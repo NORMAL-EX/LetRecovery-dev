@@ -1,0 +1,9 @@
+pub mod about;
+pub mod advanced_options;
+pub mod download_progress;
+pub mod hardware_info;
+pub mod install_progress;
+pub mod online_download;
+pub mod system_backup;
+pub mod system_install;
+pub mod tools;

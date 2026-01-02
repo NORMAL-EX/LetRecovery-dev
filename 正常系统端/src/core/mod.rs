@@ -1,0 +1,9 @@
+pub mod bcdedit;
+pub mod disk;
+pub mod dism;
+pub mod ghost;
+pub mod install_config;
+pub mod iso;
+pub mod pe;
+pub mod registry;
+pub mod system_info;
