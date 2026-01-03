@@ -334,6 +334,19 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
     let _ = tx.send(WorkerMessage::SetStatus("正在清理临时文件...".to_string()));
 
     ConfigFileManager::cleanup_all(&data_partition, &target_partition);
+    let _ = tx.send(WorkerMessage::SetProgress(50));
+
+    // 清理自动创建的数据分区并扩展目标分区
+    let _ = tx.send(WorkerMessage::SetStatus("正在清理自动创建的分区...".to_string()));
+    match DiskManager::cleanup_auto_created_partition_and_extend(&target_partition) {
+        Ok(_) => {
+            log::info!("自动创建分区清理完成");
+        }
+        Err(e) => {
+            // 不中断安装流程，只记录警告
+            log::warn!("清理自动创建分区失败: {}", e);
+        }
+    }
     let _ = tx.send(WorkerMessage::SetProgress(100));
 
     // 完成

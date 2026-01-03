@@ -3,10 +3,17 @@ use std::sync::mpsc;
 
 use crate::app::{App, BootModeSelection, InstallMode};
 use crate::core::disk::{Partition, PartitionStyle};
+use crate::core::dism::ImageInfo;
 
 /// ISO 挂载结果
 pub enum IsoMountResult {
     Success(String),
+    Error(String),
+}
+
+/// 镜像信息加载结果
+pub enum ImageInfoResult {
+    Success(Vec<ImageInfo>),
     Error(String),
 }
 
@@ -57,6 +64,14 @@ impl App {
             ui.horizontal(|ui| {
                 ui.spinner();
                 ui.label("正在挂载 ISO 镜像，请稍候...");
+            });
+        }
+
+        // 显示镜像信息加载状态
+        if self.image_info_loading {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label("正在加载镜像信息，请稍候...");
             });
         }
 
@@ -352,32 +367,45 @@ impl App {
             return;
         }
 
-        self.load_image_volumes_internal();
+        // 其他格式直接后台加载
+        self.start_image_info_loading(&self.local_image_path.clone());
     }
 
-    fn load_image_volumes_internal(&mut self) {
-        if self.local_image_path.to_lowercase().ends_with(".wim")
-            || self.local_image_path.to_lowercase().ends_with(".esd")
-        {
-            println!("[IMAGE] 加载镜像信息: {}", self.local_image_path);
-            let dism = crate::core::dism::Dism::new();
-            match dism.get_image_info(&self.local_image_path) {
-                Ok(volumes) => {
-                    println!("[IMAGE] 找到 {} 个卷", volumes.len());
-                    self.image_volumes = volumes;
-                    self.selected_volume = if self.image_volumes.is_empty() {
-                        None
-                    } else {
-                        Some(0)
-                    };
-                }
-                Err(e) => {
-                    println!("[IMAGE] 加载镜像信息失败: {}", e);
-                    self.image_volumes.clear();
-                    self.selected_volume = None;
-                }
+    fn start_image_info_loading(&mut self, image_path: &str) {
+        let path_lower = image_path.to_lowercase();
+        
+        if path_lower.ends_with(".wim") || path_lower.ends_with(".esd") {
+            println!("[IMAGE INFO] 开始后台加载镜像信息: {}", image_path);
+            
+            self.image_info_loading = true;
+            self.image_volumes.clear();
+            self.selected_volume = None;
+
+            let (tx, rx) = mpsc::channel::<ImageInfoResult>();
+            
+            unsafe {
+                IMAGE_INFO_RESULT_RX = Some(rx);
             }
-        } else if self.local_image_path.to_lowercase().ends_with(".gho") {
+
+            let path = image_path.to_string();
+
+            std::thread::spawn(move || {
+                println!("[IMAGE INFO THREAD] 线程启动，加载: {}", path);
+                
+                let dism = crate::core::dism::Dism::new();
+                match dism.get_image_info(&path) {
+                    Ok(volumes) => {
+                        println!("[IMAGE INFO THREAD] 成功加载 {} 个卷", volumes.len());
+                        let _ = tx.send(ImageInfoResult::Success(volumes));
+                    }
+                    Err(e) => {
+                        println!("[IMAGE INFO THREAD] 加载失败: {}", e);
+                        let _ = tx.send(ImageInfoResult::Error(e.to_string()));
+                    }
+                }
+            });
+        } else if path_lower.ends_with(".gho") || path_lower.ends_with(".ghs") {
+            // GHO 文件不需要加载卷信息
             self.image_volumes.clear();
             self.selected_volume = Some(0);
         }
@@ -401,8 +429,8 @@ impl App {
             println!("[ISO MOUNT THREAD] 线程启动，挂载: {}", iso_path);
             
             match crate::core::iso::IsoMounter::mount_iso(&iso_path) {
-                Ok(_) => {
-                    println!("[ISO MOUNT THREAD] 挂载成功，查找安装镜像...");
+                Ok(drive) => {
+                    println!("[ISO MOUNT THREAD] 挂载成功，盘符: {}，查找安装镜像...", drive);
                     if let Some(image_path) = crate::core::iso::IsoMounter::find_install_image() {
                         println!("[ISO MOUNT THREAD] 找到镜像: {}", image_path);
                         let _ = tx.send(IsoMountResult::Success(image_path));
@@ -420,26 +448,55 @@ impl App {
     }
 
     fn check_iso_mount_status(&mut self) {
-        if !self.iso_mounting {
-            return;
+        // 检查 ISO 挂载状态
+        if self.iso_mounting {
+            unsafe {
+                if let Some(ref rx) = ISO_MOUNT_RESULT_RX {
+                    if let Ok(result) = rx.try_recv() {
+                        self.iso_mounting = false;
+                        ISO_MOUNT_RESULT_RX = None;
+
+                        match result {
+                            IsoMountResult::Success(image_path) => {
+                                println!("[ISO MOUNT] 挂载完成，镜像路径: {}", image_path);
+                                self.local_image_path = image_path.clone();
+                                self.iso_mount_error = None;
+                                // 开始后台加载镜像信息
+                                self.start_image_info_loading(&image_path);
+                            }
+                            IsoMountResult::Error(error) => {
+                                println!("[ISO MOUNT] 挂载失败: {}", error);
+                                self.iso_mount_error = Some(error);
+                            }
+                        }
+                    }
+                }
+            }
         }
 
-        unsafe {
-            if let Some(ref rx) = ISO_MOUNT_RESULT_RX {
-                if let Ok(result) = rx.try_recv() {
-                    self.iso_mounting = false;
-                    ISO_MOUNT_RESULT_RX = None;
+        // 检查镜像信息加载状态
+        if self.image_info_loading {
+            unsafe {
+                if let Some(ref rx) = IMAGE_INFO_RESULT_RX {
+                    if let Ok(result) = rx.try_recv() {
+                        self.image_info_loading = false;
+                        IMAGE_INFO_RESULT_RX = None;
 
-                    match result {
-                        IsoMountResult::Success(image_path) => {
-                            println!("[ISO MOUNT] 挂载完成，镜像路径: {}", image_path);
-                            self.local_image_path = image_path;
-                            self.iso_mount_error = None;
-                            self.load_image_volumes_internal();
-                        }
-                        IsoMountResult::Error(error) => {
-                            println!("[ISO MOUNT] 挂载失败: {}", error);
-                            self.iso_mount_error = Some(error);
+                        match result {
+                            ImageInfoResult::Success(volumes) => {
+                                println!("[IMAGE INFO] 加载完成，找到 {} 个卷", volumes.len());
+                                self.image_volumes = volumes;
+                                self.selected_volume = if self.image_volumes.is_empty() {
+                                    None
+                                } else {
+                                    Some(0)
+                                };
+                            }
+                            ImageInfoResult::Error(error) => {
+                                println!("[IMAGE INFO] 加载失败: {}", error);
+                                self.image_volumes.clear();
+                                self.selected_volume = None;
+                            }
                         }
                     }
                 }
@@ -551,3 +608,4 @@ impl App {
 }
 
 static mut ISO_MOUNT_RESULT_RX: Option<mpsc::Receiver<IsoMountResult>> = None;
+static mut IMAGE_INFO_RESULT_RX: Option<mpsc::Receiver<ImageInfoResult>> = None;

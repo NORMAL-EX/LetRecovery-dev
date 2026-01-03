@@ -1,7 +1,12 @@
 use anyhow::Result;
-use crate::utils::cmd::create_command;
 
-use crate::utils::encoding::gbk_to_utf8;
+#[cfg(windows)]
+use windows::{
+    core::PCWSTR,
+    Win32::System::Registry::{
+        RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_LOCAL_MACHINE, KEY_READ, REG_DWORD, REG_SZ,
+    },
+};
 
 #[derive(Debug, Clone)]
 pub struct SystemInfo {
@@ -29,22 +34,26 @@ impl std::fmt::Display for BootMode {
     }
 }
 
+/// 直接调用 kernel32.dll 的 GetFirmwareEnvironmentVariableW
+#[cfg(windows)]
+mod kernel32 {
+    #[link(name = "kernel32")]
+    extern "system" {
+        pub fn GetFirmwareEnvironmentVariableW(
+            lpName: *const u16,
+            lpGuid: *const u16,
+            pBuffer: *mut u8,
+            nSize: u32,
+        ) -> u32;
+    }
+}
+
 impl SystemInfo {
     pub fn collect() -> Result<Self> {
         let is_pe = Self::check_pe_environment();
-        let boot_mode = Self::get_boot_mode(is_pe)?;
-        
-        // 在PE环境下使用不同的检测方法
-        let (tpm_enabled, tpm_version) = if is_pe {
-            Self::get_tpm_info_pe()
-        } else {
-            (
-                Self::get_tpm_enabled().unwrap_or(false),
-                Self::get_tpm_version().unwrap_or_default(),
-            )
-        };
-        
-        let secure_boot = Self::get_secure_boot(is_pe).unwrap_or(false);
+        let boot_mode = Self::get_boot_mode()?;
+        let (tpm_enabled, tpm_version) = Self::get_tpm_info();
+        let secure_boot = Self::get_secure_boot().unwrap_or(false);
         let is_online = Self::check_network();
 
         Ok(Self {
@@ -58,183 +67,253 @@ impl SystemInfo {
         })
     }
 
-    fn get_boot_mode(is_pe: bool) -> Result<BootMode> {
+    /// 使用 Windows API 检测启动模式
+    #[cfg(windows)]
+    fn get_boot_mode() -> Result<BootMode> {
         // 方法1: 检查 EFI 系统分区特征文件/目录
-        if std::path::Path::new("\\EFI").exists() 
+        if std::path::Path::new("\\EFI").exists()
             || std::path::Path::new("C:\\EFI").exists()
-            || std::path::Path::new("X:\\EFI").exists() 
+            || std::path::Path::new("X:\\EFI").exists()
         {
             return Ok(BootMode::UEFI);
         }
 
-        // 方法2: 使用 bcdedit 检查引导类型
-        let output = create_command("bcdedit")
-            .args(["/enum", "{current}"])
-            .output();
-        
-        if let Ok(output) = output {
-            let stdout = gbk_to_utf8(&output.stdout);
-            if stdout.to_lowercase().contains("winload.efi") {
-                return Ok(BootMode::UEFI);
-            }
-            if stdout.to_lowercase().contains("winload.exe") {
-                return Ok(BootMode::Legacy);
-            }
-        }
+        // 方法2: 使用 GetFirmwareEnvironmentVariableW API
+        // 这个 API 在 Legacy BIOS 下会返回 ERROR_INVALID_FUNCTION (1)
+        unsafe {
+            let name: Vec<u16> = "".encode_utf16().chain(std::iter::once(0)).collect();
+            let guid: Vec<u16> = "{00000000-0000-0000-0000-000000000000}"
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+            let mut buffer = [0u8; 1];
 
-        // 方法3: 非PE环境下尝试 PowerShell
-        if !is_pe {
-            let output = create_command("powershell")
-                .args(["-Command", "$env:firmware_type"])
-                .output();
-            
-            if let Ok(output) = output {
-                let result = gbk_to_utf8(&output.stdout).trim().to_uppercase();
-                if result == "UEFI" {
-                    return Ok(BootMode::UEFI);
-                } else if result == "BIOS" || result == "LEGACY" {
+            let result = kernel32::GetFirmwareEnvironmentVariableW(
+                name.as_ptr(),
+                guid.as_ptr(),
+                buffer.as_mut_ptr(),
+                buffer.len() as u32,
+            );
+
+            // 如果返回 0，检查错误码
+            if result == 0 {
+                let error = std::io::Error::last_os_error();
+                let raw_error = error.raw_os_error().unwrap_or(0) as u32;
+                
+                // ERROR_INVALID_FUNCTION (1) 表示是 Legacy BIOS
+                if raw_error == 1 {
                     return Ok(BootMode::Legacy);
                 }
-            }
-        }
-
-        // 方法4: 检查 Windows Boot Manager 的 path
-        let output = create_command("bcdedit")
-            .args(["/enum", "{bootmgr}"])
-            .output();
-        
-        if let Ok(output) = output {
-            let stdout = gbk_to_utf8(&output.stdout);
-            if stdout.to_lowercase().contains("\\efi\\") {
+                // 其他错误（如 ERROR_NOACCESS 998）表示是 UEFI，只是没有访问权限
                 return Ok(BootMode::UEFI);
             }
-        }
 
+            // 如果调用成功，说明是 UEFI
+            Ok(BootMode::UEFI)
+        }
+    }
+
+    #[cfg(not(windows))]
+    fn get_boot_mode() -> Result<BootMode> {
         Ok(BootMode::Legacy)
     }
 
-    /// PE环境下的TPM检测 - 使用wmic替代方案
-    fn get_tpm_info_pe() -> (bool, String) {
-        // 方法1: 尝试使用 wmic
-        let output = create_command("wmic")
-            .args(["/namespace:\\\\root\\cimv2\\security\\microsofttpm", "path", "Win32_Tpm", "get", "IsEnabled_InitialValue,SpecVersion"])
-            .output();
+    /// 获取 TPM 信息（使用注册表）
+    #[cfg(windows)]
+    fn get_tpm_info() -> (bool, String) {
+        // 方法1: 检查 TPM 服务注册表键
+        let tpm_present = Self::check_tpm_registry();
         
-        if let Ok(output) = output {
-            let stdout = gbk_to_utf8(&output.stdout);
-            if stdout.to_uppercase().contains("TRUE") {
-                let version = stdout
-                    .lines()
-                    .skip(1)
-                    .next()
-                    .and_then(|line| {
-                        let parts: Vec<&str> = line.split_whitespace().collect();
-                        parts.get(1).map(|v| {
-                            v.split(',').next().unwrap_or("").trim().to_string()
-                        })
-                    })
-                    .unwrap_or_default();
-                return (true, version);
-            }
+        if tpm_present {
+            // 尝试获取版本
+            let version = Self::get_tpm_version_from_registry();
+            (true, version)
+        } else {
+            (false, String::new())
         }
+    }
 
-        // 方法2: 检查 TPM 设备是否存在
-        let output = create_command("wmic")
-            .args(["path", "Win32_PnPEntity", "where", "Caption like '%TPM%'", "get", "Caption"])
-            .output();
-        
-        if let Ok(output) = output {
-            let stdout = gbk_to_utf8(&output.stdout);
-            if stdout.to_lowercase().contains("tpm") {
-                if stdout.contains("2.0") {
-                    return (true, "2.0".to_string());
-                } else if stdout.contains("1.2") {
-                    return (true, "1.2".to_string());
-                }
-                return (true, String::new());
-            }
-        }
-
+    #[cfg(not(windows))]
+    fn get_tpm_info() -> (bool, String) {
         (false, String::new())
     }
 
-    fn get_tpm_enabled() -> Result<bool> {
-        let output = create_command("powershell")
-            .args(["-Command", "(Get-Tpm).TpmPresent"])
-            .output()?;
+    /// 检查 TPM 是否存在（通过注册表）
+    #[cfg(windows)]
+    fn check_tpm_registry() -> bool {
+        unsafe {
+            // 检查 TPM 服务
+            let subkey: Vec<u16> = "SYSTEM\\CurrentControlSet\\Services\\TPM"
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
 
-        let result = gbk_to_utf8(&output.stdout).trim().to_lowercase();
-        if result == "true" {
-            return Ok(true);
-        }
-        if result == "false" {
-            return Ok(false);
-        }
+            let mut hkey = HKEY::default();
+            let result = RegOpenKeyExW(
+                HKEY_LOCAL_MACHINE,
+                PCWSTR::from_raw(subkey.as_ptr()),
+                0,
+                KEY_READ,
+                &mut hkey,
+            );
 
-        // 备用方法: wmic
-        let output = create_command("wmic")
-            .args(["/namespace:\\\\root\\cimv2\\security\\microsofttpm", "path", "Win32_Tpm", "get", "IsEnabled_InitialValue"])
-            .output()?;
-        
-        Ok(gbk_to_utf8(&output.stdout).to_uppercase().contains("TRUE"))
-    }
-
-    fn get_tpm_version() -> Result<String> {
-        let output = create_command("powershell")
-            .args([
-                "-Command",
-                "((Get-WmiObject -Namespace root\\cimv2\\security\\microsofttpm -Class Win32_Tpm).SpecVersion -split ',')[0].Trim()",
-            ])
-            .output()?;
-
-        let version = gbk_to_utf8(&output.stdout).trim().to_string();
-        if !version.is_empty() && !version.contains("错误") && !version.contains("error") {
-            return Ok(version);
-        }
-
-        // 备用方法: wmic
-        let output = create_command("wmic")
-            .args(["/namespace:\\\\root\\cimv2\\security\\microsofttpm", "path", "Win32_Tpm", "get", "SpecVersion"])
-            .output()?;
-        
-        let stdout = gbk_to_utf8(&output.stdout);
-        let version = stdout
-            .lines()
-            .skip(1)
-            .next()
-            .and_then(|line| line.split(',').next())
-            .map(|v| v.trim().to_string())
-            .unwrap_or_default();
-        
-        Ok(version)
-    }
-
-    fn get_secure_boot(is_pe: bool) -> Result<bool> {
-        // 方法1: 检查注册表 (PE和正常系统都可用)
-        let output = create_command("reg")
-            .args(["query", "HKLM\\SYSTEM\\CurrentControlSet\\Control\\SecureBoot\\State", "/v", "UEFISecureBootEnabled"])
-            .output();
-        
-        if let Ok(output) = output {
-            let stdout = gbk_to_utf8(&output.stdout);
-            if stdout.contains("0x1") {
-                return Ok(true);
+            if result.is_ok() {
+                let _ = RegCloseKey(hkey);
+                return true;
             }
-            if stdout.contains("0x0") {
+
+            // 备选：检查 TPM 设备注册表 (TPM 2.0)
+            let subkey: Vec<u16> = "SYSTEM\\CurrentControlSet\\Enum\\ACPI\\MSFT0101"
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+
+            let result = RegOpenKeyExW(
+                HKEY_LOCAL_MACHINE,
+                PCWSTR::from_raw(subkey.as_ptr()),
+                0,
+                KEY_READ,
+                &mut hkey,
+            );
+
+            if result.is_ok() {
+                let _ = RegCloseKey(hkey);
+                return true;
+            }
+
+            false
+        }
+    }
+
+    /// 从注册表获取 TPM 版本
+    #[cfg(windows)]
+    fn get_tpm_version_from_registry() -> String {
+        unsafe {
+            // 尝试从 TPM 注册表读取版本信息
+            let subkey: Vec<u16> = "SOFTWARE\\Microsoft\\Tpm"
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+
+            let mut hkey = HKEY::default();
+            let result = RegOpenKeyExW(
+                HKEY_LOCAL_MACHINE,
+                PCWSTR::from_raw(subkey.as_ptr()),
+                0,
+                KEY_READ,
+                &mut hkey,
+            );
+
+            if result.is_ok() {
+                // 尝试读取 SpecVersion
+                let value_name: Vec<u16> = "SpecVersion"
+                    .encode_utf16()
+                    .chain(std::iter::once(0))
+                    .collect();
+                
+                let mut buffer = [0u8; 256];
+                let mut buffer_size = buffer.len() as u32;
+                let mut value_type = REG_SZ;
+
+                let result = RegQueryValueExW(
+                    hkey,
+                    PCWSTR::from_raw(value_name.as_ptr()),
+                    None,
+                    Some(&mut value_type),
+                    Some(buffer.as_mut_ptr()),
+                    Some(&mut buffer_size),
+                );
+
+                let _ = RegCloseKey(hkey);
+
+                if result.is_ok() && buffer_size > 0 {
+                    let wide_str: &[u16] = std::slice::from_raw_parts(
+                        buffer.as_ptr() as *const u16,
+                        (buffer_size as usize / 2).saturating_sub(1),
+                    );
+                    let version = String::from_utf16_lossy(wide_str);
+                    // 取逗号前的第一部分
+                    return version.split(',').next().unwrap_or("").trim().to_string();
+                }
+            }
+
+            // 通过设备枚举检测版本
+            // TPM 2.0 设备路径
+            let subkey_20: Vec<u16> = "SYSTEM\\CurrentControlSet\\Enum\\ACPI\\MSFT0101"
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+
+            let result = RegOpenKeyExW(
+                HKEY_LOCAL_MACHINE,
+                PCWSTR::from_raw(subkey_20.as_ptr()),
+                0,
+                KEY_READ,
+                &mut hkey,
+            );
+
+            if result.is_ok() {
+                let _ = RegCloseKey(hkey);
+                return "2.0".to_string();
+            }
+
+            // 默认返回 2.0（现代系统大多是 TPM 2.0）
+            "2.0".to_string()
+        }
+    }
+
+    /// 使用注册表 API 检测安全启动状态
+    #[cfg(windows)]
+    fn get_secure_boot() -> Result<bool> {
+        unsafe {
+            let subkey: Vec<u16> = "SYSTEM\\CurrentControlSet\\Control\\SecureBoot\\State"
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+
+            let mut hkey = HKEY::default();
+            let result = RegOpenKeyExW(
+                HKEY_LOCAL_MACHINE,
+                PCWSTR::from_raw(subkey.as_ptr()),
+                0,
+                KEY_READ,
+                &mut hkey,
+            );
+
+            if result.is_err() {
                 return Ok(false);
             }
+
+            let value_name: Vec<u16> = "UEFISecureBootEnabled"
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+
+            let mut data = [0u32; 1];
+            let mut data_size = std::mem::size_of::<u32>() as u32;
+            let mut data_type = REG_DWORD;
+
+            let result = RegQueryValueExW(
+                hkey,
+                PCWSTR::from_raw(value_name.as_ptr()),
+                None,
+                Some(&mut data_type),
+                Some(data.as_mut_ptr() as *mut u8),
+                Some(&mut data_size),
+            );
+
+            let _ = RegCloseKey(hkey);
+
+            if result.is_ok() {
+                Ok(data[0] == 1)
+            } else {
+                Ok(false)
+            }
         }
+    }
 
-        // 方法2: 非PE环境下尝试 PowerShell
-        if !is_pe {
-            let output = create_command("powershell")
-                .args(["-Command", "Confirm-SecureBootUEFI"])
-                .output()?;
-
-            let result = gbk_to_utf8(&output.stdout).trim().to_lowercase();
-            return Ok(result == "true");
-        }
-
+    #[cfg(not(windows))]
+    fn get_secure_boot() -> Result<bool> {
         Ok(false)
     }
 
@@ -243,43 +322,71 @@ impl SystemInfo {
         if std::path::Path::new("X:\\Windows\\System32\\drivers\\fbwf.sys").exists() {
             return true;
         }
-        
+
         // 特征2: winpeshl.ini
         if std::path::Path::new("X:\\Windows\\System32\\winpeshl.ini").exists() {
             return true;
         }
-        
+
         // 特征3: 系统盘是 X:
         if let Ok(system_drive) = std::env::var("SystemDrive") {
             if system_drive.to_uppercase() == "X:" {
                 return true;
             }
         }
-        
+
         // 特征4: 检查 MININT 目录
         if std::path::Path::new("X:\\MININT").exists() {
             return true;
         }
-        
-        // 特征5: 检查启动配置中的 winpe 标志
-        if let Ok(output) = create_command("bcdedit").args(["/enum", "{current}"]).output() {
-            let stdout = gbk_to_utf8(&output.stdout).to_lowercase();
-            if stdout.contains("winpe") && stdout.contains("yes") {
+
+        // 特征5: 检查 MiniNT 注册表键
+        #[cfg(windows)]
+        {
+            if Self::check_minint_registry() {
                 return true;
             }
         }
-        
+
         // 特征6: 检查 SystemDrive 下的 PE 特征文件
         if let Ok(system_drive) = std::env::var("SystemDrive") {
             let fbwf_path = format!("{}\\Windows\\System32\\drivers\\fbwf.sys", system_drive);
             let winpeshl_path = format!("{}\\Windows\\System32\\winpeshl.ini", system_drive);
-            if std::path::Path::new(&fbwf_path).exists() 
-                || std::path::Path::new(&winpeshl_path).exists() {
+            if std::path::Path::new(&fbwf_path).exists()
+                || std::path::Path::new(&winpeshl_path).exists()
+            {
                 return true;
             }
         }
 
         false
+    }
+
+    /// 检查 MiniNT 注册表键（PE 环境特征）
+    #[cfg(windows)]
+    fn check_minint_registry() -> bool {
+        unsafe {
+            let subkey: Vec<u16> = "SYSTEM\\CurrentControlSet\\Control\\MiniNT"
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+
+            let mut hkey = HKEY::default();
+            let result = RegOpenKeyExW(
+                HKEY_LOCAL_MACHINE,
+                PCWSTR::from_raw(subkey.as_ptr()),
+                0,
+                KEY_READ,
+                &mut hkey,
+            );
+
+            if result.is_ok() {
+                let _ = RegCloseKey(hkey);
+                return true;
+            }
+
+            false
+        }
     }
 
     fn check_network() -> bool {
@@ -292,22 +399,12 @@ impl SystemInfo {
 
         for addr in &addresses {
             if let Ok(addr) = addr.parse() {
-                if std::net::TcpStream::connect_timeout(
-                    &addr,
-                    std::time::Duration::from_secs(2),
-                ).is_ok() {
+                if std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(2))
+                    .is_ok()
+                {
                     return true;
                 }
             }
-        }
-        
-        // 备用方法: ping
-        let output = create_command("ping")
-            .args(["-n", "1", "-w", "1000", "223.5.5.5"])
-            .output();
-        
-        if let Ok(output) = output {
-            return output.status.success();
         }
 
         false

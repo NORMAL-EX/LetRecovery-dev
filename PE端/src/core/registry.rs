@@ -1,6 +1,6 @@
 use anyhow::Result;
-use std::process::Command;
 
+use crate::utils::command::new_command;
 use crate::utils::encoding::gbk_to_utf8;
 
 pub struct OfflineRegistry;
@@ -11,7 +11,7 @@ impl OfflineRegistry {
         let key_path = format!("HKLM\\{}", hive_name);
         log::info!("加载注册表配置单元: {} -> {}", hive_file, key_path);
 
-        let output = Command::new("reg.exe")
+        let output = new_command("reg.exe")
             .args(["load", &key_path, hive_file])
             .output()?;
 
@@ -29,7 +29,7 @@ impl OfflineRegistry {
 
         // 尝试多次卸载，因为有时需要等待
         for attempt in 0..5 {
-            let output = Command::new("reg.exe")
+            let output = new_command("reg.exe")
                 .args(["unload", &key_path])
                 .output()?;
 
@@ -43,7 +43,7 @@ impl OfflineRegistry {
         }
 
         // 最后一次尝试
-        let output = Command::new("reg.exe")
+        let output = new_command("reg.exe")
             .args(["unload", &key_path])
             .output()?;
 
@@ -58,7 +58,7 @@ impl OfflineRegistry {
     pub fn set_dword(key_path: &str, value_name: &str, data: u32) -> Result<()> {
         log::debug!("设置注册表DWORD: {}\\{} = {}", key_path, value_name, data);
 
-        let output = Command::new("reg.exe")
+        let output = new_command("reg.exe")
             .args([
                 "add",
                 key_path,
@@ -88,7 +88,7 @@ impl OfflineRegistry {
             data
         );
 
-        let output = Command::new("reg.exe")
+        let output = new_command("reg.exe")
             .args([
                 "add", key_path, "/v", value_name, "/t", "REG_SZ", "/d", data, "/f",
             ])
@@ -105,7 +105,7 @@ impl OfflineRegistry {
     pub fn delete_key(key_path: &str) -> Result<()> {
         log::debug!("删除注册表键: {}", key_path);
 
-        let _ = Command::new("reg.exe")
+        let _ = new_command("reg.exe")
             .args(["delete", key_path, "/f"])
             .output();
 
@@ -117,7 +117,7 @@ impl OfflineRegistry {
     pub fn delete_value(key_path: &str, value_name: &str) -> Result<()> {
         log::debug!("删除注册表值: {}\\{}", key_path, value_name);
 
-        let _ = Command::new("reg.exe")
+        let _ = new_command("reg.exe")
             .args(["delete", key_path, "/v", value_name, "/f"])
             .output();
 
@@ -128,7 +128,7 @@ impl OfflineRegistry {
     pub fn import_reg_file(reg_file: &str) -> Result<()> {
         log::info!("导入注册表文件: {}", reg_file);
 
-        let output = Command::new("reg.exe")
+        let output = new_command("reg.exe")
             .args(["import", reg_file])
             .output()?;
 

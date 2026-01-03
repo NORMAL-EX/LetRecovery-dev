@@ -1,7 +1,7 @@
 use anyhow::Result;
 use std::path::Path;
-use std::process::Command;
 
+use crate::utils::command::new_command;
 use crate::utils::encoding::gbk_to_utf8;
 use crate::utils::path::get_bin_dir;
 
@@ -44,7 +44,7 @@ detail volume
         let script1_path = std::env::temp_dir().join("find_disk.txt");
         std::fs::write(&script1_path, &script1)?;
 
-        let output = Command::new("diskpart")
+        let output = new_command("diskpart")
             .args(["/s", &script1_path.to_string_lossy()])
             .output()?;
 
@@ -83,7 +83,7 @@ list partition
         let script2_path = std::env::temp_dir().join("list_part.txt");
         std::fs::write(&script2_path, &script2)?;
 
-        let output = Command::new("diskpart")
+        let output = new_command("diskpart")
             .args(["/s", &script2_path.to_string_lossy()])
             .output()?;
 
@@ -115,7 +115,7 @@ list partition
         let esp_partition = esp_partition.ok_or_else(|| anyhow::anyhow!("未找到 ESP 分区"))?;
 
         // Step 3: 为 ESP 分配盘符
-        let _ = Command::new("mountvol").args(["S:", "/d"]).output();
+        let _ = new_command("mountvol").args(["S:", "/d"]).output();
         std::thread::sleep(std::time::Duration::from_millis(200));
 
         let script3 = format!(
@@ -129,7 +129,7 @@ assign letter=S
         let script3_path = std::env::temp_dir().join("assign_esp.txt");
         std::fs::write(&script3_path, &script3)?;
 
-        let output = Command::new("diskpart")
+        let output = new_command("diskpart")
             .args(["/s", &script3_path.to_string_lossy()])
             .output()?;
 
@@ -158,7 +158,7 @@ assign letter=S
 
         // 方法2: 使用 mountvol /s 挂载 ESP 到 S:
         log::info!("尝试使用 mountvol /s 挂载 ESP");
-        let output = Command::new("mountvol").args(["S:", "/s"]).output();
+        let output = new_command("mountvol").args(["S:", "/s"]).output();
         if output.is_ok() {
             std::thread::sleep(std::time::Duration::from_millis(500));
             if Path::new("S:\\").exists() {
@@ -185,7 +185,7 @@ list partition
             let script_path = std::env::temp_dir().join("check_disk.txt");
             std::fs::write(&script_path, &script)?;
 
-            let output = Command::new("diskpart")
+            let output = new_command("diskpart")
                 .args(["/s", script_path.to_str().unwrap()])
                 .output()?;
 
@@ -211,7 +211,7 @@ assign letter=S
                                         std::env::temp_dir().join("assign_esp2.txt");
                                     std::fs::write(&assign_path, &assign_script)?;
 
-                                    let _ = Command::new("diskpart")
+                                    let _ = new_command("diskpart")
                                         .args(["/s", &assign_path.to_string_lossy()])
                                         .output();
 
@@ -236,7 +236,7 @@ assign letter=S
     pub fn delete_current_boot_entry(&self) -> Result<()> {
         log::info!("删除当前PE引导项...");
 
-        let output = Command::new(&self.bcdedit_path)
+        let output = new_command(&self.bcdedit_path)
             .args(["/delete", "{current}", "/f"])
             .output()?;
 
@@ -291,7 +291,7 @@ assign letter=S
                         windows_path,
                         esp_letter
                     );
-                    let output = Command::new(&self.bcdboot_path)
+                    let output = new_command(&self.bcdboot_path)
                         .args([
                             &windows_path,
                             "/s",
@@ -311,7 +311,7 @@ assign letter=S
 
                     if !output.status.success() {
                         log::info!("重试：使用 ALL 模式");
-                        let output = Command::new(&self.bcdboot_path)
+                        let output = new_command(&self.bcdboot_path)
                             .args([
                                 &windows_path,
                                 "/s",
@@ -330,7 +330,7 @@ assign letter=S
 
                         if !output.status.success() {
                             log::info!("重试：不指定引导类型");
-                            let output = Command::new(&self.bcdboot_path)
+                            let output = new_command(&self.bcdboot_path)
                                 .args([&windows_path, "/s", &esp_letter, "/l", "zh-cn"])
                                 .output()?;
 
@@ -361,7 +361,7 @@ assign letter=S
                 Err(e) => {
                     log::warn!("查找 ESP 失败: {}，尝试默认方式", e);
 
-                    let output = Command::new(&self.bcdboot_path)
+                    let output = new_command(&self.bcdboot_path)
                         .args([&windows_path, "/f", "UEFI", "/l", "zh-cn"])
                         .output()?;
 
@@ -382,7 +382,7 @@ assign letter=S
             let bootsect_path = get_bin_dir().join("bootsect.exe");
             if bootsect_path.exists() {
                 log::info!("使用 bootsect 写入引导扇区");
-                let output = Command::new(&bootsect_path)
+                let output = new_command(&bootsect_path)
                     .args(["/nt60", windows_partition, "/mbr"])
                     .output()?;
 
@@ -392,7 +392,7 @@ assign letter=S
                 log::debug!("bootsect stderr: {}", stderr);
             }
 
-            let output = Command::new(&self.bcdboot_path)
+            let output = new_command(&self.bcdboot_path)
                 .args([&windows_path, "/f", "BIOS", "/l", "zh-cn"])
                 .output()?;
 
@@ -403,7 +403,7 @@ assign letter=S
             log::debug!("bcdboot stderr: {}", stderr);
 
             if !output.status.success() {
-                let output = Command::new(&self.bcdboot_path)
+                let output = new_command(&self.bcdboot_path)
                     .args([&windows_path, "/l", "zh-cn"])
                     .output()?;
 

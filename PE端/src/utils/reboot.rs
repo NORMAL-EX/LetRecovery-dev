@@ -2,7 +2,7 @@
 //! 
 //! 只尝试结束pecmd.exe进程
 
-use std::process::Command;
+use crate::utils::command::new_command;
 
 /// 只尝试结束pecmd.exe进程
 /// 
@@ -93,7 +93,7 @@ fn kill_pecmd_winapi() -> bool {
 /// 仅使用shutdown命令重启（备用函数）
 pub fn reboot_with_shutdown() {
     log::info!("使用shutdown命令重启...");
-    let _ = Command::new("shutdown")
+    let _ = new_command("shutdown")
         .args(["/r", "/t", "5", "/f", "/c", "LetRecovery PE 操作完成，系统即将重启..."])
         .spawn();
 }

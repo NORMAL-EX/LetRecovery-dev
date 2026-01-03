@@ -77,6 +77,9 @@ impl ConfigFileManager {
     /// 临时数据目录名
     const DATA_DIR: &'static str = "LetRecovery_Data";
 
+    /// 自动创建分区的标志文件名（与 disk.rs 中的常量保持一致）
+    const AUTO_CREATED_PARTITION_MARKER: &'static str = "LetRecovery_AutoCreated.marker";
+
     /// 查找包含安装标记文件的分区
     pub fn find_install_marker_partition() -> Option<String> {
         for letter in ['C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K'] {
@@ -200,6 +203,38 @@ impl ConfigFileManager {
     pub fn cleanup_partition_markers(partition: &str) {
         let _ = std::fs::remove_file(format!("{}\\{}", partition, Self::INSTALL_MARKER));
         let _ = std::fs::remove_file(format!("{}\\{}", partition, Self::BACKUP_MARKER));
+    }
+
+    /// 查找并清理自动创建的分区
+    /// 返回被清理的分区盘符（如果有的话）
+    pub fn cleanup_auto_created_partitions() -> Vec<char> {
+        let mut cleaned = Vec::new();
+        
+        for letter in b'A'..=b'Z' {
+            let c = letter as char;
+            let marker_path = format!("{}:\\{}", c, Self::AUTO_CREATED_PARTITION_MARKER);
+            
+            if Path::new(&marker_path).exists() {
+                println!("[CONFIG] 发现自动创建的分区: {}:", c);
+                
+                // 尝试删除分区
+                if let Ok(_) = crate::core::disk::DiskManager::delete_auto_created_partition(c) {
+                    cleaned.push(c);
+                    println!("[CONFIG] 已清理自动创建的分区: {}:", c);
+                } else {
+                    println!("[CONFIG] 清理自动创建的分区失败: {}:", c);
+                }
+            }
+        }
+        
+        cleaned
+    }
+
+    /// 检查指定分区是否是自动创建的
+    pub fn is_auto_created_partition(partition: &str) -> bool {
+        let letter = partition.chars().next().unwrap_or('X');
+        let marker_path = format!("{}:\\{}", letter, Self::AUTO_CREATED_PARTITION_MARKER);
+        Path::new(&marker_path).exists()
     }
 
     /// 获取数据目录路径

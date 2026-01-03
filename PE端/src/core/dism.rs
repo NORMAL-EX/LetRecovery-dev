@@ -1,8 +1,9 @@
 use anyhow::Result;
 use std::io::Read;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::mpsc::Sender;
 
+use crate::utils::command::new_command;
 use crate::utils::encoding::gbk_to_utf8;
 use crate::utils::path::get_bin_dir;
 
@@ -116,7 +117,7 @@ impl Dism {
     pub fn add_drivers_offline(&self, image_path: &str, driver_path: &str) -> Result<()> {
         log::info!("导入驱动: {} -> {}", driver_path, image_path);
 
-        let output = Command::new(&self.dism_path)
+        let output = new_command(&self.dism_path)
             .args([
                 &format!("/image:{}", image_path),
                 "/add-driver",
@@ -135,7 +136,7 @@ impl Dism {
 
     /// 获取 WIM/ESD 镜像信息（所有分卷）
     pub fn get_image_info(&self, image_file: &str) -> Result<Vec<ImageInfo>> {
-        let output = Command::new(&self.dism_path)
+        let output = new_command(&self.dism_path)
             .args(["/get-imageinfo", &format!("/imagefile:{}", image_file)])
             .output()?;
 
@@ -200,7 +201,7 @@ impl Dism {
     ) -> Result<()> {
         log::info!("DISM 命令: {} {:?}", &self.dism_path, args);
 
-        let mut child = Command::new(&self.dism_path)
+        let mut child = new_command(&self.dism_path)
             .args(args)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

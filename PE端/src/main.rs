@@ -216,11 +216,22 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
         println!("[PE INSTALL] Step 7: 清理临时文件");
         ConfigFileManager::cleanup_all(&data_partition, &target_partition);
 
+        // Step 8: 清理自动创建的数据分区并扩展目标分区
+        println!("[PE INSTALL] Step 8: 清理自动创建的分区");
+        match DiskManager::cleanup_auto_created_partition_and_extend(&target_partition) {
+            Ok(_) => println!("[PE INSTALL] 自动创建分区清理完成"),
+            Err(e) => {
+                // 不中断安装流程，只记录警告
+                eprintln!("[PE INSTALL] 警告: 清理自动创建分区失败: {}", e);
+                log::warn!("清理自动创建分区失败: {}", e);
+            }
+        }
+
         println!("[PE INSTALL] 安装完成!");
 
         if config.auto_reboot {
             println!("[PE INSTALL] 即将重启...");
-            let _ = std::process::Command::new("shutdown")
+            let _ = utils::command::new_command("shutdown")
                 .args(["/r", "/t", "10", "/c", "LetRecovery 系统安装完成，即将重启..."])
                 .spawn();
         } else {
@@ -304,7 +315,7 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
         ));
 
         // 自动重启
-        let _ = std::process::Command::new("shutdown")
+        let _ = utils::command::new_command("shutdown")
             .args([
                 "/r",
                 "/t",

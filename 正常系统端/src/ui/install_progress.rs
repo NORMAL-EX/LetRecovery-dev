@@ -502,8 +502,19 @@ impl App {
             send_step(&progress_tx, 3, "导出驱动", 0);
             std::thread::sleep(std::time::Duration::from_millis(50));
             
-            // 找一个非系统分区来存储数据
-            let data_partition = find_data_partition(&target_partition);
+            // 找一个可用的数据分区来存储数据（传入镜像路径以检查空间）
+            let (data_partition, _is_auto_created) = match find_data_partition(&target_partition, &image_path) {
+                Ok(result) => result,
+                Err(e) => {
+                    println!("[INSTALL PE STEP 3] 查找数据分区失败: {}", e);
+                    let _ = progress_tx.send(DismProgress {
+                        percentage: 0,
+                        status: format!("ERROR:{}", e),
+                    });
+                    return;
+                }
+            };
+            
             let data_dir = ConfigFileManager::get_data_dir(&data_partition);
             std::fs::create_dir_all(&data_dir).ok();
             
@@ -532,13 +543,18 @@ impl App {
                 .to_string();
             let target_image_path = format!("{}\\{}", data_dir, image_filename);
             
-            send_step(&progress_tx, 4, "复制镜像文件", 20);
-            
-            match std::fs::copy(&image_path, &target_image_path) {
+            // 使用带进度的复制函数
+            match copy_file_with_progress(&image_path, &target_image_path, |progress| {
+                send_step(&progress_tx, 4, "复制镜像文件", progress);
+            }) {
                 Ok(_) => println!("[INSTALL PE STEP 4] 镜像复制成功: {}", target_image_path),
                 Err(e) => {
                     println!("[INSTALL PE STEP 4] 镜像复制失败: {}", e);
-                    send_step(&progress_tx, 4, "复制镜像文件", 100);
+                    // 发送错误状态，不是100%
+                    let _ = progress_tx.send(DismProgress {
+                        percentage: 0,
+                        status: format!("ERROR:复制失败: {}", e),
+                    });
                     return;
                 }
             }
@@ -794,17 +810,88 @@ fn generate_unattend_xml(target_partition: &str, options: &AdvancedOptions) -> a
 }
 
 /// 查找可用的数据分区（非系统分区）
-fn find_data_partition(exclude_partition: &str) -> String {
-    // 查找第一个非系统分区且有足够空间的分区
-    for letter in ['D', 'E', 'F', 'G', 'H'] {
-        let partition = format!("{}:", letter);
-        if partition != exclude_partition {
-            let path = format!("{}\\", partition);
-            if Path::new(&path).exists() {
-                return partition;
-            }
+/// 返回 (分区盘符, 是否自动创建)
+fn find_data_partition(exclude_partition: &str, image_path: &str) -> Result<(String, bool), String> {
+    use crate::core::disk::DiskManager;
+    
+    // 获取镜像文件大小
+    let image_size = match std::fs::metadata(image_path) {
+        Ok(meta) => meta.len(),
+        Err(e) => {
+            return Err(format!("无法获取镜像文件大小: {}", e));
+        }
+    };
+    
+    println!("[DATA PARTITION] 镜像文件大小: {} bytes ({:.2} GB)", 
+        image_size, 
+        image_size as f64 / 1024.0 / 1024.0 / 1024.0
+    );
+
+    // 调用 DiskManager 的新函数
+    match DiskManager::find_suitable_data_partition(exclude_partition, image_size) {
+        Ok(Some((partition, is_auto_created))) => {
+            println!("[DATA PARTITION] 选择分区: {}, 自动创建: {}", partition, is_auto_created);
+            Ok((partition, is_auto_created))
+        }
+        Ok(None) => {
+            Err("没有找到可用的数据分区，且无法自动创建".to_string())
+        }
+        Err(e) => {
+            Err(format!("{}", e))
         }
     }
-    // 如果没找到，使用C盘
-    "C:".to_string()
+}
+
+/// 带进度回调的文件复制
+fn copy_file_with_progress<F>(src: &str, dst: &str, mut progress_callback: F) -> anyhow::Result<()>
+where
+    F: FnMut(u8),
+{
+    use std::fs::File;
+    use std::io::{BufReader, BufWriter, Read, Write};
+
+    println!("[COPY] 开始复制: {} -> {}", src, dst);
+
+    let src_file = File::open(src)?;
+    let total_size = src_file.metadata()?.len();
+    
+    if total_size == 0 {
+        // 空文件直接创建
+        File::create(dst)?;
+        progress_callback(100);
+        return Ok(());
+    }
+
+    let mut reader = BufReader::with_capacity(1024 * 1024, src_file); // 1MB buffer
+    let dst_file = File::create(dst)?;
+    let mut writer = BufWriter::with_capacity(1024 * 1024, dst_file);
+
+    let mut copied: u64 = 0;
+    let mut buffer = vec![0u8; 1024 * 1024]; // 1MB chunks
+    let mut last_progress: u8 = 0;
+
+    loop {
+        let bytes_read = reader.read(&mut buffer)?;
+        if bytes_read == 0 {
+            break;
+        }
+
+        writer.write_all(&buffer[..bytes_read])?;
+        copied += bytes_read as u64;
+
+        let progress = ((copied as f64 / total_size as f64) * 100.0) as u8;
+        
+        // 只在进度变化时回调，避免过多调用
+        if progress != last_progress {
+            progress_callback(progress);
+            last_progress = progress;
+            println!("[COPY] 进度: {}% ({}/{})", progress, copied, total_size);
+        }
+    }
+
+    writer.flush()?;
+    progress_callback(100);
+    println!("[COPY] 复制完成: {}", dst);
+    
+    Ok(())
 }

@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::core::disk::Partition;
 use crate::core::dism::{DismProgress, ImageInfo};
+use crate::core::hardware_info::HardwareInfo;
 use crate::core::system_info::SystemInfo;
 use crate::download::aria2::DownloadProgress;
 use crate::download::config::ConfigManager;
@@ -86,6 +87,10 @@ pub struct App {
 
     // 系统信息
     pub system_info: Option<SystemInfo>,
+    
+    // 硬件信息
+    pub hardware_info: Option<HardwareInfo>,
+    pub hardware_info_loading: bool,
 
     // 磁盘分区列表
     pub partitions: Vec<Partition>,
@@ -172,6 +177,9 @@ pub struct App {
     pub iso_mounting: bool,
     pub iso_mount_error: Option<String>,
     
+    // 镜像信息加载状态
+    pub image_info_loading: bool,
+    
     // PE 下载状态
     pub pe_downloading: bool,
     pub pe_download_error: Option<String>,
@@ -198,6 +206,8 @@ impl Default for App {
         Self {
             current_panel: Panel::SystemInstall,
             system_info: None,
+            hardware_info: None,
+            hardware_info_loading: false,
             partitions: Vec::new(),
             selected_partition: None,
             config: None,
@@ -251,6 +261,7 @@ impl Default for App {
             install_error: None,
             iso_mounting: false,
             iso_mount_error: None,
+            image_info_loading: false,
             pe_downloading: false,
             pe_download_error: None,
             pe_download_then_action: None,
@@ -345,6 +356,9 @@ impl App {
     fn load_initial_data(&mut self) {
         // 加载系统信息
         self.system_info = SystemInfo::collect().ok();
+
+        // 加载硬件信息
+        self.hardware_info = crate::core::hardware_info::HardwareInfo::collect().ok();
 
         // 加载分区列表
         self.partitions = crate::core::disk::DiskManager::get_partitions().unwrap_or_default();

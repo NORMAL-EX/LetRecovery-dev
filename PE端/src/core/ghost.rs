@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use crate::core::dism::DismProgress;
 use crate::core::disk::Partition;
+use crate::utils::command::new_command;
 use crate::utils::encoding::gbk_to_utf8;
 use crate::utils::path::get_bin_dir;
 
@@ -178,7 +179,7 @@ impl Ghost {
             clone_param
         );
 
-        let mut child = Command::new(&self.ghost_path)
+        let mut child = new_command(&self.ghost_path)
             .args([&clone_param, "-sure", "-fx", "-batch"])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

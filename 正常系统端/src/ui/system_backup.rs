@@ -100,6 +100,8 @@ impl App {
                     .save_file()
                 {
                     self.backup_save_path = path.to_string_lossy().to_string();
+                    // 如果保存位置的文件存在，自动勾选增量备份；否则取消勾选
+                    self.backup_incremental = Path::new(&self.backup_save_path).exists();
                 }
             }
         });
@@ -603,14 +605,47 @@ impl App {
 
 /// 查找可用的备份数据分区
 fn find_backup_data_partition(exclude_partition: &str) -> String {
-    for letter in ['D', 'E', 'F', 'G', 'H'] {
-        let partition = format!("{}:", letter);
-        if partition != exclude_partition {
-            let path = format!("{}\\", partition);
-            if Path::new(&path).exists() {
-                return partition;
+    use crate::core::disk::DiskManager;
+    
+    let exclude_letter = exclude_partition.chars().next().unwrap_or('C').to_ascii_uppercase();
+    
+    // 遍历 A-Z 查找可用的固定磁盘分区
+    for letter in b'A'..=b'Z' {
+        let c = letter as char;
+        
+        // 跳过排除的分区
+        if c == exclude_letter {
+            continue;
+        }
+        
+        // 跳过 X 盘（PE 系统盘）
+        if c == 'X' {
+            continue;
+        }
+        
+        let partition_path = format!("{}:\\", c);
+        if !Path::new(&partition_path).exists() {
+            continue;
+        }
+        
+        // 检查是否为光驱
+        if DiskManager::is_cdrom(c) {
+            continue;
+        }
+        
+        // 检查是否为固定磁盘
+        if !DiskManager::is_fixed_drive(c) {
+            continue;
+        }
+        
+        // 检查是否有足够空间（至少 100MB 用于配置文件）
+        if let Some(free_space) = DiskManager::get_free_space_bytes(&format!("{}:", c)) {
+            if free_space >= 100 * 1024 * 1024 {
+                return format!("{}:", c);
             }
         }
     }
+    
+    // 如果没找到合适的，使用 C 盘
     "C:".to_string()
 }
