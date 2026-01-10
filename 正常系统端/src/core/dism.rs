@@ -19,6 +19,9 @@ pub struct ImageInfo {
     pub index: u32,
     pub name: String,
     pub size_bytes: u64,
+    /// 安装类型，用于过滤 WindowsPE 等非系统镜像
+    /// 值如: "Client", "WindowsPE", "Server" 等
+    pub installation_type: String,
 }
 
 pub struct Dism {
@@ -206,16 +209,215 @@ impl Dism {
     }
 
     /// 获取 WIM/ESD 镜像信息（所有分卷）
+    /// 首先尝试直接从 WIM XML 元数据读取，如果失败则使用 DISM 命令
     pub fn get_image_info(&self, image_file: &str) -> Result<Vec<ImageInfo>> {
+        // 首先尝试直接解析 WIM XML 元数据（更快更可靠）
+        if let Ok(images) = Self::parse_wim_xml_metadata(image_file) {
+            if !images.is_empty() {
+                println!("[DISM] 从 WIM XML 元数据成功解析出 {} 个镜像", images.len());
+                return Ok(images);
+            }
+        }
+
+        // 如果 XML 解析失败，使用 DISM 命令
+        println!("[DISM] XML 解析失败，使用 DISM 命令获取镜像信息");
+        self.get_image_info_via_dism(image_file)
+    }
+
+    /// 使用 DISM 命令获取镜像信息
+    fn get_image_info_via_dism(&self, image_file: &str) -> Result<Vec<ImageInfo>> {
+        // 首先获取所有索引的基本信息
         let output = create_command(&self.dism_path)
             .args(["/get-imageinfo", &format!("/imagefile:{}", image_file)])
             .output()?;
 
         let stdout = gbk_to_utf8(&output.stdout);
-        Self::parse_image_info(&stdout)
+        let mut images = Self::parse_basic_image_info(&stdout)?;
+
+        // 对每个索引获取详细信息（包括 Installation Type）
+        for image in &mut images {
+            if let Ok(detail_output) = create_command(&self.dism_path)
+                .args([
+                    "/get-imageinfo",
+                    &format!("/imagefile:{}", image_file),
+                    &format!("/index:{}", image.index),
+                ])
+                .output()
+            {
+                let detail_stdout = gbk_to_utf8(&detail_output.stdout);
+                // 解析详细信息中的 Installation Type
+                for line in detail_stdout.lines() {
+                    let line = line.trim();
+                    if line.contains("安装类型") || line.contains("Installation Type") {
+                        if let Some(install_type) = line.split(':').nth(1) {
+                            image.installation_type = install_type.trim().to_string();
+                            println!("[DISM] 索引 {} 的安装类型: {}", image.index, image.installation_type);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(images)
     }
 
-    fn parse_image_info(output: &str) -> Result<Vec<ImageInfo>> {
+    /// 直接解析 WIM 文件的 XML 元数据
+    /// WIM 文件头部包含完整的 XML 元数据，包括所有镜像的 INSTALLATIONTYPE
+    fn parse_wim_xml_metadata(image_file: &str) -> Result<Vec<ImageInfo>> {
+        use std::fs::File;
+        use std::io::{Read, Seek, SeekFrom};
+
+        println!("[DISM] 尝试直接解析 WIM XML 元数据: {}", image_file);
+
+        let mut file = File::open(image_file)?;
+        
+        // 读取 WIM 文件头（208 字节）
+        let mut header = [0u8; 208];
+        file.read_exact(&mut header)?;
+
+        // 验证 WIM 签名 "MSWIM\0\0\0"
+        let signature = &header[0..8];
+        if signature != b"MSWIM\0\0\0" {
+            anyhow::bail!("不是有效的 WIM 文件");
+        }
+
+        // 从头部读取 XML 数据的偏移量和大小
+        // 偏移量在 header[48..56] (8字节, little-endian)
+        // 大小在 header[56..64] (8字节, little-endian)
+        let xml_offset = u64::from_le_bytes(header[48..56].try_into().unwrap());
+        let xml_size = u64::from_le_bytes(header[56..64].try_into().unwrap());
+
+        if xml_offset == 0 || xml_size == 0 || xml_size > 100_000_000 {
+            anyhow::bail!("XML 元数据位置无效");
+        }
+
+        println!("[DISM] XML 偏移: {}, 大小: {}", xml_offset, xml_size);
+
+        // 读取 XML 数据
+        file.seek(SeekFrom::Start(xml_offset))?;
+        let mut xml_data = vec![0u8; xml_size as usize];
+        file.read_exact(&mut xml_data)?;
+
+        // XML 数据是 UTF-16LE 编码
+        let xml_string = Self::decode_utf16le(&xml_data)?;
+        
+        // 解析 XML
+        Self::parse_wim_xml(&xml_string)
+    }
+
+    /// 将 UTF-16LE 编码的字节数组转换为 UTF-8 字符串
+    fn decode_utf16le(data: &[u8]) -> Result<String> {
+        if data.len() < 2 {
+            anyhow::bail!("数据太短");
+        }
+
+        // 检查并跳过 BOM (0xFF 0xFE)
+        let start = if data.len() >= 2 && data[0] == 0xFF && data[1] == 0xFE {
+            2
+        } else {
+            0
+        };
+
+        // 确保数据长度是偶数
+        let len = (data.len() - start) / 2;
+        let mut utf16_data = Vec::with_capacity(len);
+        
+        for i in 0..len {
+            let offset = start + i * 2;
+            if offset + 1 < data.len() {
+                let code_unit = u16::from_le_bytes([data[offset], data[offset + 1]]);
+                utf16_data.push(code_unit);
+            }
+        }
+
+        // 去除尾部的空字符
+        while utf16_data.last() == Some(&0) {
+            utf16_data.pop();
+        }
+
+        String::from_utf16(&utf16_data)
+            .map_err(|e| anyhow::anyhow!("UTF-16 解码失败: {}", e))
+    }
+
+    /// 解析 WIM XML 元数据字符串
+    fn parse_wim_xml(xml: &str) -> Result<Vec<ImageInfo>> {
+        let mut images = Vec::new();
+
+        // 查找所有 <IMAGE INDEX="X"> ... </IMAGE> 块
+        let mut pos = 0;
+        while let Some(start) = xml[pos..].find("<IMAGE INDEX=\"") {
+            let abs_start = pos + start;
+            
+            // 找到索引值
+            let index_start = abs_start + 14; // "<IMAGE INDEX=\"" 的长度
+            if let Some(index_end) = xml[index_start..].find('"') {
+                let index_str = &xml[index_start..index_start + index_end];
+                let index: u32 = index_str.parse().unwrap_or(0);
+
+                // 找到对应的 </IMAGE>
+                if let Some(image_end) = xml[abs_start..].find("</IMAGE>") {
+                    let image_block = &xml[abs_start..abs_start + image_end + 8];
+                    
+                    // 从这个块中提取信息
+                    let name = Self::extract_xml_tag(image_block, "NAME")
+                        .or_else(|| Self::extract_xml_tag(image_block, "DISPLAYNAME"))
+                        .unwrap_or_default();
+                    
+                    let size_bytes = Self::extract_xml_tag(image_block, "TOTALBYTES")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0);
+                    
+                    let installation_type = Self::extract_xml_tag(image_block, "INSTALLATIONTYPE")
+                        .unwrap_or_default();
+
+                    println!(
+                        "[DISM XML] 索引: {}, 名称: {}, 安装类型: {}, 大小: {}",
+                        index, name, installation_type, size_bytes
+                    );
+
+                    if index > 0 && !name.is_empty() {
+                        images.push(ImageInfo {
+                            index,
+                            name,
+                            size_bytes,
+                            installation_type,
+                        });
+                    }
+
+                    pos = abs_start + image_end + 8;
+                } else {
+                    pos = abs_start + 14;
+                }
+            } else {
+                pos = abs_start + 14;
+            }
+        }
+
+        if images.is_empty() {
+            anyhow::bail!("未找到有效的镜像信息");
+        }
+
+        Ok(images)
+    }
+
+    /// 从 XML 块中提取指定标签的内容
+    fn extract_xml_tag(xml: &str, tag: &str) -> Option<String> {
+        let open_tag = format!("<{}>", tag);
+        let close_tag = format!("</{}>", tag);
+        
+        if let Some(start) = xml.find(&open_tag) {
+            let content_start = start + open_tag.len();
+            if let Some(end) = xml[content_start..].find(&close_tag) {
+                let content = &xml[content_start..content_start + end];
+                return Some(content.trim().to_string());
+            }
+        }
+        None
+    }
+
+    /// 解析 DISM 基本输出（不包含 Installation Type）
+    fn parse_basic_image_info(output: &str) -> Result<Vec<ImageInfo>> {
         let mut images = Vec::new();
         let mut current_index = 0u32;
         let mut current_name = String::new();
@@ -230,6 +432,7 @@ impl Dism {
                         index: current_index,
                         name: current_name.clone(),
                         size_bytes: current_size,
+                        installation_type: String::new(), // 稍后填充
                     });
                 }
                 if let Some(num) = line.split(':').nth(1) {
@@ -238,8 +441,17 @@ impl Dism {
                 current_name.clear();
                 current_size = 0;
             } else if line.contains("名称") || line.contains("Name") {
-                if let Some(name) = line.split(':').nth(1) {
-                    current_name = name.trim().to_string();
+                // 避免匹配到 "产品名称" 等
+                let is_name_line = line.starts_with("名称") 
+                    || line.starts_with("Name")
+                    || line.contains(": ") && (
+                        line.split(':').next().map(|s| s.trim()) == Some("名称")
+                        || line.split(':').next().map(|s| s.trim()) == Some("Name")
+                    );
+                if is_name_line {
+                    if let Some(name) = line.split(':').nth(1) {
+                        current_name = name.trim().to_string();
+                    }
                 }
             } else if line.contains("大小") || line.contains("Size") {
                 if let Some(size_str) = line.split(':').nth(1) {
@@ -258,6 +470,7 @@ impl Dism {
                 index: current_index,
                 name: current_name,
                 size_bytes: current_size,
+                installation_type: String::new(),
             });
         }
 

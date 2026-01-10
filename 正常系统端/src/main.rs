@@ -7,6 +7,15 @@ mod ui;
 mod utils;
 
 use eframe::egui;
+use std::sync::Arc;
+
+/// 预加载的配置数据
+pub struct PreloadedConfig {
+    pub remote_config: Option<download::server_config::RemoteConfig>,
+    pub system_info: Option<core::system_info::SystemInfo>,
+    pub hardware_info: Option<core::hardware_info::HardwareInfo>,
+    pub partitions: Vec<core::disk::Partition>,
+}
 
 fn main() -> eframe::Result<()> {
     // 初始化日志
@@ -78,7 +87,13 @@ fn main() -> eframe::Result<()> {
         }
     };
 
-    log::info!("初始化 GUI...");
+    log::info!("正在预加载配置和系统信息...");
+
+    // 在显示窗口前先加载服务器配置和系统信息
+    let preloaded_config = preload_all_config();
+    let preloaded_config = Arc::new(preloaded_config);
+
+    log::info!("预加载完成，初始化 GUI...");
 
     // 加载图标
     let icon = load_icon();
@@ -92,12 +107,58 @@ fn main() -> eframe::Result<()> {
         ..Default::default()
     };
 
-    // 运行应用
+    // 运行应用，传入预加载的配置
+    let config_clone = preloaded_config.clone();
     eframe::run_native(
         "LetRecovery - Windows系统一键重装工具",
         options,
-        Box::new(|cc| Ok(Box::new(app::App::new(cc)))),
+        Box::new(move |cc| Ok(Box::new(app::App::new_with_preloaded(cc, &config_clone)))),
     )
+}
+
+/// 预加载所有配置和系统信息
+fn preload_all_config() -> PreloadedConfig {
+    // 并行加载各种信息以加快启动速度
+    let remote_config_handle = std::thread::spawn(|| {
+        log::info!("开始加载远程配置...");
+        let config = download::server_config::RemoteConfig::load_from_server();
+        log::info!("远程配置加载完成: loaded={}", config.loaded);
+        config
+    });
+
+    let system_info_handle = std::thread::spawn(|| {
+        log::info!("开始收集系统信息...");
+        let info = core::system_info::SystemInfo::collect().ok();
+        log::info!("系统信息收集完成");
+        info
+    });
+
+    let hardware_info_handle = std::thread::spawn(|| {
+        log::info!("开始收集硬件信息...");
+        let info = core::hardware_info::HardwareInfo::collect().ok();
+        log::info!("硬件信息收集完成");
+        info
+    });
+
+    let partitions_handle = std::thread::spawn(|| {
+        log::info!("开始获取分区信息...");
+        let partitions = core::disk::DiskManager::get_partitions().unwrap_or_default();
+        log::info!("分区信息获取完成: {} 个分区", partitions.len());
+        partitions
+    });
+
+    // 等待所有线程完成
+    let remote_config = remote_config_handle.join().ok();
+    let system_info = system_info_handle.join().ok().flatten();
+    let hardware_info = hardware_info_handle.join().ok().flatten();
+    let partitions = partitions_handle.join().ok().unwrap_or_default();
+
+    PreloadedConfig {
+        remote_config,
+        system_info,
+        hardware_info,
+        partitions,
+    }
 }
 
 fn load_icon() -> egui::IconData {

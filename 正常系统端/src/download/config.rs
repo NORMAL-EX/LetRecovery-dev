@@ -17,11 +17,44 @@ pub struct OnlinePE {
     pub filename: String,
 }
 
+/// 在线软件信息
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OnlineSoftware {
+    /// 软件名称
+    pub name: String,
+    /// 软件描述
+    pub description: String,
+    /// 更新日期
+    pub update_date: String,
+    /// 文件大小
+    pub file_size: String,
+    /// 图标URL（可选）
+    #[serde(default)]
+    pub icon_url: Option<String>,
+    /// 下载URL（64位）
+    pub download_url: String,
+    /// 下载URL（32位，可选）
+    #[serde(default)]
+    pub download_url_x86: Option<String>,
+    /// XP系统下载URL（可选）
+    #[serde(default)]
+    pub download_url_nt5: Option<String>,
+    /// 文件名
+    pub filename: String,
+}
+
+/// 软件列表JSON格式
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SoftwareList {
+    pub software: Vec<OnlineSoftware>,
+}
+
 /// 配置管理器
 #[derive(Debug, Clone, Default)]
 pub struct ConfigManager {
     pub systems: Vec<OnlineSystem>,
     pub pe_list: Vec<OnlinePE>,
+    pub software_list: Vec<OnlineSoftware>,
 }
 
 impl ConfigManager {
@@ -53,34 +86,55 @@ impl ConfigManager {
             Vec::new()
         };
 
-        Ok(Self { systems, pe_list })
+        Ok(Self { systems, pe_list, software_list: Vec::new() })
     }
-
-    /// 从本地文件加载配置
-    pub fn load_from_local(exe_dir: &std::path::Path) -> Result<Self> {
-        let dl_path = exe_dir.join("dl.txt");
-        let pe_path = exe_dir.join("pe.txt");
-
-        let systems = if dl_path.exists() {
-            let content = std::fs::read_to_string(&dl_path)?;
-            Self::parse_system_list(&content)
-        } else {
-            Vec::new()
-        };
-
-        let pe_list = if pe_path.exists() {
-            let content = std::fs::read_to_string(&pe_path)?;
-            Self::parse_pe_list(&content)
-        } else {
-            Vec::new()
-        };
-
-        Ok(Self { systems, pe_list })
+    
+    /// 从远程配置内容加载
+    /// 
+    /// # Arguments
+    /// * `dl_content` - 系统镜像列表内容
+    /// * `pe_content` - PE 列表内容
+    pub fn load_from_content(dl_content: Option<&str>, pe_content: Option<&str>) -> Self {
+        let systems = dl_content
+            .map(|c| Self::parse_system_list(c))
+            .unwrap_or_default();
+        
+        let pe_list = pe_content
+            .map(|c| Self::parse_pe_list(c))
+            .unwrap_or_default();
+        
+        Self { systems, pe_list, software_list: Vec::new() }
+    }
+    
+    /// 从远程配置内容加载（包含软件列表）
+    /// 
+    /// # Arguments
+    /// * `dl_content` - 系统镜像列表内容
+    /// * `pe_content` - PE 列表内容
+    /// * `soft_content` - 软件列表内容（JSON格式）
+    pub fn load_from_content_with_soft(
+        dl_content: Option<&str>, 
+        pe_content: Option<&str>,
+        soft_content: Option<&str>,
+    ) -> Self {
+        let systems = dl_content
+            .map(|c| Self::parse_system_list(c))
+            .unwrap_or_default();
+        
+        let pe_list = pe_content
+            .map(|c| Self::parse_pe_list(c))
+            .unwrap_or_default();
+        
+        let software_list = soft_content
+            .map(|c| Self::parse_software_list(c))
+            .unwrap_or_default();
+        
+        Self { systems, pe_list, software_list }
     }
 
     /// 解析系统列表
     /// 格式: URL,显示名称,Win11/Win10
-    fn parse_system_list(content: &str) -> Vec<OnlineSystem> {
+    pub fn parse_system_list(content: &str) -> Vec<OnlineSystem> {
         content
             .lines()
             .filter(|line| !line.trim().is_empty() && !line.trim().starts_with('#'))
@@ -107,7 +161,7 @@ impl ConfigManager {
 
     /// 解析 PE 列表
     /// 格式: URL,显示名称,文件名
-    fn parse_pe_list(content: &str) -> Vec<OnlinePE> {
+    pub fn parse_pe_list(content: &str) -> Vec<OnlinePE> {
         content
             .lines()
             .filter(|line| !line.trim().is_empty() && !line.trim().starts_with('#'))
@@ -133,39 +187,25 @@ impl ConfigManager {
             })
             .collect()
     }
-
-    /// 保存配置到本地
-    pub fn save_to_local(&self, exe_dir: &std::path::Path) -> Result<()> {
-        // 保存系统列表
-        let dl_content: String = self
-            .systems
-            .iter()
-            .map(|s| {
-                format!(
-                    "{},{},{}",
-                    s.download_url,
-                    s.display_name,
-                    if s.is_win11 { "Win11" } else { "Win10" }
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        std::fs::write(exe_dir.join("dl.txt"), dl_content)?;
-
-        // 保存 PE 列表
-        let pe_content: String = self
-            .pe_list
-            .iter()
-            .map(|p| format!("{},{},{}", p.download_url, p.display_name, p.filename))
-            .collect::<Vec<_>>()
-            .join("\n");
-        std::fs::write(exe_dir.join("pe.txt"), pe_content)?;
-
-        Ok(())
+    
+    /// 解析软件列表（JSON格式）
+    pub fn parse_software_list(content: &str) -> Vec<OnlineSoftware> {
+        match serde_json::from_str::<SoftwareList>(content) {
+            Ok(list) => list.software,
+            Err(e) => {
+                log::warn!("解析软件列表失败: {}", e);
+                Vec::new()
+            }
+        }
     }
 
     /// 检查配置是否为空
     pub fn is_empty(&self) -> bool {
         self.systems.is_empty() && self.pe_list.is_empty()
+    }
+    
+    /// 检查软件列表是否为空
+    pub fn has_software(&self) -> bool {
+        !self.software_list.is_empty()
     }
 }

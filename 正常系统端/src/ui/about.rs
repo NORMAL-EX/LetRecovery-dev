@@ -17,7 +17,7 @@ impl App {
                 // 版本信息
                 ui.horizontal(|ui| {
                     ui.label("版本:");
-                    ui.strong("v2026.1.3");
+                    ui.strong("v2026.1.10");
                 });
 
                 ui.add_space(15.0);

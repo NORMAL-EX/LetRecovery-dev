@@ -182,7 +182,7 @@ impl App {
             ui.add_space(5.0);
             ui.colored_label(
                 egui::Color32::RED,
-                "❌ 缺少PE配置文件(pe.txt)，无法备份当前系统分区。请重新下载该软件的完整版本后重试。",
+                "❌ 无法获取PE配置，无法备份当前系统分区。请检查网络连接后重试。",
             );
         }
 

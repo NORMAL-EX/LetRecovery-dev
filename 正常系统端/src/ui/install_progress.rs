@@ -720,6 +720,38 @@ fn generate_unattend_xml(target_partition: &str, options: &AdvancedOptions) -> a
     } else {
         "User".to_string()
     };
+
+    // 构建 FirstLogonCommands
+    let mut first_logon_commands = String::new();
+    let mut order = 1;
+
+    // 首次登录脚本
+    first_logon_commands.push_str(&format!(r#"
+                <SynchronousCommand wcm:action="add">
+                    <Order>{}</Order>
+                    <CommandLine>cmd /c if exist %SystemDrive%\LetRecovery_Scripts\firstlogon.bat call %SystemDrive%\LetRecovery_Scripts\firstlogon.bat</CommandLine>
+                    <Description>Run first login script</Description>
+                </SynchronousCommand>"#, order));
+    order += 1;
+
+    // 如果需要删除UWP应用
+    if options.remove_uwp_apps {
+        first_logon_commands.push_str(&format!(r#"
+                <SynchronousCommand wcm:action="add">
+                    <Order>{}</Order>
+                    <CommandLine>powershell -ExecutionPolicy Bypass -File %SystemDrive%\LetRecovery_Scripts\remove_uwp.ps1</CommandLine>
+                    <Description>Remove preinstalled UWP apps</Description>
+                </SynchronousCommand>"#, order));
+        order += 1;
+    }
+
+    // 清理脚本目录（最后执行）
+    first_logon_commands.push_str(&format!(r#"
+                <SynchronousCommand wcm:action="add">
+                    <Order>{}</Order>
+                    <CommandLine>cmd /c rd /s /q %SystemDrive%\LetRecovery_Scripts</CommandLine>
+                    <Description>Cleanup scripts directory</Description>
+                </SynchronousCommand>"#, order));
     
     let xml_content = format!(r#"<?xml version="1.0" encoding="utf-8"?>
 <unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
@@ -741,7 +773,7 @@ fn generate_unattend_xml(target_partition: &str, options: &AdvancedOptions) -> a
             <RunSynchronous>
                 <RunSynchronousCommand wcm:action="add">
                     <Order>1</Order>
-                    <Path>cmd /c if exist C:\LetRecovery_Scripts\deploy.bat call C:\LetRecovery_Scripts\deploy.bat</Path>
+                    <Path>cmd /c if exist %SystemDrive%\LetRecovery_Scripts\deploy.bat call %SystemDrive%\LetRecovery_Scripts\deploy.bat</Path>
                     <Description>Run custom deploy script</Description>
                 </RunSynchronousCommand>
             </RunSynchronous>
@@ -779,18 +811,14 @@ fn generate_unattend_xml(target_partition: &str, options: &AdvancedOptions) -> a
                     <PlainText>true</PlainText>
                 </Password>
                 <Enabled>true</Enabled>
+                <LogonCount>1</LogonCount>
                 <Username>{username}</Username>
             </AutoLogon>
-            <FirstLogonCommands>
-                <SynchronousCommand wcm:action="add">
-                    <Order>1</Order>
-                    <CommandLine>cmd /c if exist C:\LetRecovery_Scripts\firstlogon.bat call C:\LetRecovery_Scripts\firstlogon.bat</CommandLine>
-                    <Description>Run first login script</Description>
-                </SynchronousCommand>
+            <FirstLogonCommands>{first_logon_commands}
             </FirstLogonCommands>
         </component>
     </settings>
-</unattend>"#, username = username);
+</unattend>"#, username = username, first_logon_commands = first_logon_commands);
 
     let panther_dir = format!("{}\\Windows\\Panther", target_partition);
     std::fs::create_dir_all(&panther_dir)?;

@@ -30,7 +30,7 @@ impl App {
                 // 显示隐藏分区
                 if ui
                     .add(
-                        egui::Button::new("显示隐藏分区\nShowDrives").min_size(egui::vec2(120.0, 60.0)),
+                        egui::Button::new("显示隐藏分区").min_size(egui::vec2(120.0, 60.0)),
                     )
                     .clicked()
                 {
@@ -40,7 +40,7 @@ impl App {
                 // 磁盘管理
                 if ui
                     .add(
-                        egui::Button::new("磁盘管理\ndiskmgmt.msc").min_size(egui::vec2(120.0, 60.0)),
+                        egui::Button::new("磁盘管理").min_size(egui::vec2(120.0, 60.0)),
                     )
                     .clicked()
                 {
@@ -54,7 +54,7 @@ impl App {
                 // 设备管理器
                 if ui
                     .add(
-                        egui::Button::new("设备管理器\ndevmgmt.msc").min_size(egui::vec2(120.0, 60.0)),
+                        egui::Button::new("设备管理器").min_size(egui::vec2(120.0, 60.0)),
                     )
                     .clicked()
                 {
@@ -65,7 +65,7 @@ impl App {
 
                 // 命令提示符
                 if ui
-                    .add(egui::Button::new("命令提示符\ncmd.exe").min_size(egui::vec2(120.0, 60.0)))
+                    .add(egui::Button::new("命令提示符").min_size(egui::vec2(120.0, 60.0)))
                     .clicked()
                 {
                     let _ = Command::new("cmd.exe").spawn();
@@ -74,7 +74,7 @@ impl App {
                 // 资源管理器
                 if ui
                     .add(
-                        egui::Button::new("资源管理器\nexplorer.exe")
+                        egui::Button::new("资源管理器")
                             .min_size(egui::vec2(120.0, 60.0)),
                     )
                     .clicked()
@@ -87,7 +87,7 @@ impl App {
                 // 注册表编辑器
                 if ui
                     .add(
-                        egui::Button::new("注册表编辑器\nregedit.exe")
+                        egui::Button::new("注册表编辑器")
                             .min_size(egui::vec2(120.0, 60.0)),
                     )
                     .clicked()
@@ -98,7 +98,7 @@ impl App {
                 // 任务管理器
                 if ui
                     .add(
-                        egui::Button::new("任务管理器\ntaskmgr.exe")
+                        egui::Button::new("任务管理器")
                             .min_size(egui::vec2(120.0, 60.0)),
                     )
                     .clicked()
@@ -108,7 +108,7 @@ impl App {
 
                 // 记事本
                 if ui
-                    .add(egui::Button::new("记事本\nnotepad.exe").min_size(egui::vec2(120.0, 60.0)))
+                    .add(egui::Button::new("记事本").min_size(egui::vec2(120.0, 60.0)))
                     .clicked()
                 {
                     let _ = Command::new("notepad.exe").spawn();
@@ -118,7 +118,7 @@ impl App {
 
                 // Ghost 工具
                 if ui
-                    .add(egui::Button::new("Ghost 工具\nGhost64.exe").min_size(egui::vec2(120.0, 60.0)))
+                    .add(egui::Button::new("Ghost 工具").min_size(egui::vec2(120.0, 60.0)))
                     .clicked()
                 {
                     self.launch_ghost_tool();
@@ -193,6 +193,12 @@ impl App {
             if ui.button("导出系统驱动").clicked() {
                 self.export_drivers_action(is_pe);
             }
+            
+            if ui.button("查看网络信息").clicked() {
+                self.show_network_info_dialog = true;
+                // 使用 WinAPI 获取网络信息
+                self.network_info_cache = Some(get_detailed_network_info());
+            }
         });
 
         ui.add_space(10.0);
@@ -210,6 +216,81 @@ impl App {
                     .spawn();
             }
         });
+
+        // 网络信息对话框
+        if self.show_network_info_dialog {
+            egui::Window::new("本机网络信息")
+                .open(&mut self.show_network_info_dialog)
+                .resizable(true)
+                .default_width(500.0)
+                .default_height(400.0)
+                .show(ui.ctx(), |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        if let Some(ref adapters) = self.network_info_cache {
+                            if adapters.is_empty() {
+                                ui.label("未检测到网络适配器");
+                            } else {
+                                for (i, adapter) in adapters.iter().enumerate() {
+                                    egui::CollapsingHeader::new(format!("适配器 {}: {}", i + 1, adapter.description))
+                                        .default_open(true)
+                                        .show(ui, |ui| {
+                                            egui::Grid::new(format!("net_info_grid_{}", i))
+                                                .num_columns(2)
+                                                .spacing([20.0, 4.0])
+                                                .show(ui, |ui| {
+                                                    ui.label("名称:");
+                                                    ui.label(&adapter.name);
+                                                    ui.end_row();
+                                                    
+                                                    ui.label("描述:");
+                                                    ui.label(&adapter.description);
+                                                    ui.end_row();
+                                                    
+                                                    if !adapter.adapter_type.is_empty() {
+                                                        ui.label("类型:");
+                                                        ui.label(&adapter.adapter_type);
+                                                        ui.end_row();
+                                                    }
+                                                    
+                                                    if !adapter.mac_address.is_empty() {
+                                                        ui.label("MAC 地址:");
+                                                        ui.label(&adapter.mac_address);
+                                                        ui.end_row();
+                                                    }
+                                                    
+                                                    if !adapter.ip_addresses.is_empty() {
+                                                        ui.label("IP 地址:");
+                                                        for ip in &adapter.ip_addresses {
+                                                            ui.label(ip);
+                                                            ui.end_row();
+                                                            ui.label(""); // 占位
+                                                        }
+                                                    }
+                                                    
+                                                    if !adapter.status.is_empty() {
+                                                        ui.label("状态:");
+                                                        ui.label(&adapter.status);
+                                                        ui.end_row();
+                                                    }
+                                                    
+                                                    if adapter.speed > 0 {
+                                                        ui.label("速度:");
+                                                        let speed_mbps = adapter.speed / 1_000_000;
+                                                        ui.label(format!("{} Mbps", speed_mbps));
+                                                        ui.end_row();
+                                                    }
+                                                });
+                                        });
+                                    ui.add_space(10.0);
+                                }
+                            }
+                        } else {
+                            ui.spinner();
+                            ui.label("正在获取网络信息...");
+                        }
+                    });
+                });
+        }
 
         // 显示工具状态
         if !self.tool_message.is_empty() {
@@ -332,4 +413,256 @@ impl App {
             }
         }
     }
+}
+
+/// 使用 Windows API 获取详细的网络信息
+/// 使用 GetAdaptersAddresses 获取更完整的信息
+fn get_detailed_network_info() -> Vec<crate::core::hardware_info::NetworkAdapterInfo> {
+    let mut adapters = Vec::new();
+
+    #[cfg(windows)]
+    {
+        use std::ffi::OsString;
+        use std::os::windows::ffi::OsStringExt;
+
+        // IP_ADAPTER_ADDRESSES 结构体（简化版）
+        #[repr(C)]
+        #[allow(non_snake_case, dead_code)]
+        struct SOCKET_ADDRESS {
+            lpSockaddr: *mut std::ffi::c_void,
+            iSockaddrLength: i32,
+        }
+
+        #[repr(C)]
+        #[allow(non_snake_case, dead_code)]
+        struct IP_ADAPTER_UNICAST_ADDRESS {
+            Length: u32,
+            Flags: u32,
+            Next: *mut IP_ADAPTER_UNICAST_ADDRESS,
+            Address: SOCKET_ADDRESS,
+            PrefixOrigin: i32,
+            SuffixOrigin: i32,
+            DadState: i32,
+            ValidLifetime: u32,
+            PreferredLifetime: u32,
+            LeaseLifetime: u32,
+            OnLinkPrefixLength: u8,
+        }
+
+        #[repr(C)]
+        #[allow(non_snake_case, dead_code)]
+        struct IP_ADAPTER_ADDRESSES {
+            Length: u32,
+            IfIndex: u32,
+            Next: *mut IP_ADAPTER_ADDRESSES,
+            AdapterName: *const i8,
+            FirstUnicastAddress: *mut IP_ADAPTER_UNICAST_ADDRESS,
+            FirstAnycastAddress: *mut std::ffi::c_void,
+            FirstMulticastAddress: *mut std::ffi::c_void,
+            FirstDnsServerAddress: *mut std::ffi::c_void,
+            DnsSuffix: *const u16,
+            Description: *const u16,
+            FriendlyName: *const u16,
+            PhysicalAddress: [u8; 8],
+            PhysicalAddressLength: u32,
+            Flags: u32,
+            Mtu: u32,
+            IfType: u32,
+            OperStatus: i32,
+            Ipv6IfIndex: u32,
+            ZoneIndices: [u32; 16],
+            FirstPrefix: *mut std::ffi::c_void,
+            TransmitLinkSpeed: u64,
+            ReceiveLinkSpeed: u64,
+        }
+
+        #[link(name = "iphlpapi")]
+        extern "system" {
+            fn GetAdaptersAddresses(
+                Family: u32,
+                Flags: u32,
+                Reserved: *mut std::ffi::c_void,
+                AdapterAddresses: *mut IP_ADAPTER_ADDRESSES,
+                SizePointer: *mut u32,
+            ) -> u32;
+        }
+
+        // SOCKADDR_IN 结构体
+        #[repr(C)]
+        #[allow(non_snake_case, dead_code)]
+        struct SOCKADDR_IN {
+            sin_family: u16,
+            sin_port: u16,
+            sin_addr: [u8; 4],
+            sin_zero: [u8; 8],
+        }
+
+        // SOCKADDR_IN6 结构体
+        #[repr(C)]
+        #[allow(non_snake_case, dead_code)]
+        struct SOCKADDR_IN6 {
+            sin6_family: u16,
+            sin6_port: u16,
+            sin6_flowinfo: u32,
+            sin6_addr: [u8; 16],
+            sin6_scope_id: u32,
+        }
+
+        const AF_UNSPEC: u32 = 0;
+        const GAA_FLAG_INCLUDE_PREFIX: u32 = 0x0010;
+
+        unsafe {
+            // 首先获取所需的缓冲区大小
+            let mut buf_len: u32 = 0;
+            let result = GetAdaptersAddresses(
+                AF_UNSPEC,
+                GAA_FLAG_INCLUDE_PREFIX,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &mut buf_len,
+            );
+            
+            // ERROR_BUFFER_OVERFLOW = 111
+            if result != 111 && result != 0 {
+                return adapters;
+            }
+
+            if buf_len == 0 {
+                return adapters;
+            }
+
+            // 分配缓冲区
+            let mut buffer: Vec<u8> = vec![0u8; buf_len as usize];
+            let adapter_addresses = buffer.as_mut_ptr() as *mut IP_ADAPTER_ADDRESSES;
+
+            let result = GetAdaptersAddresses(
+                AF_UNSPEC,
+                GAA_FLAG_INCLUDE_PREFIX,
+                std::ptr::null_mut(),
+                adapter_addresses,
+                &mut buf_len,
+            );
+            
+            if result != 0 {
+                return adapters;
+            }
+
+            // 遍历适配器
+            let mut current = adapter_addresses;
+            while !current.is_null() {
+                let adapter = &*current;
+                
+                // 获取友好名称
+                let friendly_name = if !adapter.FriendlyName.is_null() {
+                    let mut len = 0;
+                    let mut ptr = adapter.FriendlyName;
+                    while *ptr != 0 {
+                        len += 1;
+                        ptr = ptr.add(1);
+                    }
+                    let slice = std::slice::from_raw_parts(adapter.FriendlyName, len);
+                    OsString::from_wide(slice).to_string_lossy().to_string()
+                } else {
+                    String::new()
+                };
+
+                // 获取描述
+                let description = if !adapter.Description.is_null() {
+                    let mut len = 0;
+                    let mut ptr = adapter.Description;
+                    while *ptr != 0 {
+                        len += 1;
+                        ptr = ptr.add(1);
+                    }
+                    let slice = std::slice::from_raw_parts(adapter.Description, len);
+                    OsString::from_wide(slice).to_string_lossy().to_string()
+                } else {
+                    String::new()
+                };
+
+                // 获取 MAC 地址
+                let mac = if adapter.PhysicalAddressLength > 0 {
+                    adapter.PhysicalAddress[..adapter.PhysicalAddressLength as usize]
+                        .iter()
+                        .map(|b| format!("{:02X}", b))
+                        .collect::<Vec<_>>()
+                        .join(":")
+                } else {
+                    String::new()
+                };
+
+                // 获取 IP 地址
+                let mut ip_addresses = Vec::new();
+                let mut unicast = adapter.FirstUnicastAddress;
+                while !unicast.is_null() {
+                    let unicast_addr = &*unicast;
+                    if !unicast_addr.Address.lpSockaddr.is_null() {
+                        let family = *(unicast_addr.Address.lpSockaddr as *const u16);
+                        
+                        if family == 2 {
+                            // AF_INET (IPv4)
+                            let sockaddr = unicast_addr.Address.lpSockaddr as *const SOCKADDR_IN;
+                            let addr = (*sockaddr).sin_addr;
+                            let ip = format!("{}.{}.{}.{}", addr[0], addr[1], addr[2], addr[3]);
+                            if ip != "0.0.0.0" {
+                                ip_addresses.push(ip);
+                            }
+                        } else if family == 23 {
+                            // AF_INET6 (IPv6)
+                            let sockaddr = unicast_addr.Address.lpSockaddr as *const SOCKADDR_IN6;
+                            let addr = (*sockaddr).sin6_addr;
+                            // 简化的 IPv6 地址格式化
+                            let ipv6 = format!(
+                                "{:02x}{:02x}:{:02x}{:02x}:{:02x}{:02x}:{:02x}{:02x}:{:02x}{:02x}:{:02x}{:02x}:{:02x}{:02x}:{:02x}{:02x}",
+                                addr[0], addr[1], addr[2], addr[3], addr[4], addr[5], addr[6], addr[7],
+                                addr[8], addr[9], addr[10], addr[11], addr[12], addr[13], addr[14], addr[15]
+                            );
+                            if !ipv6.starts_with("0000:0000:0000:0000") {
+                                ip_addresses.push(ipv6);
+                            }
+                        }
+                    }
+                    unicast = unicast_addr.Next;
+                }
+
+                // 适配器类型
+                let adapter_type = match adapter.IfType {
+                    6 => "以太网".to_string(),
+                    71 => "无线网络".to_string(),
+                    24 => "回环".to_string(),
+                    131 => "隧道".to_string(),
+                    _ => format!("类型 {}", adapter.IfType),
+                };
+
+                // 操作状态
+                let status = match adapter.OperStatus {
+                    1 => "已连接".to_string(),
+                    2 => "已断开".to_string(),
+                    3 => "测试中".to_string(),
+                    4 => "未知".to_string(),
+                    5 => "休眠".to_string(),
+                    6 => "未启用".to_string(),
+                    7 => "下层关闭".to_string(),
+                    _ => "未知".to_string(),
+                };
+
+                // 跳过回环适配器和无描述的适配器
+                if adapter.IfType != 24 && !description.is_empty() {
+                    adapters.push(crate::core::hardware_info::NetworkAdapterInfo {
+                        name: friendly_name,
+                        description,
+                        mac_address: mac,
+                        ip_addresses,
+                        adapter_type,
+                        status,
+                        speed: adapter.TransmitLinkSpeed,
+                    });
+                }
+
+                current = adapter.Next;
+            }
+        }
+    }
+
+    adapters
 }

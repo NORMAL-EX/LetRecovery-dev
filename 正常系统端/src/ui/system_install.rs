@@ -80,27 +80,54 @@ impl App {
             ui.colored_label(egui::Color32::RED, format!("ISO 挂载失败: {}", error));
         }
 
-        // 镜像分卷选择
+        // 镜像分卷选择（过滤掉 WindowsPE 等非系统镜像）
         if !self.image_volumes.is_empty() {
-            ui.horizontal(|ui| {
-                ui.label("系统版本:");
-                egui::ComboBox::from_id_salt("volume_select")
-                    .selected_text(
-                        self.selected_volume
-                            .and_then(|i| self.image_volumes.get(i))
-                            .map(|v| v.name.as_str())
-                            .unwrap_or("请选择版本"),
-                    )
-                    .show_ui(ui, |ui| {
-                        for (i, vol) in self.image_volumes.iter().enumerate() {
-                            ui.selectable_value(
-                                &mut self.selected_volume,
-                                Some(i),
-                                format!("{} - {}", vol.index, vol.name),
-                            );
+            // 过滤出可安装的系统镜像
+            let installable_volumes: Vec<(usize, &ImageInfo)> = self.image_volumes
+                .iter()
+                .enumerate()
+                .filter(|(_, vol)| Self::is_installable_image(vol))
+                .collect();
+            
+            if installable_volumes.is_empty() {
+                ui.colored_label(
+                    egui::Color32::from_rgb(255, 165, 0),
+                    "⚠ 该镜像中没有可安装的系统版本（仅包含 PE 环境或安装媒体）",
+                );
+            } else {
+                // 提前获取第一个可安装卷的索引，避免闭包中移动后再借用的问题
+                let first_installable_index = installable_volumes.first().map(|(i, _)| *i);
+                
+                ui.horizontal(|ui| {
+                    ui.label("系统版本:");
+                    egui::ComboBox::from_id_salt("volume_select")
+                        .selected_text(
+                            self.selected_volume
+                                .and_then(|i| self.image_volumes.get(i))
+                                .filter(|v| Self::is_installable_image(v))
+                                .map(|v| v.name.as_str())
+                                .unwrap_or("请选择版本"),
+                        )
+                        .show_ui(ui, |ui| {
+                            for (i, vol) in installable_volumes {
+                                ui.selectable_value(
+                                    &mut self.selected_volume,
+                                    Some(i),
+                                    format!("{} - {}", vol.index, vol.name),
+                                );
+                            }
+                        });
+                });
+                
+                // 如果当前选中的是不可安装的镜像，自动切换到第一个可用的
+                if let Some(idx) = self.selected_volume {
+                    if let Some(vol) = self.image_volumes.get(idx) {
+                        if !Self::is_installable_image(vol) {
+                            self.selected_volume = first_installable_index;
                         }
-                    });
-            });
+                    }
+                }
+            }
         }
 
         ui.add_space(10.0);
@@ -272,7 +299,7 @@ impl App {
             ui.add_space(5.0);
             ui.colored_label(
                 egui::Color32::RED,
-                "❌ 缺少PE配置文件(pe.txt)，无法安装到当前系统分区。请重新下载该软件的完整版本后重试。",
+                "❌ 无法获取PE配置，无法安装到当前系统分区。请检查网络连接后重试。",
             );
         }
 
@@ -431,7 +458,8 @@ impl App {
             match crate::core::iso::IsoMounter::mount_iso(&iso_path) {
                 Ok(drive) => {
                     println!("[ISO MOUNT THREAD] 挂载成功，盘符: {}，查找安装镜像...", drive);
-                    if let Some(image_path) = crate::core::iso::IsoMounter::find_install_image() {
+                    // 使用刚挂载的盘符查找镜像，而不是遍历所有盘符
+                    if let Some(image_path) = crate::core::iso::IsoMounter::find_install_image_in_drive(&drive) {
                         println!("[ISO MOUNT THREAD] 找到镜像: {}", image_path);
                         let _ = tx.send(IsoMountResult::Success(image_path));
                     } else {
@@ -486,11 +514,18 @@ impl App {
                             ImageInfoResult::Success(volumes) => {
                                 println!("[IMAGE INFO] 加载完成，找到 {} 个卷", volumes.len());
                                 self.image_volumes = volumes;
-                                self.selected_volume = if self.image_volumes.is_empty() {
-                                    None
-                                } else {
-                                    Some(0)
-                                };
+                                
+                                // 自动选择第一个可安装的系统镜像
+                                self.selected_volume = self.image_volumes
+                                    .iter()
+                                    .enumerate()
+                                    .find(|(_, vol)| Self::is_installable_image(vol))
+                                    .map(|(i, _)| i);
+                                
+                                if self.selected_volume.is_none() && !self.image_volumes.is_empty() {
+                                    // 如果没有可用的系统版本，仍然设为 None
+                                    log::warn!("镜像中没有可安装的系统版本（全部为 PE 环境或安装媒体）");
+                                }
                             }
                             ImageInfoResult::Error(error) => {
                                 println!("[IMAGE INFO] 加载失败: {}", error);
@@ -502,6 +537,57 @@ impl App {
                 }
             }
         }
+    }
+
+    /// 判断镜像是否为可安装的系统镜像
+    /// 排除以下类型：
+    /// 1. installation_type 为 "WindowsPE" 的镜像
+    /// 2. 名称包含 "Windows PE" 或 "Windows Setup" 的镜像（PE环境/安装程序）
+    /// 3. 名称为 "Windows Setup Media" 的镜像（安装媒体元数据）
+    fn is_installable_image(vol: &ImageInfo) -> bool {
+        let name_lower = vol.name.to_lowercase();
+        let install_type_lower = vol.installation_type.to_lowercase();
+        
+        // 1. 排除 installation_type 为 WindowsPE 的
+        if install_type_lower == "windowspe" {
+            return false;
+        }
+        
+        // 2. 排除名称包含特定关键词的（PE环境、安装程序、安装媒体）
+        let excluded_keywords = [
+            "windows pe",
+            "windows setup",
+            "setup media",
+            "winpe",
+        ];
+        
+        for keyword in &excluded_keywords {
+            if name_lower.contains(keyword) {
+                return false;
+            }
+        }
+        
+        // 3. 如果 installation_type 为空，进行额外检查
+        if vol.installation_type.is_empty() {
+            // 名称必须包含系统版本标识（Windows 10/11/Server 等）
+            let is_valid_system = name_lower.contains("windows 10") 
+                || name_lower.contains("windows 11")
+                || name_lower.contains("windows server")
+                || name_lower.contains("windows 8")
+                || name_lower.contains("windows 7");
+            
+            if !is_valid_system {
+                return false;
+            }
+        }
+        
+        // 4. 如果 installation_type 明确是 Client 或 Server，直接通过
+        if install_type_lower == "client" || install_type_lower == "server" {
+            return true;
+        }
+        
+        // 5. 其他情况（installation_type 为空但名称包含有效系统标识），通过
+        true
     }
 
     pub fn update_install_options_for_partition(&mut self) {
@@ -526,10 +612,33 @@ impl App {
     pub fn refresh_partitions(&mut self) {
         if let Ok(partitions) = crate::core::disk::DiskManager::get_partitions() {
             self.partitions = partitions;
-            self.selected_partition = self
-                .partitions
-                .iter()
-                .position(|p| p.is_system_partition);
+            
+            // 判断是否为PE环境
+            let is_pe = self.system_info.as_ref().map(|s| s.is_pe_environment).unwrap_or(false);
+            
+            if is_pe {
+                // PE环境下，统计有系统的分区
+                let windows_partitions: Vec<usize> = self.partitions
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, p)| p.has_windows)
+                    .map(|(i, _)| i)
+                    .collect();
+                
+                if windows_partitions.len() == 1 {
+                    // 只有一个系统分区，默认选择它
+                    self.selected_partition = Some(windows_partitions[0]);
+                } else {
+                    // 有多个或没有系统分区，不默认选择
+                    self.selected_partition = None;
+                }
+            } else {
+                // 非PE环境，选择当前系统分区
+                self.selected_partition = self
+                    .partitions
+                    .iter()
+                    .position(|p| p.is_system_partition);
+            }
         }
     }
 

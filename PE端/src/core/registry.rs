@@ -124,6 +124,21 @@ impl OfflineRegistry {
         Ok(())
     }
 
+    /// 创建注册表键（如果不存在）
+    pub fn create_key(key_path: &str) -> Result<()> {
+        log::debug!("创建注册表键: {}", key_path);
+
+        let output = new_command("reg.exe")
+            .args(["add", key_path, "/f"])
+            .output()?;
+
+        if !output.status.success() {
+            let stderr = gbk_to_utf8(&output.stderr);
+            anyhow::bail!("创建注册表键失败: {}", stderr);
+        }
+        Ok(())
+    }
+
     /// 导入 .reg 文件
     pub fn import_reg_file(reg_file: &str) -> Result<()> {
         log::info!("导入注册表文件: {}", reg_file);

@@ -321,7 +321,7 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
 
     if config.unattended {
         let _ = tx.send(WorkerMessage::SetStatus("正在生成无人值守配置...".to_string()));
-        if let Err(e) = generate_unattend_xml(&target_partition, &config.custom_username) {
+        if let Err(e) = generate_unattend_xml(&target_partition, &config) {
             log::warn!("生成无人值守配置失败: {}", e);
         }
     } else {
@@ -483,20 +483,78 @@ fn execute_backup_workflow(tx: Sender<WorkerMessage>) {
 }
 
 /// 生成无人值守XML
-fn generate_unattend_xml(target_partition: &str, username: &str) -> anyhow::Result<()> {
-    let username = if username.is_empty() { "User" } else { username };
+/// 
+/// 包含完整的无人值守配置：
+/// - windowsPE pass: 基本设置
+/// - specialize pass: 部署脚本执行
+/// - oobeSystem pass: OOBE设置、用户账户、首次登录命令
+fn generate_unattend_xml(target_partition: &str, config: &crate::core::config::InstallConfig) -> anyhow::Result<()> {
+    use crate::ui::advanced_options::get_scripts_dir_name;
+    
+    let username = if config.custom_username.is_empty() { 
+        "User".to_string() 
+    } else { 
+        config.custom_username.clone() 
+    };
 
-    let xml_content = format!(
-        r#"<?xml version="1.0" encoding="utf-8"?>
+    let scripts_dir = get_scripts_dir_name();
+
+    // 构建 FirstLogonCommands
+    let mut first_logon_commands = String::new();
+    let mut order = 1;
+
+    // 首次登录脚本（如果存在）
+    first_logon_commands.push_str(&format!(r#"
+                <SynchronousCommand wcm:action="add">
+                    <Order>{}</Order>
+                    <CommandLine>cmd /c if exist %SystemDrive%\{}\firstlogon.bat call %SystemDrive%\{}\firstlogon.bat</CommandLine>
+                    <Description>Run first login script</Description>
+                </SynchronousCommand>"#, order, scripts_dir, scripts_dir));
+    order += 1;
+
+    // 如果需要删除UWP应用
+    if config.remove_uwp_apps {
+        first_logon_commands.push_str(&format!(r#"
+                <SynchronousCommand wcm:action="add">
+                    <Order>{}</Order>
+                    <CommandLine>powershell -ExecutionPolicy Bypass -File %SystemDrive%\{}\remove_uwp.ps1</CommandLine>
+                    <Description>Remove preinstalled UWP apps</Description>
+                </SynchronousCommand>"#, order, scripts_dir));
+        order += 1;
+    }
+
+    // 清理脚本目录（最后执行）
+    first_logon_commands.push_str(&format!(r#"
+                <SynchronousCommand wcm:action="add">
+                    <Order>{}</Order>
+                    <CommandLine>cmd /c rd /s /q %SystemDrive%\{}</CommandLine>
+                    <Description>Cleanup scripts directory</Description>
+                </SynchronousCommand>"#, order, scripts_dir));
+
+    let xml_content = format!(r#"<?xml version="1.0" encoding="utf-8"?>
 <unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
     <settings pass="windowsPE">
-        <component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+        <component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
             <UserData>
                 <ProductKey>
                     <WillShowUI>OnError</WillShowUI>
                 </ProductKey>
                 <AcceptEula>true</AcceptEula>
             </UserData>
+        </component>
+    </settings>
+    <settings pass="specialize">
+        <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+            <ComputerName>*</ComputerName>
+        </component>
+        <component name="Microsoft-Windows-Deployment" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+            <RunSynchronous>
+                <RunSynchronousCommand wcm:action="add">
+                    <Order>1</Order>
+                    <Path>cmd /c if exist %SystemDrive%\{}\deploy.bat call %SystemDrive%\{}\deploy.bat</Path>
+                    <Description>Run custom deploy script</Description>
+                </RunSynchronousCommand>
+            </RunSynchronous>
         </component>
     </settings>
     <settings pass="oobeSystem">
@@ -531,12 +589,17 @@ fn generate_unattend_xml(target_partition: &str, username: &str) -> anyhow::Resu
                     <PlainText>true</PlainText>
                 </Password>
                 <Enabled>true</Enabled>
+                <LogonCount>1</LogonCount>
                 <Username>{}</Username>
             </AutoLogon>
+            <FirstLogonCommands>{}
+            </FirstLogonCommands>
         </component>
     </settings>
-</unattend>"#,
-        username, username, username
+</unattend>"#, 
+        scripts_dir, scripts_dir,
+        username, username, username,
+        first_logon_commands
     );
 
     let panther_dir = format!("{}\\Windows\\Panther", target_partition);
@@ -544,7 +607,15 @@ fn generate_unattend_xml(target_partition: &str, username: &str) -> anyhow::Resu
 
     let unattend_path = format!("{}\\unattend.xml", panther_dir);
     std::fs::write(&unattend_path, &xml_content)?;
+    log::info!("[UNATTEND] 已写入: {}", unattend_path);
 
-    log::info!("无人值守配置已生成: {}", unattend_path);
+    // 同时写入到 Sysprep 目录
+    let sysprep_dir = format!("{}\\Windows\\System32\\Sysprep", target_partition);
+    if std::path::Path::new(&sysprep_dir).exists() {
+        let sysprep_unattend = format!("{}\\unattend.xml", sysprep_dir);
+        let _ = std::fs::write(&sysprep_unattend, &xml_content);
+        log::info!("[UNATTEND] 已写入: {}", sysprep_unattend);
+    }
+
     Ok(())
 }

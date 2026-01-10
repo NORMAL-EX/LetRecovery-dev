@@ -130,8 +130,54 @@ impl App {
                     DownloadStatus::Complete => {
                         ui.colored_label(egui::Color32::GREEN, "✓ 下载完成！");
                         
-                        // 检查是否有待继续的操作
-                        if self.pe_download_then_action.is_some() {
+                        // 检查是否需要下载后跳转到安装页面（系统镜像）
+                        if self.download_then_install {
+                            ui.label("正在跳转到安装页面...");
+                            
+                            // 获取下载的文件路径
+                            if let Some(ref downloaded_path) = self.download_then_install_path {
+                                let path = downloaded_path.clone();
+                                self.local_image_path = path.clone();
+                                // 清理下载状态
+                                self.download_then_install = false;
+                                self.download_then_install_path = None;
+                                self.cleanup_download();
+                                // 跳转到安装页面
+                                self.current_panel = crate::app::Panel::SystemInstall;
+                                // 加载镜像信息
+                                self.load_image_volumes();
+                            } else {
+                                self.download_then_install = false;
+                                self.cleanup_download();
+                                self.current_panel = crate::app::Panel::SystemInstall;
+                            }
+                        }
+                        // 检查是否需要下载后运行软件
+                        else if self.soft_download_then_run {
+                            ui.label("正在启动软件...");
+                            
+                            if let Some(ref run_path) = self.soft_download_then_run_path {
+                                let path = run_path.clone();
+                                // 清理下载状态
+                                self.soft_download_then_run = false;
+                                self.soft_download_then_run_path = None;
+                                self.cleanup_download();
+                                
+                                // 运行软件
+                                if let Err(e) = std::process::Command::new(&path).spawn() {
+                                    log::warn!("启动软件失败: {}", e);
+                                }
+                                
+                                // 返回在线下载页面
+                                self.current_panel = crate::app::Panel::OnlineDownload;
+                            } else {
+                                self.soft_download_then_run = false;
+                                self.cleanup_download();
+                                self.current_panel = crate::app::Panel::OnlineDownload;
+                            }
+                        }
+                        // 检查是否有待继续的PE操作
+                        else if self.pe_download_then_action.is_some() {
                             ui.label("正在准备继续操作...");
                             // 延迟一帧后继续操作，避免状态冲突
                             let action = self.pe_download_then_action.take();
@@ -379,18 +425,23 @@ impl App {
 
         // 先获取待执行操作
         let action = self.pe_download_then_action.take();
+        let was_download_then_install = self.download_then_install;
         self.cleanup_download();
         
         // 根据操作类型返回对应页面
-        match action {
-            Some(crate::app::PeDownloadThenAction::Install) => {
-                self.current_panel = crate::app::Panel::SystemInstall;
-            }
-            Some(crate::app::PeDownloadThenAction::Backup) => {
-                self.current_panel = crate::app::Panel::SystemBackup;
-            }
-            None => {
-                self.current_panel = crate::app::Panel::OnlineDownload;
+        if was_download_then_install {
+            self.current_panel = crate::app::Panel::OnlineDownload;
+        } else {
+            match action {
+                Some(crate::app::PeDownloadThenAction::Install) => {
+                    self.current_panel = crate::app::Panel::SystemInstall;
+                }
+                Some(crate::app::PeDownloadThenAction::Backup) => {
+                    self.current_panel = crate::app::Panel::SystemBackup;
+                }
+                None => {
+                    self.current_panel = crate::app::Panel::OnlineDownload;
+                }
             }
         }
     }
@@ -403,6 +454,10 @@ impl App {
         self.download_progress_rx = None;
         self.current_download_filename = None;
         self.pe_download_then_action = None;  // 清除待执行操作
+        self.download_then_install = false;   // 清除下载后安装标记
+        self.download_then_install_path = None;
+        self.soft_download_then_run = false;  // 清除软件下载后运行标记
+        self.soft_download_then_run_path = None;
         
         unsafe {
             DOWNLOAD_CMD_SENDER = None;

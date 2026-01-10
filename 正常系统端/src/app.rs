@@ -1,4 +1,5 @@
 use eframe::egui;
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex};
 
@@ -100,6 +101,10 @@ pub struct App {
     pub config: Option<ConfigManager>,
     pub selected_online_system: Option<usize>,
     
+    // 远程配置
+    pub remote_config: Option<crate::download::server_config::RemoteConfig>,
+    pub remote_config_loading: bool,
+    
     // PE选择（用于安装/备份界面）
     pub selected_pe_for_install: Option<usize>,
     pub selected_pe_for_backup: Option<usize>,
@@ -187,9 +192,61 @@ pub struct App {
     // PE下载完成后继续的操作
     pub pe_download_then_action: Option<PeDownloadThenAction>,
     
+    // 远程配置加载通道
+    pub remote_config_rx: Option<Receiver<crate::download::server_config::RemoteConfig>>,
+    
+    // 下载完成后跳转到安装页面
+    pub download_then_install: bool,
+    pub download_then_install_path: Option<String>,
+    
+    // 软件下载后运行
+    pub soft_download_then_run: bool,
+    pub soft_download_then_run_path: Option<String>,
+    
+    // 在线下载页面选项卡
+    pub online_download_tab: OnlineDownloadTab,
+    
+    // 软件下载相关
+    pub soft_download_save_path: String,
+    pub soft_download_run_after: bool,
+    pub show_soft_download_modal: bool,
+    pub pending_soft_download: Option<PendingSoftDownload>,
+    
+    // 软件图标缓存
+    pub soft_icon_cache: std::collections::HashMap<String, SoftIconState>,
+    pub soft_icon_loading: std::collections::HashSet<String>,
+    
     // 错误对话框
     pub show_error_dialog: bool,
     pub error_dialog_message: String,
+    
+    // 网络信息对话框
+    pub show_network_info_dialog: bool,
+    pub network_info_cache: Option<Vec<crate::core::hardware_info::NetworkAdapterInfo>>,
+}
+
+/// 在线下载页面选项卡
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum OnlineDownloadTab {
+    #[default]
+    SystemImage,
+    Software,
+}
+
+/// 待下载的软件信息
+#[derive(Debug, Clone)]
+pub struct PendingSoftDownload {
+    pub name: String,
+    pub download_url: String,
+    pub filename: String,
+}
+
+/// 软件图标状态
+#[derive(Clone)]
+pub enum SoftIconState {
+    Loading,
+    Loaded(egui::TextureHandle),
+    Failed,
 }
 
 /// PE下载完成后要执行的操作
@@ -212,6 +269,8 @@ impl Default for App {
             selected_partition: None,
             config: None,
             selected_online_system: None,
+            remote_config: None,
+            remote_config_loading: false,
             selected_pe_for_install: None,
             selected_pe_for_backup: None,
             local_image_path: String::new(),
@@ -265,8 +324,22 @@ impl Default for App {
             pe_downloading: false,
             pe_download_error: None,
             pe_download_then_action: None,
+            remote_config_rx: None,
+            download_then_install: false,
+            download_then_install_path: None,
+            soft_download_then_run: false,
+            soft_download_then_run_path: None,
+            online_download_tab: OnlineDownloadTab::default(),
+            soft_download_save_path: String::new(),
+            soft_download_run_after: true,
+            show_soft_download_modal: false,
+            pending_soft_download: None,
+            soft_icon_cache: HashMap::new(),
+            soft_icon_loading: HashSet::new(),
             show_error_dialog: false,
             error_dialog_message: String::new(),
+            show_network_info_dialog: false,
+            network_info_cache: None,
         }
     }
 }
@@ -281,6 +354,19 @@ impl App {
 
         let mut app = Self::default();
         app.load_initial_data();
+        app
+    }
+
+    /// 使用预加载的配置创建应用
+    pub fn new_with_preloaded(cc: &eframe::CreationContext<'_>, preloaded: &crate::PreloadedConfig) -> Self {
+        // 设置中文字体
+        Self::setup_fonts(&cc.egui_ctx);
+
+        // 设置视觉样式
+        Self::setup_style(&cc.egui_ctx);
+
+        let mut app = Self::default();
+        app.load_initial_data_with_preloaded(preloaded);
         app
     }
 
@@ -363,27 +449,186 @@ impl App {
         // 加载分区列表
         self.partitions = crate::core::disk::DiskManager::get_partitions().unwrap_or_default();
 
-        // 选择系统分区
-        self.selected_partition = self.partitions.iter().position(|p| p.is_system_partition);
-
-        // 加载在线配置
-        let exe_dir = crate::utils::path::get_exe_dir();
-        self.config = ConfigManager::load_from_local(&exe_dir).ok();
+        // 判断是否为PE环境
+        let is_pe = self.system_info.as_ref().map(|s| s.is_pe_environment).unwrap_or(false);
         
-        // 自动选择第一个PE
-        if let Some(ref config) = self.config {
-            if !config.pe_list.is_empty() {
-                self.selected_pe_for_install = Some(0);
-                self.selected_pe_for_backup = Some(0);
+        // 选择默认分区
+        // 非PE环境：默认选择当前系统分区
+        // PE环境：如果只有一个装有系统的分区则默认选择它，否则不默认选择
+        if is_pe {
+            // PE环境下，统计有系统的分区
+            let windows_partitions: Vec<usize> = self.partitions
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| p.has_windows)
+                .map(|(i, _)| i)
+                .collect();
+            
+            if windows_partitions.len() == 1 {
+                // 只有一个系统分区，默认选择它
+                self.selected_partition = Some(windows_partitions[0]);
+                self.backup_source_partition = Some(windows_partitions[0]);
+            } else {
+                // 有多个或没有系统分区，不默认选择
+                self.selected_partition = None;
+                self.backup_source_partition = None;
             }
+        } else {
+            // 非PE环境，选择当前系统分区
+            let system_partition_idx = self.partitions.iter().position(|p| p.is_system_partition);
+            self.selected_partition = system_partition_idx;
+            self.backup_source_partition = system_partition_idx;
         }
 
+        // 异步加载远程配置（不阻塞UI）
+        log::info!("开始异步加载远程配置...");
+        self.start_remote_config_loading();
+
         // 设置默认下载路径
+        let exe_dir = crate::utils::path::get_exe_dir();
         self.download_save_path = exe_dir.join("downloads").to_string_lossy().to_string();
 
         // 设置默认备份名称
         self.backup_name = format!("系统备份_{}", chrono::Local::now().format("%Y%m%d_%H%M%S"));
         self.backup_description = "使用 LetRecovery 创建的系统备份".to_string();
+    }
+
+    /// 使用预加载的配置初始化数据
+    fn load_initial_data_with_preloaded(&mut self, preloaded: &crate::PreloadedConfig) {
+        // 使用预加载的系统信息
+        self.system_info = preloaded.system_info.clone();
+
+        // 使用预加载的硬件信息
+        self.hardware_info = preloaded.hardware_info.clone();
+
+        // 使用预加载的分区列表
+        self.partitions = preloaded.partitions.clone();
+
+        // 判断是否为PE环境
+        let is_pe = self.system_info.as_ref().map(|s| s.is_pe_environment).unwrap_or(false);
+        
+        // 选择默认分区
+        if is_pe {
+            let windows_partitions: Vec<usize> = self.partitions
+                .iter()
+                .enumerate()
+                .filter(|(_, p)| p.has_windows)
+                .map(|(i, _)| i)
+                .collect();
+            
+            if windows_partitions.len() == 1 {
+                self.selected_partition = Some(windows_partitions[0]);
+                self.backup_source_partition = Some(windows_partitions[0]);
+            } else {
+                self.selected_partition = None;
+                self.backup_source_partition = None;
+            }
+        } else {
+            let system_partition_idx = self.partitions.iter().position(|p| p.is_system_partition);
+            self.selected_partition = system_partition_idx;
+            self.backup_source_partition = system_partition_idx;
+        }
+
+        // 使用预加载的远程配置
+        if let Some(ref remote_config) = preloaded.remote_config {
+            self.remote_config_loading = false;
+            
+            if remote_config.loaded {
+                self.config = Some(ConfigManager::load_from_content_with_soft(
+                    remote_config.dl_content.as_deref(),
+                    remote_config.pe_content.as_deref(),
+                    remote_config.soft_content.as_deref(),
+                ));
+                log::info!("使用预加载的远程配置");
+                
+                // 自动选择第一个PE
+                if let Some(ref config) = self.config {
+                    if !config.pe_list.is_empty() {
+                        if self.selected_pe_for_install.is_none() {
+                            self.selected_pe_for_install = Some(0);
+                        }
+                        if self.selected_pe_for_backup.is_none() {
+                            self.selected_pe_for_backup = Some(0);
+                        }
+                    }
+                }
+            } else {
+                log::warn!("预加载的远程配置加载失败: {:?}", remote_config.error);
+            }
+            
+            self.remote_config = Some(remote_config.clone());
+        } else {
+            // 如果没有预加载配置，则异步加载
+            log::info!("没有预加载配置，开始异步加载远程配置...");
+            self.start_remote_config_loading();
+        }
+
+        // 设置默认下载路径
+        let exe_dir = crate::utils::path::get_exe_dir();
+        self.download_save_path = exe_dir.join("downloads").to_string_lossy().to_string();
+
+        // 设置默认备份名称
+        self.backup_name = format!("系统备份_{}", chrono::Local::now().format("%Y%m%d_%H%M%S"));
+        self.backup_description = "使用 LetRecovery 创建的系统备份".to_string();
+    }
+    
+    /// 开始异步加载远程配置
+    pub fn start_remote_config_loading(&mut self) {
+        use std::sync::mpsc;
+        
+        if self.remote_config_loading {
+            return; // 已经在加载中
+        }
+        
+        self.remote_config_loading = true;
+        
+        let (tx, rx) = mpsc::channel::<crate::download::server_config::RemoteConfig>();
+        self.remote_config_rx = Some(rx);
+        
+        std::thread::spawn(move || {
+            let config = crate::download::server_config::RemoteConfig::load_from_server();
+            let _ = tx.send(config);
+        });
+    }
+    
+    /// 检查远程配置加载状态
+    pub fn check_remote_config_loading(&mut self) {
+        if !self.remote_config_loading {
+            return;
+        }
+        
+        if let Some(ref rx) = self.remote_config_rx {
+            if let Ok(remote_config) = rx.try_recv() {
+                self.remote_config_loading = false;
+                self.remote_config_rx = None;
+                
+                if remote_config.loaded {
+                    self.config = Some(ConfigManager::load_from_content_with_soft(
+                        remote_config.dl_content.as_deref(),
+                        remote_config.pe_content.as_deref(),
+                        remote_config.soft_content.as_deref(),
+                    ));
+                    log::info!("远程配置加载成功");
+                    
+                    // 自动选择第一个PE
+                    if let Some(ref config) = self.config {
+                        if !config.pe_list.is_empty() {
+                            if self.selected_pe_for_install.is_none() {
+                                self.selected_pe_for_install = Some(0);
+                            }
+                            if self.selected_pe_for_backup.is_none() {
+                                self.selected_pe_for_backup = Some(0);
+                            }
+                        }
+                    }
+                } else {
+                    log::warn!("远程配置加载失败: {:?}", remote_config.error);
+                    // 远程配置加载失败，相关功能将被禁用
+                }
+                
+                self.remote_config = Some(remote_config);
+            }
+        }
     }
 
     /// 检查PE配置是否可用
@@ -405,6 +650,12 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // 检查远程配置加载状态
+        self.check_remote_config_loading();
+        
+        // 处理图标加载结果
+        self.process_icon_load_results(ctx);
+        
         // 错误对话框
         if self.show_error_dialog {
             egui::Window::new("错误")
@@ -566,7 +817,7 @@ impl eframe::App for App {
         }
 
         // 如果有正在进行的任务，定期刷新
-        if self.is_installing || self.is_backing_up || self.current_download.is_some() || self.iso_mounting || self.pe_downloading {
+        if self.is_installing || self.is_backing_up || self.current_download.is_some() || self.iso_mounting || self.pe_downloading || self.remote_config_loading {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
     }

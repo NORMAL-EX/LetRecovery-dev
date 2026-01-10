@@ -104,6 +104,19 @@ impl OfflineRegistry {
         Ok(())
     }
 
+    /// 创建注册表键（如果不存在）
+    pub fn create_key(key_path: &str) -> Result<()> {
+        let output = create_command("reg.exe")
+            .args(["add", key_path, "/f"])
+            .output()?;
+
+        if !output.status.success() {
+            let stderr = gbk_to_utf8(&output.stderr);
+            anyhow::bail!("Failed to create registry key: {}", stderr);
+        }
+        Ok(())
+    }
+
     /// 删除注册表值
     pub fn delete_value(key_path: &str, value_name: &str) -> Result<()> {
         let _ = create_command("reg.exe")

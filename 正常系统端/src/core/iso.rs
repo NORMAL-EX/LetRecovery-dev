@@ -321,7 +321,10 @@ impl IsoMounter {
                     let sources_path = format!("{}:\\sources", letter);
                     if Path::new(&sources_path).exists() {
                         println!("[ISO] 发现挂载的 ISO: {}:", letter);
-                        let _ = Self::eject_cdrom_drive(letter);
+                        match Self::eject_cdrom_drive(letter) {
+                            Ok(_) => println!("[ISO] 成功弹出: {}:", letter),
+                            Err(e) => println!("[ISO] 弹出失败 {}: {} (将继续执行)", letter, e),
+                        }
                     }
                 }
             }
@@ -399,21 +402,31 @@ impl IsoMounter {
     }
 
     /// 在挂载的 ISO 中查找系统镜像文件
+    /// 如果传入 drive 参数，则只在该盘符下查找
+    /// 否则遍历所有盘符
+    pub fn find_install_image_in_drive(drive: &str) -> Option<String> {
+        let paths = [
+            format!("{}\\sources\\install.wim", drive),
+            format!("{}\\sources\\install.esd", drive),
+            format!("{}\\sources\\install.swm", drive),
+        ];
+
+        for path in &paths {
+            if Path::new(path).exists() {
+                println!("[ISO] 在 {} 找到安装镜像: {}", drive, path);
+                return Some(path.clone());
+            }
+        }
+
+        println!("[ISO] 在 {} 未找到安装镜像", drive);
+        None
+    }
+
+    /// 在挂载的 ISO 中查找系统镜像文件（遍历所有盘符）
     pub fn find_install_image() -> Option<String> {
         // 先查找动态挂载的盘符
         if let Some(drive) = Self::find_iso_drive() {
-            let paths = [
-                format!("{}\\sources\\install.wim", drive),
-                format!("{}\\sources\\install.esd", drive),
-                format!("{}\\sources\\install.swm", drive),
-            ];
-
-            for path in &paths {
-                if Path::new(path).exists() {
-                    println!("[ISO] 找到安装镜像: {}", path);
-                    return Some(path.clone());
-                }
-            }
+            return Self::find_install_image_in_drive(&drive);
         }
 
         println!("[ISO] 未找到安装镜像");

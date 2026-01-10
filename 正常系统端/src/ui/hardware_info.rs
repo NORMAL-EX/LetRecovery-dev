@@ -1,7 +1,7 @@
 use egui;
 
 use crate::app::App;
-use crate::core::hardware_info::{format_bytes, HardwareInfo};
+use crate::core::hardware_info::{format_bytes, HardwareInfo, BitLockerStatus};
 
 impl App {
     pub fn show_hardware_info(&mut self, ui: &mut egui::Ui) {
@@ -19,67 +19,44 @@ impl App {
             }
         }
 
+        // 复制按钮
+        if ui.button("📋 复制全部信息").clicked() {
+            if let Some(hw_info) = &self.hardware_info {
+                let formatted_text = hw_info.to_formatted_text(self.system_info.as_ref());
+                ui.output_mut(|o| o.copied_text = formatted_text);
+            }
+        }
+        
+        ui.add_space(10.0);
+
         egui::ScrollArea::vertical()
             .id_salt("hardware_scroll")
             .show(ui, |ui| {
-                // 让内容占满整个宽度，滚动条自然就在右边
                 ui.set_min_width(ui.available_width());
                 
                 if let Some(hw_info) = &self.hardware_info.clone() {
-                    // 操作系统信息
-                    egui::CollapsingHeader::new("🖥 操作系统")
+                    let sys_info = self.system_info.as_ref();
+                    
+                    // 系统信息
+                    egui::CollapsingHeader::new("💻 系统信息")
                         .default_open(true)
                         .show(ui, |ui| {
-                            egui::Grid::new("os_grid")
+                            egui::Grid::new("system_grid")
                                 .num_columns(2)
-                                .spacing([40.0, 4.0])
+                                .spacing([20.0, 4.0])
+                                .striped(true)
                                 .show(ui, |ui| {
-                                    if !hw_info.os.name.is_empty() {
-                                        ui.label("系统名称:");
-                                        ui.label(&hw_info.os.name);
-                                        ui.end_row();
-                                    }
+                                    let arch_str = match hw_info.os.architecture.as_str() {
+                                        "64 位" => "X64", "32 位" => "X86", "ARM64" => "ARM64", _ => &hw_info.os.architecture,
+                                    };
                                     
-                                    if !hw_info.os.version.is_empty() {
-                                        ui.label("版本:");
-                                        ui.label(&hw_info.os.version);
-                                        ui.end_row();
-                                    }
+                                    ui.label("系统名称:");
+                                    ui.label(format!("{} {} [10.0.{} ({})]", hw_info.os.name, arch_str, hw_info.os.build_number, hw_info.os.version));
+                                    ui.end_row();
                                     
-                                    if !hw_info.os.build_number.is_empty() {
-                                        ui.label("内部版本:");
-                                        ui.label(&hw_info.os.build_number);
-                                        ui.end_row();
-                                    }
-                                    
-                                    if !hw_info.os.architecture.is_empty() {
-                                        ui.label("系统类型:");
-                                        ui.label(&hw_info.os.architecture);
-                                        ui.end_row();
-                                    }
-
-                                    // 从 system_info 获取启动模式等信息
-                                    if let Some(sys_info) = &self.system_info {
-                                        ui.label("启动模式:");
-                                        ui.label(format!("{}", sys_info.boot_mode));
-                                        ui.end_row();
-
-                                        ui.label("TPM 状态:");
-                                        ui.label(if sys_info.tpm_enabled {
-                                            format!("已启用 (版本 {})", sys_info.tpm_version)
-                                        } else {
-                                            "未启用/未检测到".to_string()
-                                        });
-                                        ui.end_row();
-
-                                        ui.label("安全启动:");
-                                        ui.label(if sys_info.secure_boot { "已开启" } else { "已关闭/未检测到" });
-                                        ui.end_row();
-
-                                        ui.label("网络状态:");
-                                        ui.label(if sys_info.is_online { "已联网" } else { "未联网" });
-                                        ui.end_row();
-                                    }
+                                    ui.label("计算机名:");
+                                    ui.label(&hw_info.computer_name);
+                                    ui.end_row();
                                     
                                     if !hw_info.os.install_date.is_empty() {
                                         ui.label("安装日期:");
@@ -87,257 +64,286 @@ impl App {
                                         ui.end_row();
                                     }
                                     
-                                    if !hw_info.os.registered_owner.is_empty() {
-                                        ui.label("注册用户:");
-                                        ui.label(&hw_info.os.registered_owner);
-                                        ui.end_row();
-                                    }
+                                    let boot_mode = sys_info.map(|s| format!("{}", s.boot_mode)).unwrap_or_else(|| "未知".to_string());
+                                    ui.label("启动模式:");
+                                    ui.label(format!("{}  设备类型: {}", boot_mode, hw_info.device_type));
+                                    ui.end_row();
                                     
-                                    if !hw_info.os.product_id.is_empty() {
-                                        ui.label("产品 ID:");
-                                        ui.label(&hw_info.os.product_id);
-                                        ui.end_row();
-                                    }
+                                    let tpm_str = if let Some(s) = sys_info { 
+                                        if s.tpm_enabled { format!("已开启 v{}", s.tpm_version) } else { "未开启".to_string() } 
+                                    } else { "未知".to_string() };
+                                    ui.label("TPM模块:");
+                                    ui.label(&tpm_str);
+                                    ui.end_row();
+                                    
+                                    let secure_boot_str = if let Some(s) = sys_info { 
+                                        if s.secure_boot { "已启用" } else { "未启用" } 
+                                    } else { "未知" };
+                                    ui.label("安全启动:");
+                                    ui.label(secure_boot_str);
+                                    ui.end_row();
+                                    
+                                    let bitlocker_str = match hw_info.system_bitlocker_status { 
+                                        BitLockerStatus::Encrypted => "是", 
+                                        BitLockerStatus::NotEncrypted => "否", 
+                                        BitLockerStatus::EncryptionInProgress => "加密中", 
+                                        BitLockerStatus::DecryptionInProgress => "解密中", 
+                                        BitLockerStatus::Unknown => "未知", 
+                                    };
+                                    ui.label("BitLocker:");
+                                    ui.label(bitlocker_str);
+                                    ui.end_row();
                                 });
                         });
-
-                    // 计算机信息
-                    if !hw_info.computer_name.is_empty() || !hw_info.computer_manufacturer.is_empty() {
-                        egui::CollapsingHeader::new("💻 计算机")
-                            .default_open(true)
-                            .show(ui, |ui| {
-                                egui::Grid::new("computer_grid")
-                                    .num_columns(2)
-                                    .spacing([40.0, 4.0])
-                                    .show(ui, |ui| {
-                                        if !hw_info.computer_name.is_empty() {
-                                            ui.label("计算机名:");
-                                            ui.label(&hw_info.computer_name);
-                                            ui.end_row();
-                                        }
-                                        
-                                        if !hw_info.computer_manufacturer.is_empty() {
-                                            ui.label("制造商:");
-                                            ui.label(&hw_info.computer_manufacturer);
-                                            ui.end_row();
-                                        }
-                                        
-                                        if !hw_info.computer_model.is_empty() {
-                                            ui.label("型号:");
-                                            ui.label(&hw_info.computer_model);
-                                            ui.end_row();
-                                        }
-                                    });
-                            });
-                    }
-
-                    // CPU 信息
-                    egui::CollapsingHeader::new("🔲 处理器 (CPU)")
+                    
+                    ui.add_space(5.0);
+                    
+                    // 电脑信息
+                    egui::CollapsingHeader::new("🖥 电脑信息")
                         .default_open(true)
                         .show(ui, |ui| {
-                            egui::Grid::new("cpu_grid")
+                            egui::Grid::new("computer_grid")
                                 .num_columns(2)
-                                .spacing([40.0, 4.0])
+                                .spacing([20.0, 4.0])
+                                .striped(true)
                                 .show(ui, |ui| {
-                                    ui.label("名称:");
-                                    ui.label(&hw_info.cpu.name);
+                                    let mfr = crate::core::hardware_info::beautify_manufacturer_name(&hw_info.computer_manufacturer);
+                                    
+                                    ui.label("电脑型号:");
+                                    ui.label(format!("{} {}", mfr, hw_info.computer_model));
                                     ui.end_row();
                                     
-                                    if !hw_info.cpu.manufacturer.is_empty() {
-                                        ui.label("制造商:");
-                                        ui.label(&hw_info.cpu.manufacturer);
-                                        ui.end_row();
-                                    }
-                                    
-                                    ui.label("架构:");
-                                    ui.label(&hw_info.cpu.architecture);
+                                    ui.label("制造商:");
+                                    ui.label(&mfr);
                                     ui.end_row();
                                     
-                                    ui.label("核心/线程:");
-                                    ui.label(format!("{} 核心 / {} 线程", 
-                                        hw_info.cpu.cores, 
-                                        hw_info.cpu.logical_processors));
-                                    ui.end_row();
-                                    
-                                    if hw_info.cpu.max_clock_speed > 0 {
-                                        ui.label("频率:");
-                                        ui.label(format!("{:.2} GHz", 
-                                            hw_info.cpu.max_clock_speed as f64 / 1000.0));
-                                        ui.end_row();
-                                    }
-                                    
-                                    if hw_info.cpu.l2_cache_size > 0 {
-                                        ui.label("L2 缓存:");
-                                        ui.label(format!("{} KB", hw_info.cpu.l2_cache_size));
-                                        ui.end_row();
-                                    }
-                                    
-                                    if hw_info.cpu.l3_cache_size > 0 {
-                                        ui.label("L3 缓存:");
-                                        ui.label(format!("{:.1} MB", 
-                                            hw_info.cpu.l3_cache_size as f64 / 1024.0));
+                                    if !hw_info.system_serial_number.is_empty() {
+                                        ui.label("设备编号:");
+                                        ui.label(&hw_info.system_serial_number);
                                         ui.end_row();
                                     }
                                 });
                         });
-
-                    // 内存信息
-                    egui::CollapsingHeader::new("📊 内存 (RAM)")
-                        .default_open(true)
-                        .show(ui, |ui| {
-                            egui::Grid::new("memory_grid")
-                                .num_columns(2)
-                                .spacing([40.0, 4.0])
-                                .show(ui, |ui| {
-                                    ui.label("物理内存:");
-                                    ui.label(format_bytes(hw_info.memory.total_physical));
-                                    ui.end_row();
-                                    
-                                    ui.label("可用内存:");
-                                    ui.label(format_bytes(hw_info.memory.available_physical));
-                                    ui.end_row();
-                                    
-                                    ui.label("使用率:");
-                                    ui.label(format!("{}%", hw_info.memory.memory_load));
-                                    ui.end_row();
-                                });
-                        });
-
+                    
+                    ui.add_space(5.0);
+                    
                     // 主板信息
-                    egui::CollapsingHeader::new("🔧 主板")
+                    egui::CollapsingHeader::new("📟 主板信息")
                         .default_open(true)
                         .show(ui, |ui| {
                             egui::Grid::new("motherboard_grid")
                                 .num_columns(2)
-                                .spacing([40.0, 4.0])
+                                .spacing([20.0, 4.0])
+                                .striped(true)
                                 .show(ui, |ui| {
-                                    if !hw_info.motherboard.manufacturer.is_empty() {
-                                        ui.label("制造商:");
-                                        ui.label(&hw_info.motherboard.manufacturer);
-                                        ui.end_row();
-                                    }
+                                    ui.label("主板型号:");
+                                    ui.label(if !hw_info.motherboard.product.is_empty() { &hw_info.motherboard.product } else { "未知" });
+                                    ui.end_row();
                                     
-                                    if !hw_info.motherboard.product.is_empty() {
-                                        ui.label("产品:");
-                                        ui.label(&hw_info.motherboard.product);
-                                        ui.end_row();
-                                    }
+                                    ui.label("主板编号:");
+                                    ui.label(if !hw_info.motherboard.serial_number.is_empty() { &hw_info.motherboard.serial_number } else { "未知" });
+                                    ui.end_row();
                                     
-                                    if !hw_info.motherboard.version.is_empty() 
-                                        && hw_info.motherboard.version != "Default string" {
-                                        ui.label("版本:");
-                                        ui.label(&hw_info.motherboard.version);
-                                        ui.end_row();
-                                    }
+                                    ui.label("主板插槽:");
+                                    ui.label(if !hw_info.motherboard.version.is_empty() { &hw_info.motherboard.version } else { "None" });
+                                    ui.end_row();
+                                    
+                                    ui.label("BIOS版本:");
+                                    ui.label(if !hw_info.bios.version.is_empty() { &hw_info.bios.version } else { "未知" });
+                                    ui.end_row();
+                                    
+                                    ui.label("更新日期:");
+                                    ui.label(if !hw_info.bios.release_date.is_empty() { &hw_info.bios.release_date } else { "未知" });
+                                    ui.end_row();
                                 });
-                            
-                            // BIOS 信息
-                            ui.add_space(8.0);
-                            ui.label("BIOS:");
-                            egui::Grid::new("bios_grid")
+                        });
+                    
+                    ui.add_space(5.0);
+                    
+                    // CPU信息
+                    egui::CollapsingHeader::new("⚡ CPU信息")
+                        .default_open(true)
+                        .show(ui, |ui| {
+                            egui::Grid::new("cpu_grid")
                                 .num_columns(2)
-                                .spacing([40.0, 4.0])
+                                .spacing([20.0, 4.0])
+                                .striped(true)
                                 .show(ui, |ui| {
-                                    if !hw_info.bios.manufacturer.is_empty() {
-                                        ui.label("制造商:");
-                                        ui.label(&hw_info.bios.manufacturer);
-                                        ui.end_row();
-                                    }
+                                    ui.label("CPU型号:");
+                                    ui.label(&hw_info.cpu.name);
+                                    ui.end_row();
                                     
-                                    if !hw_info.bios.smbios_version.is_empty() {
-                                        ui.label("版本:");
-                                        ui.label(&hw_info.bios.smbios_version);
-                                        ui.end_row();
-                                    }
+                                    ui.label("核心/线程:");
+                                    let ai_str = if hw_info.cpu.supports_ai { " [支持AI人工智能]" } else { "" };
+                                    ui.label(format!("{} 核心 / {} 线程{}", hw_info.cpu.cores, hw_info.cpu.logical_processors, ai_str));
+                                    ui.end_row();
                                     
-                                    if !hw_info.bios.release_date.is_empty() {
-                                        ui.label("日期:");
-                                        ui.label(&hw_info.bios.release_date);
+                                    if hw_info.cpu.max_clock_speed > 0 {
+                                        ui.label("最大频率:");
+                                        ui.label(format!("{} MHz", hw_info.cpu.max_clock_speed));
                                         ui.end_row();
                                     }
                                 });
                         });
-
-                    // 硬盘信息
-                    if !hw_info.disks.is_empty() {
-                        egui::CollapsingHeader::new("💾 硬盘")
-                            .default_open(true)
-                            .show(ui, |ui| {
-                                for (i, disk) in hw_info.disks.iter().enumerate() {
-                                    if hw_info.disks.len() > 1 {
-                                        ui.label(format!("硬盘 {}:", i + 1));
-                                    }
-                                    egui::Grid::new(format!("disk_grid_{}", i))
-                                        .num_columns(2)
-                                        .spacing([40.0, 4.0])
-                                        .show(ui, |ui| {
-                                            if !disk.model.is_empty() {
-                                                ui.label("型号:");
-                                                ui.label(&disk.model);
-                                                ui.end_row();
-                                            }
+                    
+                    ui.add_space(5.0);
+                    
+                    // 内存信息
+                    egui::CollapsingHeader::new("🧠 内存信息")
+                        .default_open(true)
+                        .show(ui, |ui| {
+                            let total_gb = hw_info.memory.total_physical as f64 / (1024.0 * 1024.0 * 1024.0);
+                            let available_gb = hw_info.memory.available_physical as f64 / (1024.0 * 1024.0 * 1024.0);
+                            
+                            ui.label(format!("总大小: {:.0} GB ({:.1} GB可用) 插槽数: {}", 
+                                total_gb.round(), available_gb, hw_info.memory.slot_count));
+                            
+                            if !hw_info.memory.sticks.is_empty() {
+                                ui.add_space(5.0);
+                                egui::Grid::new("memory_sticks_grid")
+                                    .num_columns(2)
+                                    .spacing([20.0, 4.0])
+                                    .striped(true)
+                                    .show(ui, |ui| {
+                                        for (i, stick) in hw_info.memory.sticks.iter().enumerate() {
+                                            let mfr = crate::core::hardware_info::beautify_memory_manufacturer(&stick.manufacturer);
+                                            let capacity_gb = stick.capacity / (1024 * 1024 * 1024);
+                                            let mem_type = if !stick.memory_type.is_empty() { &stick.memory_type } else { "DDR" };
+                                            let part = if !stick.part_number.is_empty() { &stick.part_number } else { "Unknown" };
                                             
-                                            if !disk.interface_type.is_empty() {
-                                                ui.label("接口:");
-                                                ui.label(&disk.interface_type);
-                                                ui.end_row();
-                                            }
-                                            
-                                            if !disk.serial_number.is_empty() {
-                                                ui.label("序列号:");
-                                                ui.label(&disk.serial_number);
-                                                ui.end_row();
-                                            }
-                                            
-                                            if !disk.firmware_revision.is_empty() {
-                                                ui.label("固件:");
-                                                ui.label(&disk.firmware_revision);
-                                                ui.end_row();
-                                            }
-                                        });
-                                    if i < hw_info.disks.len() - 1 {
-                                        ui.add_space(5.0);
-                                    }
-                                }
-                            });
-                    }
-
+                                            ui.label(format!("插槽 {}:", i + 1));
+                                            ui.label(format!("{} {}/{}GB/{} {}", mfr, part, capacity_gb, mem_type, stick.speed));
+                                            ui.end_row();
+                                        }
+                                    });
+                            }
+                        });
+                    
+                    ui.add_space(5.0);
+                    
                     // 显卡信息
                     if !hw_info.gpus.is_empty() {
-                        egui::CollapsingHeader::new("🎮 显卡 (GPU)")
+                        egui::CollapsingHeader::new("🎮 显卡信息")
                             .default_open(true)
                             .show(ui, |ui| {
-                                for (i, gpu) in hw_info.gpus.iter().enumerate() {
-                                    if hw_info.gpus.len() > 1 {
-                                        ui.label(format!("显卡 {}:", i + 1));
-                                    }
-                                    egui::Grid::new(format!("gpu_grid_{}", i))
-                                        .num_columns(2)
-                                        .spacing([40.0, 4.0])
-                                        .show(ui, |ui| {
-                                            if !gpu.name.is_empty() {
-                                                ui.label("名称:");
-                                                ui.label(&gpu.name);
-                                                ui.end_row();
-                                            }
-                                            
-                                            if !gpu.current_resolution.is_empty() && gpu.current_resolution != "0x0" {
-                                                ui.label("分辨率:");
-                                                ui.label(format!("{} @ {}Hz", 
-                                                    gpu.current_resolution, 
-                                                    gpu.refresh_rate));
-                                                ui.end_row();
-                                            }
-                                        });
-                                    if i < hw_info.gpus.len() - 1 {
-                                        ui.add_space(5.0);
-                                    }
-                                }
+                                egui::Grid::new("gpu_grid")
+                                    .num_columns(2)
+                                    .spacing([20.0, 4.0])
+                                    .striped(true)
+                                    .show(ui, |ui| {
+                                        for (i, gpu) in hw_info.gpus.iter().enumerate() {
+                                            ui.label(format!("显卡 {}:", i + 1));
+                                            ui.label(crate::core::hardware_info::beautify_gpu_name(&gpu.name));
+                                            ui.end_row();
+                                        }
+                                    });
                             });
+                        
+                        ui.add_space(5.0);
                     }
-
+                    
+                    // 网卡信息
+                    if !hw_info.network_adapters.is_empty() {
+                        egui::CollapsingHeader::new("🌐 网卡信息")
+                            .default_open(true)
+                            .show(ui, |ui| {
+                                egui::Grid::new("network_grid")
+                                    .num_columns(2)
+                                    .spacing([20.0, 4.0])
+                                    .striped(true)
+                                    .show(ui, |ui| {
+                                        for (i, adapter) in hw_info.network_adapters.iter().enumerate() {
+                                            ui.label(format!("网卡 {}:", i + 1));
+                                            ui.label(&adapter.description);
+                                            ui.end_row();
+                                        }
+                                    });
+                            });
+                        
+                        ui.add_space(5.0);
+                    }
+                    
+                    // 电池信息
+                    if let Some(battery) = &hw_info.battery {
+                        egui::CollapsingHeader::new("🔋 电池信息")
+                            .default_open(true)
+                            .show(ui, |ui| {
+                                egui::Grid::new("battery_grid")
+                                    .num_columns(2)
+                                    .spacing([20.0, 4.0])
+                                    .striped(true)
+                                    .show(ui, |ui| {
+                                        let charging_str = if battery.is_charging { "充电中" } 
+                                            else if battery.is_ac_connected { "未充电" } 
+                                            else { "放电中" };
+                                        
+                                        ui.label("当前电量:");
+                                        ui.label(format!("{}%  充电状态: {}", battery.charge_percent, charging_str));
+                                        ui.end_row();
+                                        
+                                        if !battery.model.is_empty() {
+                                            ui.label("型号:");
+                                            ui.label(&battery.model);
+                                            ui.end_row();
+                                        }
+                                        
+                                        if !battery.manufacturer.is_empty() {
+                                            ui.label("制造商:");
+                                            ui.label(crate::core::hardware_info::beautify_manufacturer_name(&battery.manufacturer));
+                                            ui.end_row();
+                                        }
+                                        
+                                        if battery.design_capacity_mwh > 0 {
+                                            ui.label("设计容量:");
+                                            ui.label(format!("{} mWh", battery.design_capacity_mwh));
+                                            ui.end_row();
+                                        }
+                                        
+                                        if battery.full_charge_capacity_mwh > 0 {
+                                            ui.label("最大容量:");
+                                            ui.label(format!("{} mWh", battery.full_charge_capacity_mwh));
+                                            ui.end_row();
+                                        }
+                                        
+                                        if battery.current_capacity_mwh > 0 {
+                                            ui.label("当前容量:");
+                                            ui.label(format!("{} mWh", battery.current_capacity_mwh));
+                                            ui.end_row();
+                                        }
+                                    });
+                            });
+                        
+                        ui.add_space(5.0);
+                    }
+                    
+                    // 硬盘信息
+                    if !hw_info.disks.is_empty() {
+                        egui::CollapsingHeader::new("💾 硬盘信息")
+                            .default_open(true)
+                            .show(ui, |ui| {
+                                egui::Grid::new("disk_grid")
+                                    .num_columns(2)
+                                    .spacing([20.0, 4.0])
+                                    .striped(true)
+                                    .show(ui, |ui| {
+                                        for (i, disk) in hw_info.disks.iter().enumerate() {
+                                            let size_gb = disk.size as f64 / (1024.0 * 1024.0 * 1024.0);
+                                            let ssd_str = if disk.is_ssd { "固态" } else { "机械" };
+                                            let partition_style = if !disk.partition_style.is_empty() { &disk.partition_style } else { "未知" };
+                                            
+                                            ui.label(format!("硬盘 {}:", i + 1));
+                                            ui.label(format!("{} [{:.1}GB-{}-{}-{}]", 
+                                                disk.model, size_gb, disk.interface_type, partition_style, ssd_str));
+                                            ui.end_row();
+                                        }
+                                    });
+                            });
+                        
+                        ui.add_space(5.0);
+                    }
+                    
                     // 磁盘分区信息
-                    egui::CollapsingHeader::new("📁 磁盘分区")
+                    egui::CollapsingHeader::new("📁 磁盘分区详情")
                         .default_open(true)
                         .show(ui, |ui| {
                             let is_pe = self.system_info.as_ref().map(|s| s.is_pe_environment).unwrap_or(false);
@@ -392,29 +398,5 @@ impl App {
                     ui.label("正在加载硬件信息...");
                 }
             });
-
-        ui.add_space(10.0);
-        
-        // 刷新按钮
-        if ui.button("刷新信息").clicked() {
-            self.refresh_all_info();
-        }
-    }
-
-    fn refresh_all_info(&mut self) {
-        // 刷新系统信息
-        if let Ok(info) = crate::core::system_info::SystemInfo::collect() {
-            self.system_info = Some(info);
-        }
-
-        // 刷新硬件信息
-        if let Ok(info) = crate::core::hardware_info::HardwareInfo::collect() {
-            self.hardware_info = Some(info);
-        }
-
-        // 刷新分区信息
-        if let Ok(partitions) = crate::core::disk::DiskManager::get_partitions() {
-            self.partitions = partitions;
-        }
     }
 }
