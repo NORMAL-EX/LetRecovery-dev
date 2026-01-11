@@ -997,39 +997,36 @@ impl DiskManager {
             return Ok(Some((format!("{}:", selected), false)));
         }
 
-        // 没有找到满足条件的现有分区，尝试从 C 盘创建新分区
-        println!("[DISK] 没有找到满足条件的现有分区，尝试从 C 盘创建新分区");
+        // 没有找到满足条件的现有分区，尝试从目标安装分区创建新分区
+        // 注意：即使目标是 C 盘，也可以从 C 盘分割出临时分区来存放镜像
+        println!("[DISK] 没有找到满足条件的现有分区，尝试从 {} 盘创建新分区", exclude_letter);
 
-        // 检查 C 盘是否被排除（如果C盘是目标安装分区，无法从中创建）
-        if exclude_letter == 'C' {
-            println!("[DISK] C 盘是目标安装分区，无法从中创建新分区");
-            return Ok(None);
-        }
-
-        // 使用 shrink querymax 查询 C 盘实际可缩小的空间
-        let max_shrink_mb = match Self::query_shrink_max('C') {
+        // 使用 shrink querymax 查询目标分区实际可缩小的空间
+        let max_shrink_mb = match Self::query_shrink_max(exclude_letter) {
             Ok(mb) => mb,
             Err(e) => {
-                println!("[DISK] 查询 C 盘可缩小空间失败: {}", e);
+                println!("[DISK] 查询 {} 盘可缩小空间失败: {}", exclude_letter, e);
                 return Ok(None);
             }
         };
 
         let max_shrink_bytes = max_shrink_mb * 1024 * 1024;
-        println!("[DISK] C 盘实际可缩小空间: {} MB ({:.2} GB)", 
-            max_shrink_mb, max_shrink_bytes as f64 / 1024.0 / 1024.0 / 1024.0);
+        println!("[DISK] {} 盘实际可缩小空间: {} MB ({:.2} GB)", 
+            exclude_letter, max_shrink_mb, max_shrink_bytes as f64 / 1024.0 / 1024.0 / 1024.0);
 
         // 检查可缩小空间是否足够容纳镜像
         if max_shrink_bytes < required_size_bytes {
-            println!("[DISK] C 盘可缩小空间不足以容纳镜像文件");
+            println!("[DISK] {} 盘可缩小空间不足以容纳镜像文件", exclude_letter);
             return Err(anyhow::anyhow!(
-                "磁盘空间不足：C 盘可缩小空间为 {:.2} GB，但镜像需要 {:.2} GB。\n\
+                "磁盘空间不足：{} 盘可缩小空间为 {:.2} GB，但镜像需要 {:.2} GB。\n\
                 建议：\n\
-                1. 清理 C 盘空间\n\
+                1. 清理 {} 盘空间\n\
                 2. 运行磁盘碎片整理\n\
                 3. 或手动创建一个数据分区",
+                exclude_letter,
                 max_shrink_bytes as f64 / 1024.0 / 1024.0 / 1024.0,
-                required_size_bytes as f64 / 1024.0 / 1024.0 / 1024.0
+                required_size_bytes as f64 / 1024.0 / 1024.0 / 1024.0,
+                exclude_letter
             ));
         }
 
@@ -1046,36 +1043,47 @@ impl DiskManager {
         let actual_size_mb: u64;
         
         if max_shrink_mb >= ideal_size_mb_rounded {
-            // 可缩小空间充足，使用理想大小
+            // 可缩小空间充足，使用理想大小（镜像 + 10GB 缓冲）
             actual_size_mb = ideal_size_mb_rounded;
             println!("[DISK] 使用理想分区大小: {} MB ({} GB)", actual_size_mb, ideal_size_gb);
         } else {
-            // 可缩小空间不足以达到理想大小，使用最大可用值
-            // 向下取整到整数 GB
-            let actual_size_gb = max_shrink_mb / 1024;
-            actual_size_mb = actual_size_gb * 1024;
-            println!("[DISK] 可缩小空间有限，使用较小分区大小: {} MB ({} GB)", actual_size_mb, actual_size_gb);
+            // 可缩小空间不足以达到理想大小
+            // 确保至少能容纳镜像文件，向上取整到整数 GB
+            let min_size_gb = (required_size_mb + 1023) / 1024; // 向上取整
+            let available_size_gb = max_shrink_mb / 1024; // 可用的整数 GB
+            
+            if available_size_gb >= min_size_gb {
+                // 使用可用的整数 GB
+                actual_size_mb = available_size_gb * 1024;
+                println!("[DISK] 可缩小空间有限，使用较小分区大小: {} MB ({} GB)", actual_size_mb, available_size_gb);
+            } else {
+                // 整数 GB 不够，直接使用全部可缩小空间（不取整）
+                actual_size_mb = max_shrink_mb;
+                println!("[DISK] 空间紧张，使用全部可缩小空间: {} MB ({:.2} GB)", actual_size_mb, max_shrink_mb as f64 / 1024.0);
+            }
         }
 
         // 确保分区大小至少为 1GB 且能容纳镜像
         if actual_size_mb < 1024 {
             return Err(anyhow::anyhow!(
-                "C 盘可缩小空间太小（{} MB），需要至少 1 GB。\n\
+                "{} 盘可缩小空间太小（{} MB），需要至少 1 GB。\n\
                 建议运行磁盘碎片整理后重试。",
+                exclude_letter,
                 max_shrink_mb
             ));
         }
 
         if actual_size_mb * 1024 * 1024 < required_size_bytes {
             return Err(anyhow::anyhow!(
-                "C 盘可缩小空间（{} MB）不足以容纳镜像（需要 {} MB）。",
+                "{} 盘可缩小空间（{} MB）不足以容纳镜像（需要 {} MB）。",
+                exclude_letter,
                 actual_size_mb,
                 required_size_mb
             ));
         }
 
         // 创建新分区（传入预查询的 max_shrink_mb，避免重复查询）
-        let new_letter = Self::shrink_and_create_partition_with_marker('C', actual_size_mb, Some(max_shrink_mb))?;
+        let new_letter = Self::shrink_and_create_partition_with_marker(exclude_letter, actual_size_mb, Some(max_shrink_mb))?;
         
         Ok(Some((format!("{}:", new_letter), true)))
     }
