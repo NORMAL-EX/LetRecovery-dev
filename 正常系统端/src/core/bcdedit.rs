@@ -43,8 +43,6 @@ impl BootManager {
 
     /// 查找目标 Windows 分区所在磁盘的 ESP 分区
     pub fn find_esp_on_same_disk(&self, windows_partition: &str) -> Result<String> {
-        use std::io::Write;
-        
         println!("[BOOT] 查找 {} 所在磁盘的 ESP 分区...", windows_partition);
         
         // 提取盘符（去掉冒号）
@@ -189,8 +187,6 @@ assign letter=S
 
     /// 使用 diskpart 查找任意磁盘上的 ESP
     fn find_esp_with_diskpart(&self) -> Result<String> {
-        use std::io::Write;
-        
         println!("[BOOT] 使用 diskpart 查找 ESP");
         
         // 遍历磁盘0-3
@@ -315,7 +311,6 @@ assign letter=S
                     println!("[BOOT] ESP 分区: {}", esp_letter);
                     
                     // 确保 EFI 目录存在
-                    let efi_dir = format!("{}\\EFI", esp_letter);
                     let efi_ms_dir = format!("{}\\EFI\\Microsoft", esp_letter);
                     let efi_boot_dir = format!("{}\\EFI\\Boot", esp_letter);
                     

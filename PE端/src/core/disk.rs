@@ -75,6 +75,16 @@ impl DiskManager {
         for letter in b'A'..=b'Z' {
             let drive = format!("{}:", letter as char);
             if let Ok(info) = Self::get_partition_info(&drive) {
+                log::debug!(
+                    "Partition {} label=\"{}\" total={}MB free={}MB system={} windows={} style={}",
+                    info.letter.as_str(),
+                    info.label.as_str(),
+                    info.total_size_mb,
+                    info.free_size_mb,
+                    info.is_system_partition,
+                    info.has_windows,
+                    info.partition_style
+                );
                 partitions.push(info);
             }
         }
@@ -263,7 +273,12 @@ impl DiskManager {
 
     /// 格式化指定分区
     pub fn format_partition(partition: &str) -> Result<String> {
-        log::info!("格式化分区: {}", partition);
+        Self::format_partition_with_label(partition, None)
+    }
+    
+    /// 格式化指定分区（带卷标）
+    pub fn format_partition_with_label(partition: &str, volume_label: Option<&str>) -> Result<String> {
+        log::info!("格式化分区: {} 卷标: {:?}", partition, volume_label);
 
         let bin_dir = get_bin_dir();
         let format_exe = bin_dir.join("format.com").to_string_lossy().to_string();
@@ -275,8 +290,17 @@ impl DiskManager {
             "format.com".to_string()
         };
 
+        let mut args = vec![partition.to_string(), "/FS:NTFS".to_string(), "/q".to_string(), "/y".to_string()];
+        
+        // 如果有卷标，添加 /V:label 参数
+        if let Some(label) = volume_label {
+            if !label.is_empty() {
+                args.push(format!("/V:{}", label));
+            }
+        }
+
         let output = new_command(&format_cmd)
-            .args([partition, "/FS:NTFS", "/q", "/y"])
+            .args(&args)
             .output()?;
 
         let result = gbk_to_utf8(&output.stdout);
@@ -288,17 +312,6 @@ impl DiskManager {
         }
 
         Ok(result)
-    }
-
-    /// 检查指定分区是否包含有效的 Windows 系统
-    pub fn has_valid_windows(partition: &str) -> bool {
-        let paths_to_check = [
-            format!("{}\\Windows\\System32\\config\\SYSTEM", partition),
-            format!("{}\\Windows\\System32\\config\\SOFTWARE", partition),
-            format!("{}\\Windows\\explorer.exe", partition),
-        ];
-
-        paths_to_check.iter().all(|p| Path::new(p).exists())
     }
 
     /// 检测是否为UEFI模式
@@ -346,12 +359,6 @@ impl DiskManager {
             }
         }
         None
-    }
-
-    /// 检查指定分区是否是自动创建的
-    pub fn is_auto_created_partition(letter: char) -> bool {
-        let marker_path = format!("{}:\\{}", letter, AUTO_CREATED_PARTITION_MARKER);
-        Path::new(&marker_path).exists()
     }
 
     /// 删除自动创建的分区并扩展目标分区

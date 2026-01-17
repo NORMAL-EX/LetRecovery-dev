@@ -225,7 +225,14 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
     let _ = tx.send(WorkerMessage::SetInstallStep(InstallStep::FormatPartition));
     let _ = tx.send(WorkerMessage::SetStatus("正在格式化目标分区...".to_string()));
 
-    match DiskManager::format_partition(&target_partition) {
+    // 使用卷标参数（如果有配置的话）
+    let volume_label = if config.volume_label.is_empty() {
+        None
+    } else {
+        Some(config.volume_label.as_str())
+    };
+    
+    match DiskManager::format_partition_with_label(&target_partition, volume_label) {
         Ok(_) => {
             log::info!("分区格式化成功");
             let _ = tx.send(WorkerMessage::SetProgress(100));
@@ -280,17 +287,32 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
     // Step 3: 导入驱动
     let _ = tx.send(WorkerMessage::SetInstallStep(InstallStep::ImportDrivers));
 
-    if config.restore_drivers {
+    // 根据 driver_action_mode 决定是否导入驱动
+    // 0 = 无, 1 = 仅保存（不导入）, 2 = 自动导入
+    if config.should_import_drivers() {
         let _ = tx.send(WorkerMessage::SetStatus("正在导入驱动...".to_string()));
         let driver_path = format!("{}\\drivers", data_dir);
         if std::path::Path::new(&driver_path).exists() {
             let dism = Dism::new();
-            if let Err(e) = dism.add_drivers_offline(&apply_dir, &driver_path) {
-                log::warn!("导入驱动失败: {}", e);
+            match dism.add_drivers_offline(&apply_dir, &driver_path) {
+                Ok(_) => {
+                    log::info!("驱动导入成功");
+                }
+                Err(e) => {
+                    log::warn!("导入驱动失败: {}", e);
+                    // 不中断安装流程，继续执行
+                }
             }
+        } else {
+            log::info!("驱动目录不存在，跳过驱动导入: {}", driver_path);
         }
+    } else if config.has_driver_data() {
+        // SaveOnly 模式：驱动已保存但不导入
+        let _ = tx.send(WorkerMessage::SetStatus("跳过驱动导入（仅保存模式）".to_string()));
+        log::info!("驱动操作模式为仅保存，跳过驱动导入");
     } else {
         let _ = tx.send(WorkerMessage::SetStatus("跳过驱动导入".to_string()));
+        log::info!("驱动操作模式为无，跳过驱动导入");
     }
     let _ = tx.send(WorkerMessage::SetProgress(100));
 
@@ -364,7 +386,9 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
 /// 执行备份工作流
 fn execute_backup_workflow(tx: Sender<WorkerMessage>) {
     use crate::core::bcdedit::BootManager;
+    use crate::core::config::BackupFormat;
     use crate::core::dism::Dism;
+    use crate::core::ghost::Ghost;
 
     log::info!("========== 开始PE备份流程 ==========");
 
@@ -393,17 +417,19 @@ fn execute_backup_workflow(tx: Sender<WorkerMessage>) {
 
     log::info!("源分区: {}", config.source_partition);
     log::info!("保存路径: {}", config.save_path);
+    log::info!("备份格式: {:?}", config.format);
+    if config.format == BackupFormat::Swm {
+        log::info!("SWM分卷大小: {} MB", config.swm_split_size);
+    }
     let _ = tx.send(WorkerMessage::SetProgress(100));
 
     // 查找备份标记分区
     let source_partition = ConfigFileManager::find_backup_marker_partition()
         .unwrap_or_else(|| config.source_partition.clone());
 
-    // Step 2: 执行DISM备份
+    // Step 2: 执行备份
     let _ = tx.send(WorkerMessage::SetBackupStep(BackupStep::CaptureImage));
-    let _ = tx.send(WorkerMessage::SetStatus("正在执行系统备份...".to_string()));
-
-    let dism = Dism::new();
+    
     let capture_dir = format!("{}\\", source_partition);
 
     // 创建进度通道
@@ -416,22 +442,77 @@ fn execute_backup_workflow(tx: Sender<WorkerMessage>) {
         }
     });
 
-    let backup_result = if config.incremental && std::path::Path::new(&config.save_path).exists() {
-        dism.append_image(
-            &config.save_path,
-            &capture_dir,
-            &config.name,
-            &config.description,
-            Some(progress_tx),
-        )
-    } else {
-        dism.capture_image(
-            &config.save_path,
-            &capture_dir,
-            &config.name,
-            &config.description,
-            Some(progress_tx),
-        )
+    let backup_result = match config.format {
+        BackupFormat::Gho => {
+            // GHO格式使用Ghost
+            let _ = tx.send(WorkerMessage::SetStatus("正在使用Ghost备份系统...".to_string()));
+            let ghost = Ghost::new();
+            if !ghost.is_available() {
+                drop(progress_handle);
+                let _ = tx.send(WorkerMessage::Failed("Ghost工具不可用".to_string()));
+                return;
+            }
+            
+            // Ghost备份
+            ghost.create_image_from_letter(&source_partition, &config.save_path, Some(progress_tx))
+        }
+        BackupFormat::Esd => {
+            // ESD格式使用DISM高压缩
+            let _ = tx.send(WorkerMessage::SetStatus("正在备份系统（ESD高压缩）...".to_string()));
+            let dism = Dism::new();
+            if config.incremental && std::path::Path::new(&config.save_path).exists() {
+                dism.append_image_esd(
+                    &config.save_path,
+                    &capture_dir,
+                    &config.name,
+                    &config.description,
+                    Some(progress_tx),
+                )
+            } else {
+                dism.capture_image_esd(
+                    &config.save_path,
+                    &capture_dir,
+                    &config.name,
+                    &config.description,
+                    Some(progress_tx),
+                )
+            }
+        }
+        BackupFormat::Swm => {
+            // SWM分卷格式
+            let _ = tx.send(WorkerMessage::SetStatus(format!("正在备份系统（SWM分卷，每卷{}MB）...", config.swm_split_size).to_string()));
+            let dism = Dism::new();
+            dism.capture_image_swm(
+                &config.save_path,
+                &capture_dir,
+                &config.name,
+                &config.description,
+                config.swm_split_size,
+                Some(progress_tx),
+            )
+        }
+        BackupFormat::Wim => {
+            // 标准WIM格式
+            let _ = tx.send(WorkerMessage::SetStatus("正在执行系统备份...".to_string()));
+            let dism = Dism::new();
+            if config.incremental && std::path::Path::new(&config.save_path).exists() {
+                dism.append_image(
+                    &config.save_path,
+                    &capture_dir,
+                    &config.name,
+                    &config.description,
+                    Some(progress_tx),
+                )
+            } else {
+                dism.capture_image(
+                    &config.save_path,
+                    &capture_dir,
+                    &config.name,
+                    &config.description,
+                    Some(progress_tx),
+                )
+            }
+        }
     };
 
     drop(progress_handle);
@@ -446,7 +527,15 @@ fn execute_backup_workflow(tx: Sender<WorkerMessage>) {
     let _ = tx.send(WorkerMessage::SetBackupStep(BackupStep::VerifyBackup));
     let _ = tx.send(WorkerMessage::SetStatus("正在验证备份文件...".to_string()));
 
-    if !std::path::Path::new(&config.save_path).exists() {
+    // 对于SWM格式，检查第一个分卷文件
+    let verify_path = if config.format == BackupFormat::Swm {
+        // SWM的第一个文件可能是 xxx.swm 或 xxx.swm
+        config.save_path.clone()
+    } else {
+        config.save_path.clone()
+    };
+    
+    if !std::path::Path::new(&verify_path).exists() {
         let _ = tx.send(WorkerMessage::Failed("备份文件验证失败".to_string()));
         return;
     }

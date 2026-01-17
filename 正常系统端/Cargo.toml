@@ -46,7 +46,23 @@ windows = { version = "0.58", features = [
     "Win32_System_Ole",
     "Win32_System_Variant",
     "Win32_System_Wmi",
+    # Windows Runtime - APPX包管理
+    "Foundation",
+    "Foundation_Collections",
+    "Management_Deployment",
+    "ApplicationModel",
+    # 系统时间设置
+    "Win32_System_Time",
+    # 磁盘格式化和BitLocker支持
+    "Win32_System_LibraryLoader",
+    "Win32_Security_Cryptography",
+    # SetupAPI - 设备驱动管理
+    "Win32_Devices_DeviceAndDriverInstallation",
 ] }
+winreg = "0.52"
+
+# wimgapi.dll 动态加载
+libloading = "0.8"
 
 # 编码转换
 encoding_rs = "0.8"

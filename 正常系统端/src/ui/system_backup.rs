@@ -2,7 +2,7 @@ use egui;
 use std::sync::mpsc;
 use std::path::Path;
 
-use crate::app::{App, BackupMode, Panel};
+use crate::app::{App, BackupFormat, BackupMode, Panel};
 use crate::core::dism::{Dism, DismProgress};
 use crate::core::install_config::{BackupConfig, ConfigFileManager};
 
@@ -87,6 +87,66 @@ impl App {
         ui.add_space(15.0);
         ui.separator();
 
+        // 备份格式选择
+        ui.horizontal(|ui| {
+            ui.label("备份格式:");
+            egui::ComboBox::from_id_salt("backup_format_select")
+                .selected_text(format!("{}", self.backup_format))
+                .width(80.0)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut self.backup_format,
+                        BackupFormat::Wim,
+                        "WIM (推荐)",
+                    );
+                    ui.selectable_value(
+                        &mut self.backup_format,
+                        BackupFormat::Esd,
+                        "ESD (高压缩)",
+                    );
+                    ui.selectable_value(
+                        &mut self.backup_format,
+                        BackupFormat::Swm,
+                        "SWM (分卷)",
+                    );
+                    ui.selectable_value(
+                        &mut self.backup_format,
+                        BackupFormat::Gho,
+                        "GHO (Ghost)",
+                    );
+                });
+            
+            // 显示格式说明
+            match self.backup_format {
+                BackupFormat::Wim => {
+                    ui.label("标准WIM格式，兼容性好");
+                }
+                BackupFormat::Esd => {
+                    ui.label("高压缩率，体积更小");
+                }
+                BackupFormat::Swm => {
+                    ui.label("分卷存储，便于传输");
+                }
+                BackupFormat::Gho => {
+                    ui.colored_label(egui::Color32::from_rgb(255, 165, 0), "需要Ghost工具支持");
+                }
+            }
+        });
+
+        // SWM分卷大小设置
+        if self.backup_format == BackupFormat::Swm {
+            ui.horizontal(|ui| {
+                ui.label("分卷大小:");
+                ui.add(egui::DragValue::new(&mut self.backup_swm_split_size)
+                    .range(512..=8192)
+                    .speed(100)
+                    .suffix(" MB"));
+                ui.label("(512-8192 MB)");
+            });
+        }
+
+        ui.add_space(10.0);
+
         // 备份保存位置
         ui.horizontal(|ui| {
             ui.label("保存位置:");
@@ -94,9 +154,13 @@ impl App {
                 egui::TextEdit::singleline(&mut self.backup_save_path).desired_width(400.0),
             );
             if ui.button("浏览...").clicked() {
+                let ext = self.backup_format.extension();
+                let desc = self.backup_format.filter_description();
+                let default_name = format!("backup.{}", ext);
+                
                 if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("WIM镜像", &["wim"])
-                    .set_file_name("backup.wim")
+                    .add_filter(desc, &[ext])
+                    .set_file_name(&default_name)
                     .save_file()
                 {
                     self.backup_save_path = path.to_string_lossy().to_string();
@@ -412,6 +476,8 @@ impl App {
         let name = self.backup_name.clone();
         let description = self.backup_description.clone();
         let is_incremental = self.backup_incremental;
+        let backup_format = self.backup_format.to_config_value();
+        let swm_split_size = self.backup_swm_split_size;
         
         let pe_info = self.selected_pe_for_backup.and_then(|idx| {
             self.config.as_ref().and_then(|c| c.pe_list.get(idx).cloned())
@@ -474,6 +540,8 @@ impl App {
                 description: description.clone(),
                 source_partition: source_letter.clone(),
                 incremental: is_incremental,
+                format: backup_format,
+                swm_split_size: swm_split_size,
             };
             
             if let Err(e) = ConfigFileManager::write_backup_config(&source_letter, &data_partition, &backup_config) {

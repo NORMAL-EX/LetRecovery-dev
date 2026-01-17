@@ -12,8 +12,3 @@ pub fn get_exe_dir() -> PathBuf {
 pub fn get_bin_dir() -> PathBuf {
     get_exe_dir().join("bin")
 }
-
-/// 获取临时目录
-pub fn get_temp_dir() -> PathBuf {
-    std::env::temp_dir()
-}

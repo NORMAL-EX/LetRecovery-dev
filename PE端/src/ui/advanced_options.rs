@@ -1,7 +1,7 @@
-use walkdir::WalkDir;
-
 use crate::core::config::InstallConfig;
+use crate::core::dism::Dism;
 use crate::core::registry::OfflineRegistry;
+use crate::utils::path;
 
 /// 脚本目录名称（统一路径，与正常系统端保持一致）
 const SCRIPTS_DIR: &str = "LetRecovery_Scripts";
@@ -206,7 +206,47 @@ pub fn apply_advanced_options(target_partition: &str, config: &InstallConfig) ->
         log::info!("[ADVANCED] UWP删除脚本已写入: {}", uwp_script_path);
     }
 
-    // 10. 自定义用户名 - 写入标记文件供无人值守使用
+    // 10. 导入磁盘控制器驱动（Win10/Win11 x64）
+    if config.import_storage_controller_drivers {
+        let storage_drivers_dir = path::get_exe_dir()
+            .join("drivers")
+            .join("storage_controller");
+        if storage_drivers_dir.is_dir() {
+            log::info!(
+                "[ADVANCED] 导入磁盘控制器驱动: {}",
+                storage_drivers_dir.display()
+            );
+
+            // 先卸载注册表，因为 DISM 可能需要独占访问
+            let _ = OfflineRegistry::unload_hive("pc-soft");
+            let _ = OfflineRegistry::unload_hive("pc-sys");
+            if default_loaded {
+                let _ = OfflineRegistry::unload_hive("pc-default");
+            }
+
+            let dism = Dism::new();
+            let image_path = format!("{}\\", target_partition);
+            let storage_drivers_path = storage_drivers_dir.to_string_lossy().to_string();
+            match dism.add_drivers_offline(&image_path, &storage_drivers_path) {
+                Ok(_) => log::info!("[ADVANCED] 磁盘控制器驱动导入成功"),
+                Err(e) => log::warn!("[ADVANCED] 磁盘控制器驱动导入失败: {}", e),
+            }
+
+            // 重新加载注册表
+            let _ = OfflineRegistry::load_hive("pc-soft", &software_hive);
+            let _ = OfflineRegistry::load_hive("pc-sys", &system_hive);
+            if default_loaded {
+                let _ = OfflineRegistry::load_hive("pc-default", &default_hive);
+            }
+        } else {
+            log::warn!(
+                "[ADVANCED] 未找到磁盘控制器驱动目录: {}",
+                storage_drivers_dir.display()
+            );
+        }
+    }
+
+    // 11. 自定义用户名 - 写入标记文件供无人值守使用
     if !config.custom_username.is_empty() {
         log::info!("[ADVANCED] 设置自定义用户名: {}", config.custom_username);
         let username_file = format!("{}\\username.txt", scripts_dir);
@@ -284,24 +324,6 @@ foreach ($App in $AppsToRemove) {
 
 Write-Host "UWP应用清理完成"
 "#.to_string()
-}
-
-/// 复制目录（递归）
-pub fn copy_dir_all(src: &str, dst: &str) -> anyhow::Result<()> {
-    std::fs::create_dir_all(dst)?;
-    for entry in WalkDir::new(src) {
-        let entry = entry?;
-        let target = std::path::Path::new(dst).join(entry.path().strip_prefix(src)?);
-        if entry.file_type().is_dir() {
-            std::fs::create_dir_all(&target)?;
-        } else {
-            if let Some(parent) = target.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::copy(entry.path(), &target)?;
-        }
-    }
-    Ok(())
 }
 
 /// 获取脚本目录名称

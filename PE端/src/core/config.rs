@@ -1,13 +1,53 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
+/// 驱动操作模式
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum DriverActionMode {
+    /// 无操作
+    #[default]
+    None = 0,
+    /// 仅保存驱动（到数据目录）
+    SaveOnly = 1,
+    /// 自动导入（保存并导入到新系统）
+    AutoImport = 2,
+}
+
+impl DriverActionMode {
+    /// 从数值转换
+    pub fn from_u8(value: u8) -> Self {
+        match value {
+            1 => Self::SaveOnly,
+            2 => Self::AutoImport,
+            _ => Self::None,
+        }
+    }
+    
+    /// 转换为数值
+    pub fn as_u8(&self) -> u8 {
+        *self as u8
+    }
+    
+    /// 是否需要导入驱动
+    pub fn should_import(&self) -> bool {
+        *self == Self::AutoImport
+    }
+    
+    /// 是否有驱动目录（SaveOnly 或 AutoImport 时都有）
+    pub fn has_drivers(&self) -> bool {
+        *self != Self::None
+    }
+}
+
 /// 系统安装配置（用于PE环境内安装）
 #[derive(Debug, Clone, Default)]
 pub struct InstallConfig {
     /// 无人值守安装
     pub unattended: bool,
-    /// 驱动还原
+    /// 驱动还原（兼容旧版本）
     pub restore_drivers: bool,
+    /// 驱动操作模式: 0=无, 1=仅保存, 2=自动导入
+    pub driver_action_mode: DriverActionMode,
     /// 立即重启
     pub auto_reboot: bool,
     /// 原系统引导GUID（用于删除旧引导项）
@@ -40,8 +80,74 @@ pub struct InstallConfig {
     pub disable_device_encryption: bool,
     /// 删除预装UWP应用
     pub remove_uwp_apps: bool,
+    /// 导入磁盘控制器驱动
+    pub import_storage_controller_drivers: bool,
     /// 自定义用户名
     pub custom_username: String,
+    /// 自定义系统盘卷标
+    pub volume_label: String,
+}
+
+impl InstallConfig {
+    /// 判断是否需要导入驱动
+    /// 优先使用新的driver_action_mode，兼容旧的restore_drivers
+    pub fn should_import_drivers(&self) -> bool {
+        // 优先使用新的driver_action_mode
+        if self.driver_action_mode != DriverActionMode::None {
+            self.driver_action_mode.should_import()
+        } else {
+            // 兼容旧版本
+            self.restore_drivers
+        }
+    }
+    
+    /// 判断是否有驱动目录需要处理
+    pub fn has_driver_data(&self) -> bool {
+        self.driver_action_mode.has_drivers() || self.restore_drivers
+    }
+}
+
+/// 备份格式
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum BackupFormat {
+    #[default]
+    Wim = 0,
+    Esd = 1,
+    Swm = 2,
+    Gho = 3,
+}
+
+impl BackupFormat {
+    /// 从数值转换
+    pub fn from_u8(value: u8) -> Self {
+        match value {
+            0 => Self::Wim,
+            1 => Self::Esd,
+            2 => Self::Swm,
+            3 => Self::Gho,
+            _ => Self::Wim,
+        }
+    }
+    
+    /// 获取文件扩展名
+    pub fn extension(&self) -> &'static str {
+        match self {
+            Self::Wim => "wim",
+            Self::Esd => "esd",
+            Self::Swm => "swm",
+            Self::Gho => "gho",
+        }
+    }
+    
+    /// 获取格式描述
+    pub fn description(&self) -> &'static str {
+        match self {
+            Self::Wim => "WIM格式",
+            Self::Esd => "ESD格式（高压缩）",
+            Self::Swm => "SWM格式（分卷）",
+            Self::Gho => "GHO格式（Ghost）",
+        }
+    }
 }
 
 /// 系统备份配置（用于PE环境内备份）
@@ -57,6 +163,10 @@ pub struct BackupConfig {
     pub source_partition: String,
     /// 是否增量备份
     pub incremental: bool,
+    /// 备份格式
+    pub format: BackupFormat,
+    /// SWM分卷大小（MB）
+    pub swm_split_size: u32,
 }
 
 /// 配置文件管理器
@@ -251,6 +361,10 @@ impl ConfigFileManager {
                 match key {
                     "Unattended" => config.unattended = value.parse().unwrap_or(false),
                     "RestoreDrivers" => config.restore_drivers = value.parse().unwrap_or(false),
+                    "DriverActionMode" => {
+                        let mode_value: u8 = value.parse().unwrap_or(0);
+                        config.driver_action_mode = DriverActionMode::from_u8(mode_value);
+                    }
                     "AutoReboot" => config.auto_reboot = value.parse().unwrap_or(false),
                     "OriginalGUID" => config.original_guid = value.to_string(),
                     "VolumeIndex" => config.volume_index = value.parse().unwrap_or(1),
@@ -278,7 +392,11 @@ impl ConfigFileManager {
                         config.disable_device_encryption = value.parse().unwrap_or(false)
                     }
                     "RemoveUWPApps" => config.remove_uwp_apps = value.parse().unwrap_or(false),
+                    "ImportStorageControllerDrivers" => {
+                        config.import_storage_controller_drivers = value.parse().unwrap_or(false)
+                    }
                     "CustomUsername" => config.custom_username = value.to_string(),
+                    "VolumeLabel" => config.volume_label = value.to_string(),
                     _ => {}
                 }
             }
@@ -290,6 +408,7 @@ impl ConfigFileManager {
     /// 反序列化备份配置
     fn deserialize_backup_config(content: &str) -> Result<BackupConfig> {
         let mut config = BackupConfig::default();
+        config.swm_split_size = 4096; // 默认4GB
 
         for line in content.lines() {
             let line = line.trim();
@@ -307,6 +426,11 @@ impl ConfigFileManager {
                     "Description" => config.description = value.to_string(),
                     "SourcePartition" => config.source_partition = value.to_string(),
                     "Incremental" => config.incremental = value.parse().unwrap_or(false),
+                    "Format" => {
+                        let format_value: u8 = value.parse().unwrap_or(0);
+                        config.format = BackupFormat::from_u8(format_value);
+                    }
+                    "SwmSplitSize" => config.swm_split_size = value.parse().unwrap_or(4096),
                     _ => {}
                 }
             }

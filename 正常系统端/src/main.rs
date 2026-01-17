@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![allow(dead_code)]
 
 mod app;
 mod core;
@@ -71,6 +72,20 @@ fn main() -> eframe::Result<()> {
     }
 
     log::info!("依赖文件检查通过");
+
+    // 检查系统核心组件（极限精简系统检测）
+    if let Err(missing_components) = check_system_components() {
+        log::error!("系统组件缺失: {:?}", missing_components);
+        let message = format!(
+            "很抱歉，该软件目前暂时不支持您所使用的极限精简系统使用。\n\n\
+            缺少以下系统组件：\n{}",
+            missing_components.join("\n")
+        );
+        show_error_message(&message);
+        return Ok(());
+    }
+
+    log::info!("系统组件检查通过");
 
     // 防止重复运行
     let _mutex = match single_instance::SingleInstance::new("LetRecovery-mutex-2025") {
@@ -193,7 +208,6 @@ fn check_dependencies() -> Result<(), Vec<String>> {
         "bin/bootsect.exe",
         "bin/format.com",
         "bin/aria2c.exe",
-        "bin/dism/dism.exe",
         "bin/ghost/ghost64.exe",
         // tools 目录 - 工具箱
         "tools/BOOTICE.exe",
@@ -215,6 +229,40 @@ fn check_dependencies() -> Result<(), Vec<String>> {
         Ok(())
     } else {
         Err(missing_files)
+    }
+}
+
+/// 检查系统核心组件完整性（用于检测极限精简系统）
+/// 返回 Ok(()) 表示所有组件存在，Err(Vec<String>) 包含缺失的组件列表
+fn check_system_components() -> Result<(), Vec<String>> {
+    // 获取系统盘路径 (通过 SYSTEMROOT 环境变量，通常为 C:\Windows)
+    let system_root = std::env::var("SYSTEMROOT")
+        .or_else(|_| std::env::var("WINDIR"))
+        .unwrap_or_else(|_| "C:\\Windows".to_string());
+    
+    let system32_path = std::path::Path::new(&system_root).join("System32");
+    
+    // 必需的系统组件列表
+    let required_components = [
+        ("diskpart.exe", "磁盘分区工具"),
+        ("wimgapi.dll", "WIM 镜像处理库"),
+        ("advapi32.dll", "高级 Windows API 库"),
+    ];
+    
+    let mut missing_components = Vec::new();
+    
+    for (file, description) in &required_components {
+        let file_path = system32_path.join(file);
+        if !file_path.exists() {
+            log::warn!("系统组件缺失: {} ({})", file, description);
+            missing_components.push(format!("{} - {}", file, description));
+        }
+    }
+    
+    if missing_components.is_empty() {
+        Ok(())
+    } else {
+        Err(missing_components)
     }
 }
 
@@ -419,6 +467,7 @@ fn execute_pe_install(
     advanced_options.disable_uac = config.disable_uac;
     advanced_options.disable_device_encryption = config.disable_device_encryption;
     advanced_options.remove_uwp_apps = config.remove_uwp_apps;
+    advanced_options.import_storage_controller_drivers = config.import_storage_controller_drivers;
     advanced_options.custom_username = !config.custom_username.is_empty();
     advanced_options.username = config.custom_username.clone();
     

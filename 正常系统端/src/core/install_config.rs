@@ -6,8 +6,10 @@ use std::path::Path;
 pub struct InstallConfig {
     /// 无人值守安装
     pub unattended: bool,
-    /// 驱动还原
+    /// 驱动还原（兼容旧版本）
     pub restore_drivers: bool,
+    /// 驱动操作模式: 0=无, 1=仅保存, 2=自动导入
+    pub driver_action_mode: u8,
     /// 立即重启
     pub auto_reboot: bool,
     /// 原系统引导GUID（用于删除旧引导项）
@@ -40,8 +42,45 @@ pub struct InstallConfig {
     pub disable_device_encryption: bool,
     /// 删除预装UWP应用
     pub remove_uwp_apps: bool,
+    /// 导入磁盘控制器驱动
+    pub import_storage_controller_drivers: bool,
     /// 自定义用户名
     pub custom_username: String,
+    /// 自定义系统盘卷标
+    pub volume_label: String,
+}
+
+impl InstallConfig {
+    /// 根据DriverAction获取driver_action_mode值
+    pub fn driver_action_to_mode(action: crate::app::DriverAction) -> u8 {
+        match action {
+            crate::app::DriverAction::None => 0,
+            crate::app::DriverAction::SaveOnly => 1,
+            crate::app::DriverAction::AutoImport => 2,
+        }
+    }
+    
+    /// 从driver_action_mode获取DriverAction
+    pub fn mode_to_driver_action(mode: u8) -> crate::app::DriverAction {
+        match mode {
+            0 => crate::app::DriverAction::None,
+            1 => crate::app::DriverAction::SaveOnly,
+            2 => crate::app::DriverAction::AutoImport,
+            // 兼容旧版本：如果restore_drivers为true则默认AutoImport
+            _ => crate::app::DriverAction::AutoImport,
+        }
+    }
+    
+    /// 判断是否需要导入驱动
+    pub fn should_import_drivers(&self) -> bool {
+        // 优先使用新的driver_action_mode
+        if self.driver_action_mode > 0 {
+            self.driver_action_mode == 2 // AutoImport
+        } else {
+            // 兼容旧版本
+            self.restore_drivers
+        }
+    }
 }
 
 /// 系统备份配置（用于PE环境内备份）
@@ -57,6 +96,10 @@ pub struct BackupConfig {
     pub source_partition: String,
     /// 是否增量备份
     pub incremental: bool,
+    /// 备份格式: 0=WIM, 1=ESD, 2=SWM, 3=GHO
+    pub format: u8,
+    /// SWM分卷大小（MB）
+    pub swm_split_size: u32,
 }
 
 /// 配置文件管理器
@@ -253,6 +296,7 @@ impl ConfigFileManager {
             r#"[Install]
 Unattended={}
 RestoreDrivers={}
+DriverActionMode={}
 AutoReboot={}
 OriginalGUID={}
 VolumeIndex={}
@@ -270,10 +314,13 @@ DisableReservedStorage={}
 DisableUAC={}
 DisableDeviceEncryption={}
 RemoveUWPApps={}
+ImportStorageControllerDrivers={}
 CustomUsername={}
+VolumeLabel={}
 "#,
             config.unattended,
             config.restore_drivers,
+            config.driver_action_mode,
             config.auto_reboot,
             config.original_guid,
             config.volume_index,
@@ -289,7 +336,9 @@ CustomUsername={}
             config.disable_uac,
             config.disable_device_encryption,
             config.remove_uwp_apps,
+            config.import_storage_controller_drivers,
             config.custom_username,
+            config.volume_label,
         )
     }
 
@@ -302,12 +351,16 @@ Name={}
 Description={}
 SourcePartition={}
 Incremental={}
+Format={}
+SwmSplitSize={}
 "#,
             config.save_path,
             config.name,
             config.description,
             config.source_partition,
             config.incremental,
+            config.format,
+            config.swm_split_size,
         )
     }
 
@@ -328,6 +381,7 @@ Incremental={}
                 match key {
                     "Unattended" => config.unattended = value.parse().unwrap_or(false),
                     "RestoreDrivers" => config.restore_drivers = value.parse().unwrap_or(false),
+                    "DriverActionMode" => config.driver_action_mode = value.parse().unwrap_or(0),
                     "AutoReboot" => config.auto_reboot = value.parse().unwrap_or(false),
                     "OriginalGUID" => config.original_guid = value.to_string(),
                     "VolumeIndex" => config.volume_index = value.parse().unwrap_or(1),
@@ -343,7 +397,9 @@ Incremental={}
                     "DisableUAC" => config.disable_uac = value.parse().unwrap_or(false),
                     "DisableDeviceEncryption" => config.disable_device_encryption = value.parse().unwrap_or(false),
                     "RemoveUWPApps" => config.remove_uwp_apps = value.parse().unwrap_or(false),
+                    "ImportStorageControllerDrivers" => config.import_storage_controller_drivers = value.parse().unwrap_or(false),
                     "CustomUsername" => config.custom_username = value.to_string(),
+                    "VolumeLabel" => config.volume_label = value.to_string(),
                     _ => {}
                 }
             }
@@ -372,6 +428,8 @@ Incremental={}
                     "Description" => config.description = value.to_string(),
                     "SourcePartition" => config.source_partition = value.to_string(),
                     "Incremental" => config.incremental = value.parse().unwrap_or(false),
+                    "Format" => config.format = value.parse().unwrap_or(0),
+                    "SwmSplitSize" => config.swm_split_size = value.parse().unwrap_or(4096),
                     _ => {}
                 }
             }

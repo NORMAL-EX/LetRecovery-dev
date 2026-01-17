@@ -1,7 +1,7 @@
 use egui;
 
 use crate::app::App;
-use crate::core::hardware_info::{format_bytes, HardwareInfo, BitLockerStatus};
+use crate::core::hardware_info::BitLockerStatus;
 
 impl App {
     pub fn show_hardware_info(&mut self, ui: &mut egui::Ui) {
@@ -23,7 +23,7 @@ impl App {
         if ui.button("📋 复制全部信息").clicked() {
             if let Some(hw_info) = &self.hardware_info {
                 let formatted_text = hw_info.to_formatted_text(self.system_info.as_ref());
-                ui.output_mut(|o| o.copied_text = formatted_text);
+                ui.ctx().copy_text(formatted_text);
             }
         }
         

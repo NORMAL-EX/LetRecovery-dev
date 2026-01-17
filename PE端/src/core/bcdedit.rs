@@ -419,11 +419,6 @@ assign letter=S
         log::info!("========== 引导修复完成 ==========");
         Ok(())
     }
-
-    /// 查找 EFI 分区
-    pub fn find_efi_partition(&self) -> Result<String> {
-        self.find_and_mount_esp()
-    }
 }
 
 impl Default for BootManager {

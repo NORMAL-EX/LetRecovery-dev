@@ -1315,6 +1315,7 @@ dependencies = [
  "encoding_rs",
  "env_logger",
  "image",
+ "libloading",
  "log",
  "serde",
  "thiserror 1.0.69",

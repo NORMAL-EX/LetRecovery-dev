@@ -49,8 +49,8 @@ impl Aria2Manager {
                 "--rpc-listen-port=6800",
                 "--rpc-allow-origin-all=true",
                 "--max-concurrent-downloads=5",
-                "--split=16",
-                "--max-connection-per-server=16",
+                "--split=32",
+                "--max-connection-per-server=32",
                 "--min-split-size=1M",
                 "--file-allocation=none",
                 "--continue=true",
@@ -85,8 +85,8 @@ impl Aria2Manager {
 
         let mut options = aria2_ws::TaskOptions::default();
         options.dir = Some(save_dir.to_string());
-        options.split = Some(16);
-        options.max_connection_per_server = Some(16);
+        options.split = Some(32);
+        options.max_connection_per_server = Some(32);
 
         if let Some(name) = filename {
             options.out = Some(name.to_string());

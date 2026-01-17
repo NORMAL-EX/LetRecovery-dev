@@ -17,6 +17,109 @@ pub struct OnlinePE {
     pub filename: String,
 }
 
+/// 本地缓存的PE配置（不含下载链接）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CachedPE {
+    pub display_name: String,
+    pub filename: String,
+}
+
+impl From<&OnlinePE> for CachedPE {
+    fn from(pe: &OnlinePE) -> Self {
+        Self {
+            display_name: pe.display_name.clone(),
+            filename: pe.filename.clone(),
+        }
+    }
+}
+
+impl CachedPE {
+    /// 转换为OnlinePE（下载链接设为空）
+    pub fn to_online_pe(&self) -> OnlinePE {
+        OnlinePE {
+            download_url: String::new(),
+            display_name: self.display_name.clone(),
+            filename: self.filename.clone(),
+        }
+    }
+}
+
+/// PE配置缓存文件结构
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PeCache {
+    pub pe_list: Vec<CachedPE>,
+    pub version: u32,
+}
+
+impl PeCache {
+    const CACHE_VERSION: u32 = 1;
+    
+    /// 获取缓存文件路径
+    fn get_cache_path() -> std::path::PathBuf {
+        crate::utils::path::get_exe_dir().join("pe_cache.json")
+    }
+    
+    /// 保存PE配置到本地缓存（不包含下载链接）
+    pub fn save(pe_list: &[OnlinePE]) -> Result<()> {
+        let cache = PeCache {
+            pe_list: pe_list.iter().map(CachedPE::from).collect(),
+            version: Self::CACHE_VERSION,
+        };
+        
+        let cache_path = Self::get_cache_path();
+        let json_content = serde_json::to_string_pretty(&cache)?;
+        std::fs::write(&cache_path, json_content)?;
+        
+        log::info!("PE配置已缓存到: {:?}, 共 {} 项", cache_path, pe_list.len());
+        Ok(())
+    }
+    
+    /// 从本地缓存加载PE配置
+    pub fn load() -> Option<Vec<OnlinePE>> {
+        let cache_path = Self::get_cache_path();
+        
+        if !cache_path.exists() {
+            log::info!("PE缓存文件不存在: {:?}", cache_path);
+            return None;
+        }
+        
+        match std::fs::read_to_string(&cache_path) {
+            Ok(content) => {
+                match serde_json::from_str::<PeCache>(&content) {
+                    Ok(cache) => {
+                        if cache.version != Self::CACHE_VERSION {
+                            log::warn!("PE缓存版本不匹配，忽略缓存");
+                            return None;
+                        }
+                        
+                        let pe_list: Vec<OnlinePE> = cache.pe_list
+                            .iter()
+                            .map(|c| c.to_online_pe())
+                            .collect();
+                        
+                        log::info!("从缓存加载PE配置，共 {} 项", pe_list.len());
+                        Some(pe_list)
+                    }
+                    Err(e) => {
+                        log::warn!("解析PE缓存失败: {}", e);
+                        None
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!("读取PE缓存文件失败: {}", e);
+                None
+            }
+        }
+    }
+    
+    /// 检查是否有本地PE可用（已下载过）
+    pub fn has_downloaded_pe(filename: &str) -> bool {
+        let (exists, _) = crate::core::pe::PeManager::check_pe_exists(filename);
+        exists
+    }
+}
+
 /// 在线软件信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OnlineSoftware {

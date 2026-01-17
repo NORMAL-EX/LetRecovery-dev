@@ -69,6 +69,92 @@ pub enum BackupMode {
     ViaPE,        // 通过PE备份
 }
 
+/// 备份格式
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum BackupFormat {
+    #[default]
+    Wim,          // WIM格式（默认）
+    Esd,          // ESD格式（高压缩）
+    Swm,          // SWM格式（分卷）
+    Gho,          // GHO格式（Ghost）
+}
+
+impl std::fmt::Display for BackupFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BackupFormat::Wim => write!(f, "WIM"),
+            BackupFormat::Esd => write!(f, "ESD"),
+            BackupFormat::Swm => write!(f, "SWM"),
+            BackupFormat::Gho => write!(f, "GHO"),
+        }
+    }
+}
+
+impl BackupFormat {
+    /// 获取文件扩展名
+    pub fn extension(&self) -> &'static str {
+        match self {
+            BackupFormat::Wim => "wim",
+            BackupFormat::Esd => "esd",
+            BackupFormat::Swm => "swm",
+            BackupFormat::Gho => "gho",
+        }
+    }
+    
+    /// 获取文件过滤器描述
+    pub fn filter_description(&self) -> &'static str {
+        match self {
+            BackupFormat::Wim => "WIM镜像",
+            BackupFormat::Esd => "ESD镜像",
+            BackupFormat::Swm => "SWM分卷镜像",
+            BackupFormat::Gho => "GHO镜像",
+        }
+    }
+    
+    /// 转换为配置文件中的数值
+    pub fn to_config_value(&self) -> u8 {
+        match self {
+            BackupFormat::Wim => 0,
+            BackupFormat::Esd => 1,
+            BackupFormat::Swm => 2,
+            BackupFormat::Gho => 3,
+        }
+    }
+    
+    /// 从配置文件数值转换
+    pub fn from_config_value(value: u8) -> Self {
+        match value {
+            0 => BackupFormat::Wim,
+            1 => BackupFormat::Esd,
+            2 => BackupFormat::Swm,
+            3 => BackupFormat::Gho,
+            _ => BackupFormat::Wim,
+        }
+    }
+}
+
+/// 驱动操作选项
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum DriverAction {
+    /// 无操作
+    None,
+    /// 仅保存驱动
+    SaveOnly,
+    /// 自动导入（保存并导入）
+    #[default]
+    AutoImport,
+}
+
+impl std::fmt::Display for DriverAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DriverAction::None => write!(f, "无"),
+            DriverAction::SaveOnly => write!(f, "仅保存"),
+            DriverAction::AutoImport => write!(f, "自动导入"),
+        }
+    }
+}
+
 /// 安装选项
 #[derive(Clone, Default)]
 pub struct InstallOptions {
@@ -79,6 +165,7 @@ pub struct InstallOptions {
     pub auto_reboot: bool,
     pub boot_mode: BootModeSelection,
     pub advanced_options: AdvancedOptions,
+    pub driver_action: DriverAction,
 }
 
 /// 主应用结构
@@ -121,10 +208,12 @@ pub struct App {
     pub export_drivers: bool,
     pub auto_reboot: bool,
     pub selected_boot_mode: BootModeSelection,
+    pub driver_action: DriverAction,
 
     // 高级选项
     pub advanced_options: AdvancedOptions,
     pub show_advanced_options: bool,
+    pub storage_driver_default_target: Option<String>,
 
     // 安装相关
     pub install_options: InstallOptions,
@@ -156,6 +245,8 @@ pub struct App {
     pub is_backing_up: bool,
     pub backup_progress: u8,
     pub backup_mode: BackupMode,
+    pub backup_format: BackupFormat,
+    pub backup_swm_split_size: u32,  // SWM分卷大小（MB）
 
     // 工具箱
     pub tool_message: String,
@@ -177,6 +268,9 @@ pub struct App {
     // 安装进度通道
     pub install_progress_rx: Option<Receiver<DismProgress>>,
     pub install_error: Option<String>,
+    
+    // 自动重启标志（防止重复触发）
+    pub auto_reboot_triggered: bool,
 
     // ISO 挂载状态
     pub iso_mounting: bool,
@@ -223,6 +317,121 @@ pub struct App {
     // 网络信息对话框
     pub show_network_info_dialog: bool,
     pub network_info_cache: Option<Vec<crate::core::hardware_info::NetworkAdapterInfo>>,
+    
+    // 导入存储驱动对话框
+    pub show_import_storage_driver_dialog: bool,
+    pub import_storage_driver_target: Option<String>,
+    pub import_storage_driver_message: String,
+    pub import_storage_driver_loading: bool,
+    
+    // 移除APPX对话框
+    pub show_remove_appx_dialog: bool,
+    pub remove_appx_target: Option<String>,
+    pub remove_appx_list: Vec<crate::ui::tools::AppxPackageInfo>,
+    pub remove_appx_selected: HashSet<String>,
+    pub remove_appx_loading: bool,
+    pub remove_appx_message: String,
+    
+    // 驱动备份还原对话框
+    pub show_driver_backup_dialog: bool,
+    pub driver_backup_mode: crate::ui::tools::DriverBackupMode,
+    pub driver_backup_target: Option<String>,
+    pub driver_backup_path: String,
+    pub driver_backup_loading: bool,
+    pub driver_backup_message: String,
+    
+    // 软件列表对话框
+    pub show_software_list_dialog: bool,
+    pub software_list: Vec<crate::ui::tools::InstalledSoftware>,
+    pub software_list_loading: bool,
+    
+    // 重置网络确认对话框
+    pub show_reset_network_confirm_dialog: bool,
+    
+    // Windows分区信息缓存（避免重复检测）
+    pub windows_partitions_cache: Option<Vec<crate::ui::tools::WindowsPartitionInfo>>,
+    pub windows_partitions_loading: bool,
+    pub windows_partitions_rx: Option<Receiver<Vec<crate::ui::tools::WindowsPartitionInfo>>>,
+    
+    // 驱动操作异步通道
+    pub driver_operation_rx: Option<Receiver<Result<String, String>>>,
+    
+    // 存储驱动导入异步通道
+    pub storage_driver_rx: Option<Receiver<Result<String, String>>>,
+    
+    // APPX移除异步通道
+    pub appx_remove_rx: Option<Receiver<(usize, usize)>>,
+    
+    // APPX列表加载异步通道
+    pub appx_list_rx: Option<Receiver<Vec<crate::ui::tools::AppxPackageInfo>>>,
+    
+    // 时间同步对话框
+    pub show_time_sync_dialog: bool,
+    pub time_sync_loading: bool,
+    pub time_sync_message: String,
+    pub time_sync_rx: Option<Receiver<crate::ui::tools::time_sync::TimeSyncResult>>,
+    
+    // 批量格式化对话框
+    pub show_batch_format_dialog: bool,
+    pub batch_format_loading: bool,
+    pub batch_format_partitions_loading: bool,
+    pub batch_format_message: String,
+    pub batch_format_partitions: Vec<crate::ui::tools::FormatablePartition>,
+    pub batch_format_selected: std::collections::HashSet<String>,
+    pub batch_format_rx: Option<Receiver<crate::ui::tools::batch_format::BatchFormatResult>>,
+    pub batch_format_partitions_rx: Option<Receiver<Vec<crate::ui::tools::FormatablePartition>>>,
+    
+    // BitLocker解锁对话框
+    pub show_bitlocker_dialog: bool,
+    pub bitlocker_loading: bool,
+    pub bitlocker_detecting: bool,
+    pub bitlocker_message: String,
+    pub bitlocker_partitions: Vec<crate::ui::tools::BitLockerPartition>,
+    pub bitlocker_selected: Option<String>,
+    pub bitlocker_password: String,
+    pub bitlocker_recovery_key: String,
+    pub bitlocker_unlock_mode: BitLockerUnlockMode,
+    pub bitlocker_rx: Option<Receiver<crate::ui::tools::bitlocker::UnlockResult>>,
+    pub bitlocker_partitions_rx: Option<Receiver<Vec<crate::ui::tools::BitLockerPartition>>>,
+    
+    // GHO密码查看对话框
+    pub show_gho_password_dialog: bool,
+    pub gho_password_file_path: String,
+    pub gho_password_result: Option<crate::ui::tools::types::GhoPasswordResult>,
+    pub gho_password_loading: bool,
+    pub gho_password_rx: Option<Receiver<crate::ui::tools::types::GhoPasswordResult>>,
+    
+    // 英伟达驱动卸载对话框
+    pub show_nvidia_uninstall_dialog: bool,
+    pub nvidia_uninstall_target: Option<String>,
+    pub nvidia_uninstall_hardware_summary: Option<crate::core::nvidia_driver::SystemHardwareSummary>,
+    pub nvidia_uninstall_loading: bool,
+    pub nvidia_uninstall_hardware_loading: bool,
+    pub nvidia_uninstall_message: String,
+    pub nvidia_uninstall_rx: Option<Receiver<crate::ui::tools::types::NvidiaUninstallResult>>,
+    pub nvidia_uninstall_hardware_rx: Option<Receiver<crate::core::nvidia_driver::SystemHardwareSummary>>,
+    
+    // 分区对拷对话框
+    pub show_partition_copy_dialog: bool,
+    pub partition_copy_loading: bool,
+    pub partition_copy_copying: bool,
+    pub partition_copy_partitions_loading: bool,
+    pub partition_copy_message: String,
+    pub partition_copy_log: String,
+    pub partition_copy_partitions: Vec<crate::ui::tools::CopyablePartition>,
+    pub partition_copy_source: Option<String>,
+    pub partition_copy_target: Option<String>,
+    pub partition_copy_progress: Option<crate::ui::tools::CopyProgress>,
+    pub partition_copy_is_resume: bool,
+    pub partition_copy_partitions_rx: Option<Receiver<Vec<crate::ui::tools::CopyablePartition>>>,
+    pub partition_copy_progress_rx: Option<Receiver<crate::ui::tools::CopyProgress>>,
+    
+    // 一键分区对话框
+    pub show_quick_partition_dialog: bool,
+    pub quick_partition_state: crate::ui::tools::QuickPartitionDialogState,
+    pub quick_partition_disks_rx: Option<Receiver<Vec<crate::core::quick_partition::PhysicalDisk>>>,
+    pub quick_partition_result_rx: Option<Receiver<crate::core::quick_partition::QuickPartitionResult>>,
+    pub resize_existing_result_rx: Option<Receiver<crate::core::quick_partition::ResizePartitionResult>>,
 }
 
 /// 在线下载页面选项卡
@@ -256,6 +465,14 @@ pub enum PeDownloadThenAction {
     Backup,   // 继续备份
 }
 
+/// BitLocker解锁模式
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum BitLockerUnlockMode {
+    #[default]
+    Password,
+    RecoveryKey,
+}
+
 impl Default for App {
     fn default() -> Self {
         let runtime = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
@@ -282,8 +499,10 @@ impl Default for App {
             export_drivers: true,
             auto_reboot: false,
             selected_boot_mode: BootModeSelection::Auto,
+            driver_action: DriverAction::AutoImport,
             advanced_options: AdvancedOptions::default(),
             show_advanced_options: false,
+            storage_driver_default_target: None,
             install_options: InstallOptions::default(),
             install_target_partition: String::new(),
             install_image_path: String::new(),
@@ -307,6 +526,8 @@ impl Default for App {
             is_backing_up: false,
             backup_progress: 0,
             backup_mode: BackupMode::Direct,
+            backup_format: BackupFormat::Wim,
+            backup_swm_split_size: 4096,  // 默认4GB分卷
             tool_message: String::new(),
             tool_target_partition: None,
             runtime,
@@ -318,6 +539,7 @@ impl Default for App {
             backup_error: None,
             install_progress_rx: None,
             install_error: None,
+            auto_reboot_triggered: false,
             iso_mounting: false,
             iso_mount_error: None,
             image_info_loading: false,
@@ -340,6 +562,101 @@ impl Default for App {
             error_dialog_message: String::new(),
             show_network_info_dialog: false,
             network_info_cache: None,
+            // 导入存储驱动对话框
+            show_import_storage_driver_dialog: false,
+            import_storage_driver_target: None,
+            import_storage_driver_message: String::new(),
+            import_storage_driver_loading: false,
+            // 移除APPX对话框
+            show_remove_appx_dialog: false,
+            remove_appx_target: None,
+            remove_appx_list: Vec::new(),
+            remove_appx_selected: HashSet::new(),
+            remove_appx_loading: false,
+            remove_appx_message: String::new(),
+            // 驱动备份还原对话框
+            show_driver_backup_dialog: false,
+            driver_backup_mode: crate::ui::tools::DriverBackupMode::default(),
+            driver_backup_target: None,
+            driver_backup_path: String::new(),
+            driver_backup_loading: false,
+            driver_backup_message: String::new(),
+            // 软件列表对话框
+            show_software_list_dialog: false,
+            software_list: Vec::new(),
+            software_list_loading: false,
+            // 重置网络确认对话框
+            show_reset_network_confirm_dialog: false,
+            // Windows分区信息缓存
+            windows_partitions_cache: None,
+            windows_partitions_loading: false,
+            windows_partitions_rx: None,
+            // 异步操作通道
+            driver_operation_rx: None,
+            storage_driver_rx: None,
+            appx_remove_rx: None,
+            appx_list_rx: None,
+            // 时间同步对话框
+            show_time_sync_dialog: false,
+            time_sync_loading: false,
+            time_sync_message: String::new(),
+            time_sync_rx: None,
+            // 批量格式化对话框
+            show_batch_format_dialog: false,
+            batch_format_loading: false,
+            batch_format_partitions_loading: false,
+            batch_format_message: String::new(),
+            batch_format_partitions: Vec::new(),
+            batch_format_selected: HashSet::new(),
+            batch_format_rx: None,
+            batch_format_partitions_rx: None,
+            // BitLocker解锁对话框
+            show_bitlocker_dialog: false,
+            bitlocker_loading: false,
+            bitlocker_detecting: false,
+            bitlocker_message: String::new(),
+            bitlocker_partitions: Vec::new(),
+            bitlocker_selected: None,
+            bitlocker_password: String::new(),
+            bitlocker_recovery_key: String::new(),
+            bitlocker_unlock_mode: BitLockerUnlockMode::default(),
+            bitlocker_rx: None,
+            bitlocker_partitions_rx: None,
+            // GHO密码查看对话框
+            show_gho_password_dialog: false,
+            gho_password_file_path: String::new(),
+            gho_password_result: None,
+            gho_password_loading: false,
+            gho_password_rx: None,
+            // 英伟达驱动卸载对话框
+            show_nvidia_uninstall_dialog: false,
+            nvidia_uninstall_target: None,
+            nvidia_uninstall_hardware_summary: None,
+            nvidia_uninstall_loading: false,
+            nvidia_uninstall_hardware_loading: false,
+            nvidia_uninstall_message: String::new(),
+            nvidia_uninstall_rx: None,
+            nvidia_uninstall_hardware_rx: None,
+            // 分区对拷对话框
+            show_partition_copy_dialog: false,
+            partition_copy_loading: false,
+            partition_copy_copying: false,
+            partition_copy_partitions_loading: false,
+            partition_copy_message: String::new(),
+            partition_copy_log: String::new(),
+            partition_copy_partitions: Vec::new(),
+            partition_copy_source: None,
+            partition_copy_target: None,
+            partition_copy_progress: None,
+            partition_copy_is_resume: false,
+            partition_copy_partitions_rx: None,
+            partition_copy_progress_rx: None,
+            // 一键分区对话框
+            show_quick_partition_dialog: false,
+            quick_partition_state: crate::ui::tools::QuickPartitionDialogState::default(),
+            quick_partition_disks_rx: None,
+            quick_partition_result_rx: None,
+            resize_existing_result_rx: None,
         }
     }
 }
@@ -414,6 +731,11 @@ impl App {
         .into();
         dark_style.spacing.item_spacing = egui::vec2(10.0, 8.0);
         dark_style.spacing.button_padding = egui::vec2(10.0, 5.0);
+        // 滚动条设置 - 使滚动条更明显
+        dark_style.spacing.scroll.bar_width = 5.0;
+        dark_style.spacing.scroll.bar_inner_margin = 2.0;
+        dark_style.spacing.scroll.bar_outer_margin = 2.0;
+        dark_style.spacing.scroll.floating = false; // 不使用浮动滚动条，始终显示
         
         // 修改浅色样式
         let mut light_style = (*options.light_style).clone();
@@ -427,6 +749,11 @@ impl App {
         .into();
         light_style.spacing.item_spacing = egui::vec2(10.0, 8.0);
         light_style.spacing.button_padding = egui::vec2(10.0, 5.0);
+        // 滚动条设置 - 使滚动条更明显
+        light_style.spacing.scroll.bar_width = 10.0;
+        light_style.spacing.scroll.bar_inner_margin = 2.0;
+        light_style.spacing.scroll.bar_outer_margin = 2.0;
+        light_style.spacing.scroll.floating = false; // 不使用浮动滚动条，始终显示
         
         light_style.visuals.widgets.inactive.expansion = 0.0;
         light_style.visuals.widgets.hovered.expansion = 0.0;
@@ -491,6 +818,9 @@ impl App {
         // 设置默认备份名称
         self.backup_name = format!("系统备份_{}", chrono::Local::now().format("%Y%m%d_%H%M%S"));
         self.backup_description = "使用 LetRecovery 创建的系统备份".to_string();
+        
+        // 预加载Windows分区信息（后台异步）
+        self.start_load_windows_partitions();
     }
 
     /// 使用预加载的配置初始化数据
@@ -541,6 +871,15 @@ impl App {
                 ));
                 log::info!("使用预加载的远程配置");
                 
+                // 成功获取云端PE配置后，保存到本地缓存（不含下载链接）
+                if let Some(ref config) = self.config {
+                    if !config.pe_list.is_empty() {
+                        if let Err(e) = crate::download::config::PeCache::save(&config.pe_list) {
+                            log::warn!("保存PE缓存失败: {}", e);
+                        }
+                    }
+                }
+                
                 // 自动选择第一个PE
                 if let Some(ref config) = self.config {
                     if !config.pe_list.is_empty() {
@@ -554,6 +893,31 @@ impl App {
                 }
             } else {
                 log::warn!("预加载的远程配置加载失败: {:?}", remote_config.error);
+                
+                // 预加载配置失败，尝试从本地缓存加载PE配置
+                if let Some(cached_pe_list) = crate::download::config::PeCache::load() {
+                    // 只保留已经下载过的PE
+                    let available_pe_list: Vec<crate::download::config::OnlinePE> = cached_pe_list
+                        .into_iter()
+                        .filter(|pe| crate::download::config::PeCache::has_downloaded_pe(&pe.filename))
+                        .collect();
+                    
+                    if !available_pe_list.is_empty() {
+                        log::info!("从本地缓存加载了 {} 个可用PE配置", available_pe_list.len());
+                        
+                        let mut config = ConfigManager::default();
+                        config.pe_list = available_pe_list;
+                        self.config = Some(config);
+                        
+                        // 自动选择第一个PE
+                        if self.selected_pe_for_install.is_none() {
+                            self.selected_pe_for_install = Some(0);
+                        }
+                        if self.selected_pe_for_backup.is_none() {
+                            self.selected_pe_for_backup = Some(0);
+                        }
+                    }
+                }
             }
             
             self.remote_config = Some(remote_config.clone());
@@ -570,6 +934,9 @@ impl App {
         // 设置默认备份名称
         self.backup_name = format!("系统备份_{}", chrono::Local::now().format("%Y%m%d_%H%M%S"));
         self.backup_description = "使用 LetRecovery 创建的系统备份".to_string();
+        
+        // 预加载Windows分区信息（后台异步）
+        self.start_load_windows_partitions();
     }
     
     /// 开始异步加载远程配置
@@ -610,6 +977,15 @@ impl App {
                     ));
                     log::info!("远程配置加载成功");
                     
+                    // 成功获取云端PE配置后，保存到本地缓存（不含下载链接）
+                    if let Some(ref config) = self.config {
+                        if !config.pe_list.is_empty() {
+                            if let Err(e) = crate::download::config::PeCache::save(&config.pe_list) {
+                                log::warn!("保存PE缓存失败: {}", e);
+                            }
+                        }
+                    }
+                    
                     // 自动选择第一个PE
                     if let Some(ref config) = self.config {
                         if !config.pe_list.is_empty() {
@@ -623,7 +999,31 @@ impl App {
                     }
                 } else {
                     log::warn!("远程配置加载失败: {:?}", remote_config.error);
-                    // 远程配置加载失败，相关功能将被禁用
+                    
+                    // 远程配置加载失败，尝试从本地缓存加载PE配置
+                    if let Some(cached_pe_list) = crate::download::config::PeCache::load() {
+                        // 只保留已经下载过的PE
+                        let available_pe_list: Vec<crate::download::config::OnlinePE> = cached_pe_list
+                            .into_iter()
+                            .filter(|pe| crate::download::config::PeCache::has_downloaded_pe(&pe.filename))
+                            .collect();
+                        
+                        if !available_pe_list.is_empty() {
+                            log::info!("从本地缓存加载了 {} 个可用PE配置", available_pe_list.len());
+                            
+                            let mut config = ConfigManager::default();
+                            config.pe_list = available_pe_list;
+                            self.config = Some(config);
+                            
+                            // 自动选择第一个PE
+                            if self.selected_pe_for_install.is_none() {
+                                self.selected_pe_for_install = Some(0);
+                            }
+                            if self.selected_pe_for_backup.is_none() {
+                                self.selected_pe_for_backup = Some(0);
+                            }
+                        }
+                    }
                 }
                 
                 self.remote_config = Some(remote_config);
@@ -655,6 +1055,9 @@ impl eframe::App for App {
         
         // 处理图标加载结果
         self.process_icon_load_results(ctx);
+        
+        // 检查工具箱异步操作结果
+        self.check_tools_async_operations();
         
         // 错误对话框
         if self.show_error_dialog {
@@ -812,12 +1215,27 @@ impl eframe::App for App {
                 .min_width(500.0)
                 .min_height(400.0)
                 .show(ctx, |ui| {
-                    self.advanced_options.show_ui(ui);
+                    self.advanced_options
+                        .show_ui(ui, self.hardware_info.as_ref());
                 });
         }
 
         // 如果有正在进行的任务，定期刷新
-        if self.is_installing || self.is_backing_up || self.current_download.is_some() || self.iso_mounting || self.pe_downloading || self.remote_config_loading {
+        let tools_loading = self.windows_partitions_loading 
+            || self.driver_backup_loading 
+            || self.import_storage_driver_loading 
+            || self.remove_appx_loading
+            || self.gho_password_loading
+            || self.nvidia_uninstall_loading
+            || self.nvidia_uninstall_hardware_loading
+            || self.partition_copy_partitions_loading
+            || self.partition_copy_copying
+            || self.quick_partition_state.loading
+            || self.quick_partition_state.executing;
+        
+        if self.is_installing || self.is_backing_up || self.current_download.is_some() 
+            || self.iso_mounting || self.pe_downloading || self.remote_config_loading 
+            || tools_loading {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
     }

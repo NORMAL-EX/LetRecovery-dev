@@ -49,7 +49,7 @@ impl App {
             
             if ui.add_enabled(!self.iso_mounting, egui::Button::new("浏览...")).clicked() {
                 if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("系统镜像", &["wim", "esd", "iso", "gho"])
+                    .add_filter("系统镜像", &["wim", "esd", "swm", "iso", "gho"])
                     .pick_file()
                 {
                     self.local_image_path = path.to_string_lossy().to_string();
@@ -89,14 +89,40 @@ impl App {
                 .filter(|(_, vol)| Self::is_installable_image(vol))
                 .collect();
             
-            if installable_volumes.is_empty() {
+            // 如果过滤后没有可安装的版本，使用原始列表并选择最后一项
+            let (volumes_to_show, use_original): (Vec<(usize, &ImageInfo)>, bool) = if installable_volumes.is_empty() {
+                // 过滤后无结果，显示原始列表
+                let original_volumes: Vec<(usize, &ImageInfo)> = self.image_volumes
+                    .iter()
+                    .enumerate()
+                    .collect();
+                (original_volumes, true)
+            } else {
+                (installable_volumes, false)
+            };
+            
+            if volumes_to_show.is_empty() {
                 ui.colored_label(
                     egui::Color32::from_rgb(255, 165, 0),
-                    "⚠ 该镜像中没有可安装的系统版本（仅包含 PE 环境或安装媒体）",
+                    "⚠ 该镜像中没有可用的系统版本",
                 );
             } else {
-                // 提前获取第一个可安装卷的索引，避免闭包中移动后再借用的问题
-                let first_installable_index = installable_volumes.first().map(|(i, _)| *i);
+                // 获取要选择的默认索引
+                let default_index = if use_original {
+                    // 使用原始列表时，默认选择最后一项
+                    volumes_to_show.last().map(|(i, _)| *i)
+                } else {
+                    // 使用过滤列表时，默认选择第一项
+                    volumes_to_show.first().map(|(i, _)| *i)
+                };
+                
+                // 如果显示的是原始列表，显示提示
+                if use_original {
+                    ui.colored_label(
+                        egui::Color32::from_rgb(255, 165, 0),
+                        "⚠ 未检测到标准系统镜像，显示所有分卷",
+                    );
+                }
                 
                 ui.horizontal(|ui| {
                     ui.label("系统版本:");
@@ -104,31 +130,33 @@ impl App {
                         .selected_text(
                             self.selected_volume
                                 .and_then(|i| self.image_volumes.get(i))
-                                .filter(|v| Self::is_installable_image(v))
                                 .map(|v| v.name.as_str())
                                 .unwrap_or("请选择版本"),
                         )
                         .show_ui(ui, |ui| {
-                            for (i, vol) in installable_volumes {
+                            for (i, vol) in &volumes_to_show {
                                 ui.selectable_value(
                                     &mut self.selected_volume,
-                                    Some(i),
+                                    Some(*i),
                                     format!("{} - {}", vol.index, vol.name),
                                 );
                             }
                         });
                 });
                 
-                // 如果当前选中的是不可安装的镜像，自动切换到第一个可用的
-                if let Some(idx) = self.selected_volume {
-                    if let Some(vol) = self.image_volumes.get(idx) {
-                        if !Self::is_installable_image(vol) {
-                            self.selected_volume = first_installable_index;
-                        }
-                    }
+                // 如果当前没有选中有效项，或选中的不在显示列表中，自动选择默认项
+                let current_valid = self.selected_volume
+                    .map(|idx| volumes_to_show.iter().any(|(i, _)| *i == idx))
+                    .unwrap_or(false);
+                
+                if !current_valid {
+                    self.selected_volume = default_index;
                 }
             }
         }
+        
+        // 选择 Win10/11 镜像后，自动默认勾选磁盘控制器驱动
+        self.update_storage_controller_driver_default();
 
         ui.add_space(10.0);
         ui.separator();
@@ -209,7 +237,30 @@ impl App {
             ui.checkbox(&mut self.format_partition, "格式化分区");
             ui.checkbox(&mut self.repair_boot, "添加引导");
             ui.checkbox(&mut self.unattended_install, "无人值守");
-            ui.checkbox(&mut self.export_drivers, "保留驱动");
+            
+            // 驱动操作下拉框
+            ui.label("驱动:");
+            egui::ComboBox::from_id_salt("driver_action_select")
+                .selected_text(format!("{}", self.driver_action))
+                .width(80.0)
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(
+                        &mut self.driver_action,
+                        crate::app::DriverAction::None,
+                        "无",
+                    );
+                    ui.selectable_value(
+                        &mut self.driver_action,
+                        crate::app::DriverAction::SaveOnly,
+                        "仅保存",
+                    );
+                    ui.selectable_value(
+                        &mut self.driver_action,
+                        crate::app::DriverAction::AutoImport,
+                        "自动导入",
+                    );
+                });
+            
             ui.checkbox(&mut self.auto_reboot, "立即重启");
         });
 
@@ -401,7 +452,7 @@ impl App {
     fn start_image_info_loading(&mut self, image_path: &str) {
         let path_lower = image_path.to_lowercase();
         
-        if path_lower.ends_with(".wim") || path_lower.ends_with(".esd") {
+        if path_lower.ends_with(".wim") || path_lower.ends_with(".esd") || path_lower.ends_with(".swm") {
             println!("[IMAGE INFO] 开始后台加载镜像信息: {}", image_path);
             
             self.image_info_loading = true;
@@ -590,6 +641,43 @@ impl App {
         true
     }
 
+    fn update_storage_controller_driver_default(&mut self) {
+        let mut target_id: Option<String> = None;
+        let mut is_win10_or_11: bool = false;
+
+        if let Some(idx) = self.selected_volume {
+            if let Some(vol) = self.image_volumes.get(idx) {
+                target_id = Some(format!(
+                    "{}::{}::{}",
+                    self.local_image_path, vol.index, vol.name
+                ));
+                // 直接使用 wimgapi 解析出的版本号
+                // major_version >= 10 表示 Windows 10 或更高版本
+                is_win10_or_11 = vol.major_version.map(|v| v >= 10).unwrap_or(false);
+            }
+        }
+
+        // 只有当选择的镜像变化时才更新设置
+        if target_id != self.storage_driver_default_target {
+            self.storage_driver_default_target = target_id;
+            self.advanced_options.import_storage_controller_drivers = is_win10_or_11;
+            
+            // 只在变化时打印日志
+            if let Some(idx) = self.selected_volume {
+                if let Some(vol) = self.image_volumes.get(idx) {
+                    if let Some(v) = vol.major_version {
+                        println!(
+                            "[STORAGE DRIVER] 镜像版本: major_version={}, is_win10_or_11={}",
+                            v, is_win10_or_11
+                        );
+                    } else {
+                        println!("[STORAGE DRIVER] 未检测到版本信息，不自动勾选磁盘控制器驱动");
+                    }
+                }
+            }
+        }
+    }
+
     pub fn update_install_options_for_partition(&mut self) {
         if let Some(idx) = self.selected_partition {
             if let Some(partition) = self.partitions.get(idx) {
@@ -697,15 +785,20 @@ impl App {
             format_partition: self.format_partition,
             repair_boot: self.repair_boot,
             unattended_install: self.unattended_install,
-            export_drivers: self.export_drivers,
+            // 根据driver_action设置export_drivers（仅SaveOnly和AutoImport需要导出）
+            export_drivers: matches!(self.driver_action, crate::app::DriverAction::SaveOnly | crate::app::DriverAction::AutoImport),
             auto_reboot: self.auto_reboot,
             boot_mode: self.selected_boot_mode,
             advanced_options: self.advanced_options.clone(),
+            driver_action: self.driver_action,
         };
 
         self.is_installing = true;
         self.current_panel = crate::app::Panel::InstallProgress;
         self.install_progress = crate::app::InstallProgress::default();
+        
+        // 重置自动重启标志
+        self.auto_reboot_triggered = false;
 
         self.install_target_partition = partition.letter.clone();
         self.install_image_path = image_path;

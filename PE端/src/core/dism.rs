@@ -1,13 +1,18 @@
+//! 镜像操作模块
+//!
+//! 该模块封装了 Windows 系统镜像操作功能，完全基于 Windows API，不依赖 DISM 命令行：
+//! - 镜像释放/应用：使用 wimgapi.dll
+//! - 镜像备份/捕获：使用 wimgapi.dll
+//! - 驱动导出/导入：使用 setupapi.dll/newdev.dll
+
 use anyhow::Result;
-use std::io::Read;
-use std::process::Stdio;
+use std::path::Path;
 use std::sync::mpsc::Sender;
 
-use crate::utils::command::new_command;
-use crate::utils::encoding::gbk_to_utf8;
-use crate::utils::path::get_bin_dir;
+use crate::core::driver::DriverManager;
+use crate::core::wimgapi::{WimManager, WimProgress, WIM_COMPRESS_LZX, WIM_COMPRESS_LZMS};
 
-/// DISM 操作进度
+/// 操作进度
 #[derive(Debug, Clone)]
 pub struct DismProgress {
     pub percentage: u8,
@@ -16,34 +21,28 @@ pub struct DismProgress {
 
 /// 镜像分卷信息
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ImageInfo {
     pub index: u32,
     pub name: String,
     pub size_bytes: u64,
+    /// 安装类型，用于过滤 WindowsPE 等非系统镜像
+    pub installation_type: String,
 }
 
-pub struct Dism {
-    dism_path: String,
-}
+pub struct Dism;
 
 impl Dism {
     pub fn new() -> Self {
-        let bin_dir = get_bin_dir();
-        Self {
-            dism_path: bin_dir
-                .join("dism")
-                .join("dism.exe")
-                .to_string_lossy()
-                .to_string(),
-        }
+        Self
     }
 
-    /// 检查 DISM 是否可用
-    pub fn is_available(&self) -> bool {
-        std::path::Path::new(&self.dism_path).exists()
-    }
+    // ========================================================================
+    // 镜像操作 - 使用 wimgapi.dll
+    // ========================================================================
 
     /// 应用系统镜像 (WIM/ESD)
+    /// 使用 wimgapi.dll 实现
     pub fn apply_image(
         &self,
         image_file: &str,
@@ -51,24 +50,46 @@ impl Dism {
         index: u32,
         progress_tx: Option<Sender<DismProgress>>,
     ) -> Result<()> {
-        log::info!(
-            "开始释放镜像: {} -> {} (Index: {})",
-            image_file,
-            apply_dir,
-            index
-        );
+        log::info!("[Dism] 使用 wimgapi 应用镜像: {} -> {}", image_file, apply_dir);
 
-        let args = [
-            "/Apply-Image",
-            &format!("/ImageFile:{}", image_file),
-            &format!("/ApplyDir:{}", apply_dir),
-            &format!("/Index:{}", index),
-        ];
+        let wim_manager = WimManager::new()
+            .map_err(|e| anyhow::anyhow!("wimgapi 初始化失败: {}", e))?;
 
-        self.run_with_progress(&args, progress_tx)
+        // 创建进度转换通道
+        let (wim_tx, wim_rx) = std::sync::mpsc::channel::<WimProgress>();
+
+        // 启动进度转发线程
+        let progress_tx_clone = progress_tx.clone();
+        let forward_thread = std::thread::spawn(move || {
+            while let Ok(progress) = wim_rx.recv() {
+                if let Some(ref tx) = progress_tx_clone {
+                    let _ = tx.send(DismProgress {
+                        percentage: progress.percentage,
+                        status: progress.status,
+                    });
+                }
+            }
+        });
+
+        // 应用镜像
+        let result = wim_manager.apply_image(image_file, apply_dir, index, Some(wim_tx));
+
+        // 等待转发线程结束
+        let _ = forward_thread.join();
+
+        match result {
+            Ok(_) => {
+                log::info!("[Dism] 镜像应用成功");
+                Ok(())
+            }
+            Err(e) => {
+                anyhow::bail!("镜像应用失败: {}", e)
+            }
+        }
     }
 
     /// 捕获系统镜像 (备份)
+    /// 使用 wimgapi.dll 实现
     pub fn capture_image(
         &self,
         image_file: &str,
@@ -77,21 +98,49 @@ impl Dism {
         description: &str,
         progress_tx: Option<Sender<DismProgress>>,
     ) -> Result<()> {
-        log::info!("开始备份镜像: {} -> {}", capture_dir, image_file);
+        log::info!("[Dism] 使用 wimgapi 捕获镜像: {} -> {}", capture_dir, image_file);
 
-        let args = [
-            "/Capture-Image",
-            &format!("/ImageFile:{}", image_file),
-            &format!("/CaptureDir:{}", capture_dir),
-            &format!("/Name:{}", name),
-            &format!("/Description:{}", description),
-            "/Compress:max",
-        ];
+        let wim_manager = WimManager::new()
+            .map_err(|e| anyhow::anyhow!("wimgapi 初始化失败: {}", e))?;
 
-        self.run_with_progress(&args, progress_tx)
+        let (wim_tx, wim_rx) = std::sync::mpsc::channel::<WimProgress>();
+
+        let progress_tx_clone = progress_tx.clone();
+        let forward_thread = std::thread::spawn(move || {
+            while let Ok(progress) = wim_rx.recv() {
+                if let Some(ref tx) = progress_tx_clone {
+                    let _ = tx.send(DismProgress {
+                        percentage: progress.percentage,
+                        status: progress.status,
+                    });
+                }
+            }
+        });
+
+        let result = wim_manager.capture_image(
+            capture_dir,
+            image_file,
+            name,
+            description,
+            WIM_COMPRESS_LZX,
+            Some(wim_tx),
+        );
+
+        let _ = forward_thread.join();
+
+        match result {
+            Ok(_) => {
+                log::info!("[Dism] 镜像捕获成功");
+                Ok(())
+            }
+            Err(e) => {
+                anyhow::bail!("镜像捕获失败: {}", e)
+            }
+        }
     }
 
     /// 增量备份镜像
+    /// 使用 wimgapi.dll 实现
     pub fn append_image(
         &self,
         image_file: &str,
@@ -100,216 +149,383 @@ impl Dism {
         description: &str,
         progress_tx: Option<Sender<DismProgress>>,
     ) -> Result<()> {
-        log::info!("开始增量备份: {} -> {}", capture_dir, image_file);
+        log::info!("[Dism] 使用 wimgapi 追加镜像: {} -> {}", capture_dir, image_file);
 
-        let args = [
-            "/Append-Image",
-            &format!("/ImageFile:{}", image_file),
-            &format!("/CaptureDir:{}", capture_dir),
-            &format!("/Name:{}", name),
-            &format!("/Description:{}", description),
-        ];
-
-        self.run_with_progress(&args, progress_tx)
+        // 对于追加操作，WimManager 的 capture_image 在文件存在时会自动追加
+        self.capture_image(image_file, capture_dir, name, description, progress_tx)
     }
 
-    /// 导入驱动到离线系统
+    /// 捕获系统镜像为ESD格式（高压缩）
+    /// 使用 wimgapi.dll + LZMS 压缩
+    pub fn capture_image_esd(
+        &self,
+        image_file: &str,
+        capture_dir: &str,
+        name: &str,
+        description: &str,
+        progress_tx: Option<Sender<DismProgress>>,
+    ) -> Result<()> {
+        log::info!("[Dism] 使用 wimgapi 捕获ESD镜像: {} -> {}", capture_dir, image_file);
+
+        let wim_manager = WimManager::new()
+            .map_err(|e| anyhow::anyhow!("wimgapi 初始化失败: {}", e))?;
+
+        let (wim_tx, wim_rx) = std::sync::mpsc::channel::<WimProgress>();
+
+        let progress_tx_clone = progress_tx.clone();
+        let forward_thread = std::thread::spawn(move || {
+            while let Ok(progress) = wim_rx.recv() {
+                if let Some(ref tx) = progress_tx_clone {
+                    let _ = tx.send(DismProgress {
+                        percentage: progress.percentage,
+                        status: progress.status,
+                    });
+                }
+            }
+        });
+
+        let result = wim_manager.capture_image(
+            capture_dir,
+            image_file,
+            name,
+            description,
+            WIM_COMPRESS_LZMS,
+            Some(wim_tx),
+        );
+
+        let _ = forward_thread.join();
+
+        match result {
+            Ok(_) => {
+                log::info!("[Dism] ESD镜像捕获成功");
+                Ok(())
+            }
+            Err(e) => {
+                anyhow::bail!("ESD镜像捕获失败: {}", e)
+            }
+        }
+    }
+
+    /// 增量备份ESD镜像
+    pub fn append_image_esd(
+        &self,
+        image_file: &str,
+        capture_dir: &str,
+        name: &str,
+        description: &str,
+        progress_tx: Option<Sender<DismProgress>>,
+    ) -> Result<()> {
+        log::info!("[Dism] 使用 wimgapi 追加ESD镜像: {} -> {}", capture_dir, image_file);
+        self.capture_image_esd(image_file, capture_dir, name, description, progress_tx)
+    }
+
+    /// 捕获系统镜像为SWM分卷格式
+    /// 先创建WIM，然后分割
+    pub fn capture_image_swm(
+        &self,
+        image_file: &str,
+        capture_dir: &str,
+        name: &str,
+        description: &str,
+        split_size_mb: u32,
+        progress_tx: Option<Sender<DismProgress>>,
+    ) -> Result<()> {
+        log::info!("[Dism] 捕获SWM分卷镜像: {} -> {} (分卷大小: {}MB)", capture_dir, image_file, split_size_mb);
+
+        // 先创建临时WIM文件
+        let temp_wim = format!("{}.tmp.wim", image_file.trim_end_matches(".swm"));
+        
+        // Step 1: 捕获为WIM
+        if let Some(ref tx) = progress_tx {
+            let _ = tx.send(DismProgress {
+                percentage: 0,
+                status: "正在捕获镜像...".to_string(),
+            });
+        }
+
+        let wim_manager = WimManager::new()
+            .map_err(|e| anyhow::anyhow!("wimgapi 初始化失败: {}", e))?;
+
+        let (wim_tx, wim_rx) = std::sync::mpsc::channel::<WimProgress>();
+
+        let progress_tx_clone = progress_tx.clone();
+        let forward_thread = std::thread::spawn(move || {
+            while let Ok(progress) = wim_rx.recv() {
+                if let Some(ref tx) = progress_tx_clone {
+                    // 捕获阶段占80%进度
+                    let _ = tx.send(DismProgress {
+                        percentage: (progress.percentage as u32 * 80 / 100) as u8,
+                        status: progress.status,
+                    });
+                }
+            }
+        });
+
+        let result = wim_manager.capture_image(
+            capture_dir,
+            &temp_wim,
+            name,
+            description,
+            WIM_COMPRESS_LZX,
+            Some(wim_tx),
+        );
+
+        let _ = forward_thread.join();
+
+        if let Err(e) = result {
+            let _ = std::fs::remove_file(&temp_wim);
+            anyhow::bail!("捕获镜像失败: {}", e);
+        }
+
+        // Step 2: 分割WIM为SWM
+        if let Some(ref tx) = progress_tx {
+            let _ = tx.send(DismProgress {
+                percentage: 80,
+                status: "正在分割镜像...".to_string(),
+            });
+        }
+
+        let split_result = wim_manager.split_wim(&temp_wim, image_file, split_size_mb as u64);
+
+        // 清理临时WIM
+        let _ = std::fs::remove_file(&temp_wim);
+
+        match split_result {
+            Ok(_) => {
+                if let Some(ref tx) = progress_tx {
+                    let _ = tx.send(DismProgress {
+                        percentage: 100,
+                        status: "分卷完成".to_string(),
+                    });
+                }
+                log::info!("[Dism] SWM分卷镜像创建成功");
+                Ok(())
+            }
+            Err(e) => {
+                anyhow::bail!("分割镜像失败: {}", e)
+            }
+        }
+    }
+
+    // ========================================================================
+    // 驱动操作 - 使用 setupapi.dll/newdev.dll
+    // ========================================================================
+
+    /// 导入驱动到离线系统 (PE环境下使用)
+    /// 使用 Windows API 直接复制到驱动存储
     pub fn add_drivers_offline(&self, image_path: &str, driver_path: &str) -> Result<()> {
-        log::info!("导入驱动: {} -> {}", driver_path, image_path);
+        log::info!("[Dism] 使用 Windows API 离线导入驱动: {} -> {}", driver_path, image_path);
 
-        let output = new_command(&self.dism_path)
-            .args([
-                &format!("/image:{}", image_path),
-                "/add-driver",
-                "/forceunsigned",
-                &format!("/driver:{}", driver_path),
-                "/recurse",
-            ])
-            .output()?;
+        let manager = DriverManager::new()
+            .map_err(|e| anyhow::anyhow!("驱动管理器初始化失败: {}", e))?;
 
-        if !output.status.success() {
-            let stderr = gbk_to_utf8(&output.stderr);
-            anyhow::bail!("导入驱动失败: {}", stderr);
+        let (success, fail) = manager.import_drivers_offline(
+            Path::new(image_path),
+            Path::new(driver_path),
+        )?;
+
+        log::info!(
+            "[Dism] 离线驱动导入完成: 成功 {}, 失败 {}",
+            success, fail
+        );
+
+        if fail > 0 && success == 0 {
+            anyhow::bail!("所有驱动导入失败");
         }
         Ok(())
     }
 
-    /// 获取 WIM/ESD 镜像信息（所有分卷）
-    pub fn get_image_info(&self, image_file: &str) -> Result<Vec<ImageInfo>> {
-        let output = new_command(&self.dism_path)
-            .args(["/get-imageinfo", &format!("/imagefile:{}", image_file)])
-            .output()?;
+    /// 从指定系统分区导出驱动 (PE环境下使用)
+    /// 使用 Windows API 直接读取驱动存储
+    #[allow(dead_code)]
+    pub fn export_drivers_from_system(&self, system_partition: &str, destination: &str) -> Result<()> {
+        std::fs::create_dir_all(destination)?;
 
-        let stdout = gbk_to_utf8(&output.stdout);
-        Self::parse_image_info(&stdout)
+        log::info!("[Dism] 使用 Windows API 从 {} 导出驱动到: {}", system_partition, destination);
+
+        let manager = DriverManager::new()
+            .map_err(|e| anyhow::anyhow!("驱动管理器初始化失败: {}", e))?;
+
+        let count = manager.export_drivers_from_system(
+            Path::new(system_partition),
+            Path::new(destination),
+        )?;
+        log::info!("[Dism] 成功导出 {} 个驱动", count);
+        Ok(())
     }
 
-    fn parse_image_info(output: &str) -> Result<Vec<ImageInfo>> {
-        let mut images = Vec::new();
-        let mut current_index = 0u32;
-        let mut current_name = String::new();
-        let mut current_size = 0u64;
+    // ========================================================================
+    // 镜像信息 - 使用 wimgapi.dll + WIM XML 解析
+    // ========================================================================
 
-        for line in output.lines() {
-            let line = line.trim();
-
-            if line.starts_with("索引") || line.starts_with("Index") {
-                if current_index > 0 {
-                    images.push(ImageInfo {
-                        index: current_index,
-                        name: current_name.clone(),
-                        size_bytes: current_size,
-                    });
-                }
-                if let Some(num) = line.split(':').nth(1) {
-                    current_index = num.trim().parse().unwrap_or(0);
-                }
-                current_name.clear();
-                current_size = 0;
-            } else if line.contains("名称") || line.contains("Name") {
-                if let Some(name) = line.split(':').nth(1) {
-                    current_name = name.trim().to_string();
-                }
-            } else if line.contains("大小") || line.contains("Size") {
-                if let Some(size_str) = line.split(':').nth(1) {
-                    let size_str = size_str
-                        .replace(",", "")
-                        .replace(" ", "")
-                        .replace("字节", "")
-                        .replace("bytes", "");
-                    current_size = size_str.trim().parse().unwrap_or(0);
-                }
+    /// 获取 WIM/ESD 镜像信息（所有分卷）
+    /// 使用 wimgapi.dll 或直接解析 WIM XML 元数据
+    #[allow(dead_code)]
+    pub fn get_image_info(&self, image_file: &str) -> Result<Vec<ImageInfo>> {
+        // 首先尝试使用 wimgapi
+        if let Ok(wim_manager) = WimManager::new() {
+            if let Ok(images) = wim_manager.get_image_info(image_file) {
+                log::info!("[Dism] 从 wimgapi 成功获取 {} 个镜像信息", images.len());
+                return Ok(images.into_iter().map(|img| ImageInfo {
+                    index: img.index,
+                    name: img.name,
+                    size_bytes: img.size_bytes,
+                    installation_type: img.installation_type,
+                }).collect());
             }
         }
 
-        if current_index > 0 {
-            images.push(ImageInfo {
-                index: current_index,
-                name: current_name,
-                size_bytes: current_size,
-            });
+        // 尝试直接解析 WIM XML 元数据
+        if let Ok(images) = Self::parse_wim_xml_metadata(image_file) {
+            if !images.is_empty() {
+                log::info!("[Dism] 从 WIM XML 元数据成功解析出 {} 个镜像", images.len());
+                return Ok(images);
+            }
+        }
+
+        anyhow::bail!("无法获取镜像信息")
+    }
+
+    /// 直接解析 WIM 文件的 XML 元数据
+    fn parse_wim_xml_metadata(image_file: &str) -> Result<Vec<ImageInfo>> {
+        use std::fs::File;
+        use std::io::{Read, Seek, SeekFrom};
+
+        log::info!("[Dism] 尝试直接解析 WIM XML 元数据: {}", image_file);
+
+        let mut file = File::open(image_file)?;
+        
+        // 读取 WIM 文件头（208 字节）
+        let mut header = [0u8; 208];
+        file.read_exact(&mut header)?;
+
+        // 验证 WIM 签名 "MSWIM\0\0\0"
+        let signature = &header[0..8];
+        if signature != b"MSWIM\0\0\0" {
+            anyhow::bail!("不是有效的 WIM 文件");
+        }
+
+        // 从头部读取 XML 数据的偏移量和大小
+        let xml_offset = u64::from_le_bytes(header[48..56].try_into().unwrap());
+        let xml_size = u64::from_le_bytes(header[56..64].try_into().unwrap());
+
+        if xml_offset == 0 || xml_size == 0 || xml_size > 100_000_000 {
+            anyhow::bail!("XML 元数据位置无效");
+        }
+
+        log::info!("[Dism] XML 偏移: {}, 大小: {}", xml_offset, xml_size);
+
+        // 读取 XML 数据
+        file.seek(SeekFrom::Start(xml_offset))?;
+        let mut xml_data = vec![0u8; xml_size as usize];
+        file.read_exact(&mut xml_data)?;
+
+        // XML 数据是 UTF-16LE 编码
+        let xml_string = Self::decode_utf16le(&xml_data)?;
+        
+        // 解析 XML
+        Self::parse_wim_xml(&xml_string)
+    }
+
+    /// 将 UTF-16LE 编码的字节数组转换为 UTF-8 字符串
+    fn decode_utf16le(data: &[u8]) -> Result<String> {
+        if data.len() < 2 {
+            anyhow::bail!("数据太短");
+        }
+
+        // 检查并跳过 BOM (0xFF 0xFE)
+        let start = if data.len() >= 2 && data[0] == 0xFF && data[1] == 0xFE {
+            2
+        } else {
+            0
+        };
+
+        let len = (data.len() - start) / 2;
+        let mut utf16_data = Vec::with_capacity(len);
+        
+        for i in 0..len {
+            let offset = start + i * 2;
+            if offset + 1 < data.len() {
+                let code_unit = u16::from_le_bytes([data[offset], data[offset + 1]]);
+                utf16_data.push(code_unit);
+            }
+        }
+
+        // 去除尾部的空字符
+        while utf16_data.last() == Some(&0) {
+            utf16_data.pop();
+        }
+
+        String::from_utf16(&utf16_data)
+            .map_err(|e| anyhow::anyhow!("UTF-16 解码失败: {}", e))
+    }
+
+    /// 解析 WIM XML 元数据字符串
+    fn parse_wim_xml(xml: &str) -> Result<Vec<ImageInfo>> {
+        let mut images = Vec::new();
+
+        let mut pos = 0;
+        while let Some(start) = xml[pos..].find("<IMAGE INDEX=\"") {
+            let abs_start = pos + start;
+            
+            let index_start = abs_start + 14;
+            if let Some(index_end) = xml[index_start..].find('"') {
+                let index_str = &xml[index_start..index_start + index_end];
+                let index: u32 = index_str.parse().unwrap_or(0);
+
+                if let Some(image_end) = xml[abs_start..].find("</IMAGE>") {
+                    let image_block = &xml[abs_start..abs_start + image_end + 8];
+                    
+                    // 优先使用 DISPLAYNAME，其次使用 NAME
+                    let name = Self::extract_xml_tag(image_block, "DISPLAYNAME")
+                        .or_else(|| Self::extract_xml_tag(image_block, "NAME"))
+                        .unwrap_or_default();
+                    
+                    let size_bytes = Self::extract_xml_tag(image_block, "TOTALBYTES")
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0);
+                    
+                    let installation_type = Self::extract_xml_tag(image_block, "INSTALLATIONTYPE")
+                        .unwrap_or_default();
+
+                    if index > 0 && !name.is_empty() {
+                        images.push(ImageInfo {
+                            index,
+                            name,
+                            size_bytes,
+                            installation_type,
+                        });
+                    }
+
+                    pos = abs_start + image_end + 8;
+                } else {
+                    pos = abs_start + 14;
+                }
+            } else {
+                pos = abs_start + 14;
+            }
+        }
+
+        if images.is_empty() {
+            anyhow::bail!("未找到有效的镜像信息");
         }
 
         Ok(images)
     }
 
-    /// 执行 DISM 命令并实时获取进度
-    fn run_with_progress(
-        &self,
-        args: &[&str],
-        progress_tx: Option<Sender<DismProgress>>,
-    ) -> Result<()> {
-        log::info!("DISM 命令: {} {:?}", &self.dism_path, args);
-
-        let mut child = new_command(&self.dism_path)
-            .args(args)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?;
-
-        if let Some(mut stdout) = child.stdout.take() {
-            let mut buffer = [0u8; 1024];
-            let mut line_buffer = Vec::new();
-
-            loop {
-                match stdout.read(&mut buffer) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        for &byte in &buffer[..n] {
-                            if byte == b'\r' || byte == b'\n' {
-                                if !line_buffer.is_empty() {
-                                    let line = gbk_to_utf8(&line_buffer);
-                                    log::debug!("DISM: {}", line);
-
-                                    if let Some(progress) = Self::parse_progress_line(&line) {
-                                        if let Some(ref tx) = progress_tx {
-                                            let _ = tx.send(progress);
-                                        }
-                                    }
-                                    line_buffer.clear();
-                                }
-                            } else {
-                                line_buffer.push(byte);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        if e.kind() != std::io::ErrorKind::Interrupted {
-                            break;
-                        }
-                    }
-                }
-            }
-
-            // 处理剩余的数据
-            if !line_buffer.is_empty() {
-                let line = gbk_to_utf8(&line_buffer);
-                if let Some(progress) = Self::parse_progress_line(&line) {
-                    if let Some(ref tx) = progress_tx {
-                        let _ = tx.send(progress);
-                    }
-                }
+    /// 从 XML 块中提取指定标签的内容
+    fn extract_xml_tag(xml: &str, tag: &str) -> Option<String> {
+        let open_tag = format!("<{}>", tag);
+        let close_tag = format!("</{}>", tag);
+        
+        if let Some(start) = xml.find(&open_tag) {
+            let content_start = start + open_tag.len();
+            if let Some(end) = xml[content_start..].find(&close_tag) {
+                let content = &xml[content_start..content_start + end];
+                return Some(content.trim().to_string());
             }
         }
-
-        // 读取 stderr
-        if let Some(mut stderr) = child.stderr.take() {
-            let mut err_output = Vec::new();
-            let _ = stderr.read_to_end(&mut err_output);
-            if !err_output.is_empty() {
-                let err_str = gbk_to_utf8(&err_output);
-                log::debug!("DISM STDERR: {}", err_str);
-            }
-        }
-
-        let status = child.wait()?;
-        log::info!("DISM 命令结束，状态: {:?}", status);
-
-        if !status.success() {
-            anyhow::bail!("DISM 命令执行失败");
-        }
-        Ok(())
-    }
-
-    /// 解析 DISM 进度输出
-    fn parse_progress_line(line: &str) -> Option<DismProgress> {
-        let mut percentage: Option<u8> = None;
-
-        // 查找 xx.x% 或 xx% 格式
-        let line_chars: Vec<char> = line.chars().collect();
-        for i in 0..line_chars.len() {
-            if line_chars[i] == '%' && i > 0 {
-                let mut num_str = String::new();
-                let mut j = i as i32 - 1;
-
-                while j >= 0 {
-                    let c = line_chars[j as usize];
-                    if c.is_ascii_digit() || c == '.' {
-                        num_str.insert(0, c);
-                        j -= 1;
-                    } else if c == ' ' && num_str.is_empty() {
-                        j -= 1;
-                    } else {
-                        break;
-                    }
-                }
-
-                if !num_str.is_empty() {
-                    if let Some(dot_pos) = num_str.find('.') {
-                        num_str = num_str[..dot_pos].to_string();
-                    }
-                    if let Ok(p) = num_str.parse::<u8>() {
-                        percentage = Some(p);
-                        break;
-                    }
-                }
-            }
-        }
-
-        percentage.map(|p| DismProgress {
-            percentage: p,
-            status: format!("{}%", p),
-        })
+        None
     }
 }
 

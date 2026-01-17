@@ -1,6 +1,6 @@
 use egui;
 use std::path::Path;
-use std::sync::mpsc;
+use std::sync::Mutex;
 
 use crate::app::{App, OnlineDownloadTab, PendingSoftDownload, SoftIconState};
 use crate::download::config::{OnlineSystem, OnlineSoftware};
@@ -390,13 +390,12 @@ impl App {
             // 使用ctx.request_repaint通知UI更新
             ctx.request_repaint();
             
-            // 通过静态变量传递结果（简化实现）
-            unsafe {
-                ICON_LOAD_RESULTS.push(IconLoadResult {
-                    url: url_clone,
-                    data: result,
-                });
-            }
+            // Pass results via a static queue (simplified).
+            let mut results = ICON_LOAD_RESULTS.lock().unwrap_or_else(|e| e.into_inner());
+            results.push(IconLoadResult {
+                url: url_clone,
+                data: result,
+            });
         });
     }
     
@@ -418,8 +417,9 @@ impl App {
     
     /// 处理图标加载结果（在UI更新时调用）
     pub fn process_icon_load_results(&mut self, ctx: &egui::Context) {
-        let results: Vec<IconLoadResult> = unsafe {
-            std::mem::take(&mut ICON_LOAD_RESULTS)
+        let results: Vec<IconLoadResult> = {
+            let mut results = ICON_LOAD_RESULTS.lock().unwrap_or_else(|e| e.into_inner());
+            std::mem::take(&mut *results)
         };
         
         for result in results {
@@ -633,4 +633,4 @@ impl App {
 }
 
 // 静态变量存储图标加载结果
-static mut ICON_LOAD_RESULTS: Vec<IconLoadResult> = Vec::new();
+static ICON_LOAD_RESULTS: Mutex<Vec<IconLoadResult>> = Mutex::new(Vec::new());

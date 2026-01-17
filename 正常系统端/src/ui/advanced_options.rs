@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use walkdir::WalkDir;
 
+use crate::core::hardware_info::HardwareInfo;
 use crate::core::registry::OfflineRegistry;
 
 /// 系统安装高级选项
@@ -26,6 +27,7 @@ pub struct AdvancedOptions {
     // 自定义内容
     pub import_custom_drivers: bool,
     pub custom_drivers_path: String,
+    pub import_storage_controller_drivers: bool,
     pub import_registry_file: bool,
     pub registry_file_path: String,
     pub import_custom_files: bool,
@@ -34,6 +36,10 @@ pub struct AdvancedOptions {
     // 用户设置
     pub custom_username: bool,
     pub username: String,
+    
+    // 系统盘设置
+    pub custom_volume_label: bool,
+    pub volume_label: String,
 }
 
 impl AdvancedOptions {
@@ -272,7 +278,44 @@ impl AdvancedOptions {
             let _ = OfflineRegistry::load_hive("pc-sys", &system_hive);
         }
 
-        // 13. 导入注册表文件 - 实际导入到离线注册表
+        // 13. 导入磁盘控制器驱动（Win10/Win11 x64）
+        if self.import_storage_controller_drivers {
+            let storage_drivers_dir = crate::utils::path::get_exe_dir()
+                .join("drivers")
+                .join("storage_controller");
+            if storage_drivers_dir.is_dir() {
+                println!(
+                    "[ADVANCED] 导入磁盘控制器驱动: {}",
+                    storage_drivers_dir.display()
+                );
+
+                // 先卸载注册表，因为 DISM 可能需要独占访问
+                let _ = OfflineRegistry::unload_hive("pc-soft");
+                let _ = OfflineRegistry::unload_hive("pc-sys");
+                if default_loaded {
+                    let _ = OfflineRegistry::unload_hive("pc-default");
+                }
+
+                let dism = crate::core::dism::Dism::new();
+                let image_path = format!("{}\\", target_partition);
+                let storage_drivers_path = storage_drivers_dir.to_string_lossy().to_string();
+                match dism.add_drivers_offline(&image_path, &storage_drivers_path) {
+                    Ok(_) => println!("[ADVANCED] 磁盘控制器驱动导入成功"),
+                    Err(e) => println!("[ADVANCED] 磁盘控制器驱动导入失败: {} (继续执行)", e),
+                }
+
+                // 重新加载注册表
+                let _ = OfflineRegistry::load_hive("pc-soft", &software_hive);
+                let _ = OfflineRegistry::load_hive("pc-sys", &system_hive);
+            } else {
+                println!(
+                    "[ADVANCED] 未找到磁盘控制器驱动目录: {}",
+                    storage_drivers_dir.display()
+                );
+            }
+        }
+
+        // 14. 导入注册表文件 - 实际导入到离线注册表
         if self.import_registry_file && !self.registry_file_path.is_empty() {
             println!("[ADVANCED] 导入注册表文件: {}", self.registry_file_path);
             
@@ -297,7 +340,7 @@ impl AdvancedOptions {
             }
         }
 
-        // 14. 导入自定义文件
+        // 15. 导入自定义文件
         if self.import_custom_files && !self.custom_files_path.is_empty() {
             println!("[ADVANCED] 导入自定义文件: {}", self.custom_files_path);
             match Self::copy_dir_all(&self.custom_files_path, target_partition) {
@@ -306,11 +349,18 @@ impl AdvancedOptions {
             }
         }
 
-        // 15. 自定义用户名 - 写入标记文件供无人值守使用
+        // 16. 自定义用户名 - 写入标记文件供无人值守使用
         if self.custom_username && !self.username.is_empty() {
             println!("[ADVANCED] 设置自定义用户名: {}", self.username);
             let username_file = format!("{}\\username.txt", scripts_dir);
             std::fs::write(&username_file, &self.username)?;
+        }
+
+        // 17. 自定义系统盘卷标 - 写入标记文件供格式化时使用
+        if self.custom_volume_label && !self.volume_label.is_empty() {
+            println!("[ADVANCED] 设置系统盘卷标: {}", self.volume_label);
+            let volume_label_file = format!("{}\\volume_label.txt", scripts_dir);
+            std::fs::write(&volume_label_file, &self.volume_label)?;
         }
 
         // 卸载注册表
@@ -413,7 +463,7 @@ Write-Host "UWP应用清理完成"
     }
 
     /// 显示高级选项界面
-    pub fn show_ui(&mut self, ui: &mut egui::Ui) {
+    pub fn show_ui(&mut self, ui: &mut egui::Ui, hardware_info: Option<&HardwareInfo>) {
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.heading("系统优化选项");
             ui.separator();
@@ -479,6 +529,19 @@ Write-Host "UWP应用清理完成"
             });
 
             ui.horizontal(|ui| {
+                ui.checkbox(
+                    &mut self.import_storage_controller_drivers,
+                    "导入磁盘控制器驱动[Win11/Win10 X64]",
+                );
+            });
+            ui.label(
+                egui::RichText::new(
+                    "导入 Win10/Win11 的英特尔 VMD / 苹果 SSD / Visior 硬盘控制器驱动，如已集成无需勾选",
+                )
+                .small(),
+            );
+
+            ui.horizontal(|ui| {
                 ui.checkbox(&mut self.import_registry_file, "导入注册表文件");
                 if self.import_registry_file {
                     ui.text_edit_singleline(&mut self.registry_file_path);
@@ -513,10 +576,73 @@ Write-Host "UWP应用清理完成"
                 ui.checkbox(&mut self.custom_username, "自定义用户名");
                 if self.custom_username {
                     ui.text_edit_singleline(&mut self.username);
+                    let model_name = detect_computer_model_name(hardware_info);
+                    let button = ui.add_enabled(
+                        model_name.is_some(),
+                        egui::Button::new("识别电脑型号"),
+                    );
+                    if button.clicked() {
+                        if let Some(name) = model_name {
+                            self.username = name;
+                        }
+                    }
                 }
             });
+
+            ui.add_space(15.0);
+            ui.heading("系统盘设置");
+            ui.separator();
+
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut self.custom_volume_label, "自定义系统盘卷标");
+                if self.custom_volume_label {
+                    ui.add(egui::TextEdit::singleline(&mut self.volume_label)
+                        .desired_width(150.0)
+                        .hint_text("例如: Windows"));
+                }
+            });
+            if self.custom_volume_label {
+                ui.label("提示: 卷标将在格式化分区时应用");
+            }
         });
     }
 }
 
 use egui;
+
+fn detect_computer_model_name(hardware_info: Option<&HardwareInfo>) -> Option<String> {
+    let info = hardware_info?;
+    let model_token = extract_primary_token(&info.computer_model);
+    let manufacturer_token = extract_primary_token(&info.computer_manufacturer);
+
+    match (model_token, manufacturer_token) {
+        (Some(model), Some(manufacturer)) => {
+            if model.len() <= manufacturer.len() {
+                Some(model)
+            } else {
+                Some(manufacturer)
+            }
+        }
+        (Some(model), None) => Some(model),
+        (None, Some(manufacturer)) => Some(manufacturer),
+        (None, None) => None,
+    }
+}
+
+fn extract_primary_token(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let token = trimmed
+        .split(|c: char| {
+            c.is_whitespace() || matches!(c, '_' | '-' | ',' | ';' | '/' | '\\')
+        })
+        .find(|part| !part.is_empty())?;
+    let token = token.trim_matches(|c: char| c.is_ascii_punctuation());
+    if token.is_empty() {
+        None
+    } else {
+        Some(token.to_string())
+    }
+}

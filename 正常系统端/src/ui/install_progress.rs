@@ -207,6 +207,16 @@ impl App {
                     
                     self.install_progress.total_progress = 
                         (base_progress + (progress.percentage as usize * step_weight / 100)).min(100) as u8;
+                    
+                    // 检查是否安装完成，并且用户勾选了自动重启
+                    if self.install_progress.total_progress >= 100 
+                        && self.install_options.auto_reboot 
+                        && !self.auto_reboot_triggered 
+                    {
+                        println!("[INSTALL] 安装完成，用户已勾选立即重启，执行自动重启");
+                        self.auto_reboot_triggered = true;
+                        self.reboot_system();
+                    }
                 }
             }
         }
@@ -343,11 +353,15 @@ impl App {
             }
             std::thread::sleep(std::time::Duration::from_millis(100));
 
-            // Step 4: 导入驱动
+            // Step 4: 导入驱动（仅在 AutoImport 模式下导入）
             send_step(&progress_tx, 4, "导入驱动", 0);
             std::thread::sleep(std::time::Duration::from_millis(50));
-            if options.export_drivers && driver_backup_path.exists() {
-                println!("[INSTALL STEP 4] 开始导入驱动");
+            
+            // 判断是否需要导入驱动（只有 AutoImport 模式才导入）
+            let should_import = matches!(options.driver_action, crate::app::DriverAction::AutoImport);
+            
+            if should_import && driver_backup_path.exists() {
+                println!("[INSTALL STEP 4] 开始导入驱动 (AutoImport模式)");
                 send_step(&progress_tx, 4, "导入驱动", 30);
                 
                 match import_drivers(&target_partition, &driver_backup_str) {
@@ -362,8 +376,22 @@ impl App {
                         send_step(&progress_tx, 4, "导入驱动", 100);
                     }
                 }
+            } else if matches!(options.driver_action, crate::app::DriverAction::SaveOnly) && driver_backup_path.exists() {
+                // SaveOnly 模式：保留驱动备份到目标分区
+                println!("[INSTALL STEP 4] 仅保存驱动 (SaveOnly模式)");
+                send_step(&progress_tx, 4, "保存驱动", 30);
+                
+                let target_driver_dir = format!("{}\\LetRecovery_Drivers", target_partition);
+                if let Err(e) = copy_dir_recursive(&driver_backup_str, &target_driver_dir) {
+                    println!("[INSTALL STEP 4] 保存驱动到目标分区失败: {}", e);
+                } else {
+                    println!("[INSTALL STEP 4] 驱动已保存到: {}", target_driver_dir);
+                }
+                
+                let _ = std::fs::remove_dir_all(&driver_backup_path);
+                send_step(&progress_tx, 4, "保存驱动", 100);
             } else {
-                println!("[INSTALL STEP 4] 跳过导入驱动");
+                println!("[INSTALL STEP 4] 跳过驱动处理 (driver_action: {:?})", options.driver_action);
                 send_step(&progress_tx, 4, "导入驱动", 100);
             }
             std::thread::sleep(std::time::Duration::from_millis(100));
@@ -518,8 +546,14 @@ impl App {
             let data_dir = ConfigFileManager::get_data_dir(&data_partition);
             std::fs::create_dir_all(&data_dir).ok();
             
-            if options.export_drivers {
-                println!("[INSTALL PE STEP 3] 导出驱动到: {}", data_dir);
+            // 根据driver_action决定是否导出驱动
+            let should_export = matches!(
+                options.driver_action, 
+                crate::app::DriverAction::SaveOnly | crate::app::DriverAction::AutoImport
+            );
+            
+            if should_export {
+                println!("[INSTALL PE STEP 3] 导出驱动到: {} (driver_action: {:?})", data_dir, options.driver_action);
                 send_step(&progress_tx, 3, "导出驱动", 30);
                 
                 let driver_path = format!("{}\\drivers", data_dir);
@@ -527,6 +561,8 @@ impl App {
                     Ok(_) => println!("[INSTALL PE STEP 3] 驱动导出成功"),
                     Err(e) => println!("[INSTALL PE STEP 3] 驱动导出失败: {}", e),
                 }
+            } else {
+                println!("[INSTALL PE STEP 3] 跳过驱动导出 (driver_action: {:?})", options.driver_action);
             }
             send_step(&progress_tx, 3, "导出驱动", 100);
             std::thread::sleep(std::time::Duration::from_millis(100));
@@ -573,6 +609,7 @@ impl App {
             let install_config = InstallConfig {
                 unattended: options.unattended_install,
                 restore_drivers: options.export_drivers,
+                driver_action_mode: InstallConfig::driver_action_to_mode(options.driver_action),
                 auto_reboot: options.auto_reboot,
                 original_guid: String::new(),
                 volume_index,
@@ -588,8 +625,14 @@ impl App {
                 disable_uac: advanced_options.disable_uac,
                 disable_device_encryption: advanced_options.disable_device_encryption,
                 remove_uwp_apps: advanced_options.remove_uwp_apps,
+                import_storage_controller_drivers: advanced_options.import_storage_controller_drivers,
                 custom_username: if advanced_options.custom_username {
                     advanced_options.username.clone()
+                } else {
+                    String::new()
+                },
+                volume_label: if advanced_options.custom_volume_label {
+                    advanced_options.volume_label.clone()
                 } else {
                     String::new()
                 },
@@ -709,6 +752,42 @@ fn import_drivers(target_partition: &str, driver_path: &str) -> anyhow::Result<(
     let image_path = format!("{}\\", target_partition);
     
     dism.add_drivers_offline(&image_path, driver_path)
+}
+
+/// 递归复制目录
+fn copy_dir_recursive(src: &str, dst: &str) -> anyhow::Result<()> {
+    use std::fs;
+    use std::path::Path;
+    
+    let src_path = Path::new(src);
+    let dst_path = Path::new(dst);
+    
+    if !src_path.exists() {
+        anyhow::bail!("源目录不存在: {}", src);
+    }
+    
+    // 创建目标目录
+    fs::create_dir_all(dst_path)?;
+    
+    // 遍历源目录
+    for entry in fs::read_dir(src_path)? {
+        let entry = entry?;
+        let src_file = entry.path();
+        let dst_file = dst_path.join(entry.file_name());
+        
+        if src_file.is_dir() {
+            // 递归复制子目录
+            copy_dir_recursive(
+                &src_file.to_string_lossy(),
+                &dst_file.to_string_lossy(),
+            )?;
+        } else {
+            // 复制文件
+            fs::copy(&src_file, &dst_file)?;
+        }
+    }
+    
+    Ok(())
 }
 
 /// 生成无人值守 XML 文件

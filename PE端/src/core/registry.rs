@@ -101,29 +101,6 @@ impl OfflineRegistry {
         Ok(())
     }
 
-    /// 删除注册表键
-    pub fn delete_key(key_path: &str) -> Result<()> {
-        log::debug!("删除注册表键: {}", key_path);
-
-        let _ = new_command("reg.exe")
-            .args(["delete", key_path, "/f"])
-            .output();
-
-        // 忽略不存在的情况
-        Ok(())
-    }
-
-    /// 删除注册表值
-    pub fn delete_value(key_path: &str, value_name: &str) -> Result<()> {
-        log::debug!("删除注册表值: {}\\{}", key_path, value_name);
-
-        let _ = new_command("reg.exe")
-            .args(["delete", key_path, "/v", value_name, "/f"])
-            .output();
-
-        Ok(())
-    }
-
     /// 创建注册表键（如果不存在）
     pub fn create_key(key_path: &str) -> Result<()> {
         log::debug!("创建注册表键: {}", key_path);
@@ -135,21 +112,6 @@ impl OfflineRegistry {
         if !output.status.success() {
             let stderr = gbk_to_utf8(&output.stderr);
             anyhow::bail!("创建注册表键失败: {}", stderr);
-        }
-        Ok(())
-    }
-
-    /// 导入 .reg 文件
-    pub fn import_reg_file(reg_file: &str) -> Result<()> {
-        log::info!("导入注册表文件: {}", reg_file);
-
-        let output = new_command("reg.exe")
-            .args(["import", reg_file])
-            .output()?;
-
-        if !output.status.success() {
-            let stderr = gbk_to_utf8(&output.stderr);
-            anyhow::bail!("导入注册表文件失败: {}", stderr);
         }
         Ok(())
     }

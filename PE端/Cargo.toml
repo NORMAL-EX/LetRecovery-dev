@@ -26,6 +26,9 @@ windows = { version = "0.58", features = [
     "Win32_System_Diagnostics_ToolHelp",
 ] }
 
+# wimgapi.dll / setupapi.dll 动态加载
+libloading = "0.8"
+
 # 编码转换
 encoding_rs = "0.8"
 

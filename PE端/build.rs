@@ -11,7 +11,7 @@ fn main() {
         // 设置程序信息
         res.set("ProductName", "LetRecovery PE");
         res.set("FileDescription", "LetRecovery PE安装助手");
-        res.set("LegalCopyright", "Copyright (C) 2025 NORMAL-EX");
+        res.set("LegalCopyright", "Copyright © 2026 NORMAL-EX");
         res.set("ProductVersion", "2026.1.0");
         res.set("FileVersion", "2026.1.0");
 

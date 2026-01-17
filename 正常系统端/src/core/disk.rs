@@ -7,7 +7,7 @@ use crate::utils::path::get_bin_dir;
 #[cfg(windows)]
 use windows::{
     core::PCWSTR,
-    Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE},
+    Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE},
     Win32::Storage::FileSystem::{
         CreateFileW, GetDiskFreeSpaceExW, GetDriveTypeW, GetVolumeInformationW,
         FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
@@ -600,14 +600,40 @@ impl DiskManager {
         let script_path = temp_dir.join("lr_query_shrink.txt");
         std::fs::write(&script_path, &script_content)?;
 
-        let output = create_command(&get_diskpart_path())
+        // 首先尝试使用内置 diskpart，如果失败则使用系统 diskpart
+        let diskpart_path = get_diskpart_path();
+        let output = create_command(&diskpart_path)
             .args(["/s", script_path.to_str().unwrap()])
             .output()?;
 
-        let _ = std::fs::remove_file(&script_path);
-
         let output_text = gbk_to_utf8(&output.stdout);
+        let error_text = gbk_to_utf8(&output.stderr);
+        
+        println!("[DISK] Shrink querymax 使用: {}", diskpart_path);
+        println!("[DISK] Shrink querymax stdout 长度: {} 字节", output.stdout.len());
         println!("[DISK] Shrink querymax 输出: {}", output_text);
+        if !error_text.is_empty() {
+            println!("[DISK] Shrink querymax 错误: {}", error_text);
+        }
+
+        // 如果输出为空且使用的是内置 diskpart，尝试使用系统 diskpart
+        let output_text = if output_text.trim().is_empty() || output.stdout.len() < 50 {
+            println!("[DISK] 内置 diskpart 输出异常，尝试使用系统 diskpart");
+            
+            let sys_output = create_command("diskpart.exe")
+                .args(["/s", script_path.to_str().unwrap()])
+                .output()?;
+            
+            let sys_output_text = gbk_to_utf8(&sys_output.stdout);
+            println!("[DISK] 系统 diskpart stdout 长度: {} 字节", sys_output.stdout.len());
+            println!("[DISK] 系统 diskpart 输出: {}", sys_output_text);
+            
+            sys_output_text
+        } else {
+            output_text
+        };
+        
+        let _ = std::fs::remove_file(&script_path);
 
         // 解析输出，查找可回收的最大空间
         // 英文: "The maximum number of reclaimable bytes is: XXX MB"
@@ -653,10 +679,19 @@ impl DiskManager {
     /// 解析 shrink querymax 输出（中文）
     fn parse_shrink_max_output_cn(output: &str) -> Option<u64> {
         for line in output.lines() {
-            // 中文输出格式: "可回收的最大字节数为:  XXX MB" 或包含 "收回" 的行
+            // 中文输出可能的格式：
+            // "可回收的最大字节数为:  XXX MB"
+            // "最多可从此卷收回 XXX MB"  
+            // "可以从该卷收回的最大空间是: XXX MB"
+            // "该卷可以收回的最大空间为 XXX MB"
             if line.contains("回收") || line.contains("收回") || line.contains("可用") 
-                || line.contains("压缩") || line.contains("缩小") {
-                return Self::extract_size_from_line(line);
+                || line.contains("压缩") || line.contains("缩小") || line.contains("最大")
+                || line.contains("空间") || line.contains("字节") {
+                println!("[DISK] 尝试解析中文行: {}", line);
+                if let Some(size) = Self::extract_size_from_line(line) {
+                    println!("[DISK] 解析成功: {} MB", size);
+                    return Some(size);
+                }
             }
         }
         None
@@ -997,8 +1032,27 @@ impl DiskManager {
             return Ok(Some((format!("{}:", selected), false)));
         }
 
+        // ========================================================================
         // 没有找到满足条件的现有分区，尝试从目标安装分区创建新分区
-        // 注意：即使目标是 C 盘，也可以从 C 盘分割出临时分区来存放镜像
+        // ========================================================================
+        // 
+        // ⚠️ 重要：这里【不能】检查 exclude_letter == 'C' 然后直接返回！
+        // 
+        // 错误的写法（已删除）：
+        //   if exclude_letter == 'C' {
+        //       return Ok(None);  // ← 这是错的！
+        //   }
+        //
+        // 原因：当用户只有一个 C 盘时（比如虚拟机环境），需要从 C 盘分割出
+        // 一个临时分区来存放镜像文件。PE 安装流程如下：
+        //   1. 从 C 盘分割出临时分区（如 Y:）
+        //   2. 将镜像复制到 Y:\LetRecovery\
+        //   3. 重启进入 PE
+        //   4. PE 中格式化 C 盘并释放镜像
+        //   5. 安装完成后可删除 Y: 分区
+        //
+        // 因此，即使 exclude_letter == 'C'，也必须尝试分割 C 盘！
+        // ========================================================================
         println!("[DISK] 没有找到满足条件的现有分区，尝试从 {} 盘创建新分区", exclude_letter);
 
         // 使用 shrink querymax 查询目标分区实际可缩小的空间
