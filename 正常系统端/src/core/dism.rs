@@ -279,29 +279,50 @@ impl Dism {
     /// 获取 WIM/ESD 镜像信息（所有分卷）
     /// 使用 wimgapi.dll 或直接解析 WIM XML 元数据
     pub fn get_image_info(&self, image_file: &str) -> Result<Vec<ImageInfo>> {
+        println!("[Dism] 开始获取镜像信息: {}", image_file);
+        
         // 首先尝试使用 wimgapi
-        if let Ok(wim_manager) = WimManager::new() {
-            if let Ok(images) = wim_manager.get_image_info(image_file) {
-                println!("[Dism] 从 wimgapi 成功获取 {} 个镜像信息", images.len());
-                return Ok(images.into_iter().map(|img| ImageInfo {
-                    index: img.index,
-                    name: img.name,
-                    size_bytes: img.size_bytes,
-                    installation_type: img.installation_type,
-                    major_version: img.major_version,
-                }).collect());
+        match WimManager::new() {
+            Ok(wim_manager) => {
+                println!("[Dism] wimgapi.dll 加载成功");
+                match wim_manager.get_image_info(image_file) {
+                    Ok(images) => {
+                        println!("[Dism] 从 wimgapi 成功获取 {} 个镜像信息", images.len());
+                        return Ok(images.into_iter().map(|img| ImageInfo {
+                            index: img.index,
+                            name: img.name,
+                            size_bytes: img.size_bytes,
+                            installation_type: img.installation_type,
+                            major_version: img.major_version,
+                        }).collect());
+                    }
+                    Err(e) => {
+                        println!("[Dism] wimgapi 获取镜像信息失败: {}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                println!("[Dism] wimgapi.dll 加载失败: {} (这可能是PE环境缺少该DLL)", e);
             }
         }
 
-        // 尝试直接解析 WIM XML 元数据
-        if let Ok(images) = Self::parse_wim_xml_metadata(image_file) {
-            if !images.is_empty() {
-                println!("[Dism] 从 WIM XML 元数据成功解析出 {} 个镜像", images.len());
-                return Ok(images);
+        // 尝试直接解析 WIM XML 元数据（仅对WIM有效，ESD的元数据是压缩的）
+        println!("[Dism] 尝试直接解析 WIM XML 元数据...");
+        match Self::parse_wim_xml_metadata(image_file) {
+            Ok(images) => {
+                if !images.is_empty() {
+                    println!("[Dism] 从 WIM XML 元数据成功解析出 {} 个镜像", images.len());
+                    return Ok(images);
+                } else {
+                    println!("[Dism] WIM XML 解析成功但未找到镜像信息");
+                }
+            }
+            Err(e) => {
+                println!("[Dism] WIM XML 直接解析失败: {} (ESD文件的元数据是压缩的，需要wimgapi)", e);
             }
         }
 
-        anyhow::bail!("无法获取镜像信息")
+        anyhow::bail!("无法获取镜像信息：wimgapi 打开文件失败。可能原因：系统 wimgapi.dll 版本过旧不支持此ESD格式，请将新版 wimgapi.dll 放到程序目录")
     }
 
     /// 通过读取 ntdll.dll 文件版本判断是否为 Win10/11 镜像

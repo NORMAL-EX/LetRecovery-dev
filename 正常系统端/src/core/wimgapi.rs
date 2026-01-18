@@ -427,14 +427,39 @@ fn get_last_error() -> u32 {
 impl Wimgapi {
     /// 加载 wimgapi.dll 并解析所需函数
     ///
+    /// 加载顺序：
+    /// 1. 程序目录下的 wimgapi.dll（自带新版本，兼容老系统）
+    /// 2. 系统目录的 wimgapi.dll
+    ///
     /// # 参数
-    /// - `path`: 可选的 wimgapi.dll 路径，默认使用系统路径
+    /// - `path`: 可选的 wimgapi.dll 路径，默认按上述顺序查找
     ///
     /// # 返回值
     /// - `Ok(Self)`: 成功加载
     /// - `Err(WimApiError)`: 加载失败
     pub fn new(path: Option<PathBuf>) -> Result<Self, WimApiError> {
-        let lib_path = path.unwrap_or_else(|| PathBuf::from("wimgapi.dll"));
+        let lib_path = if let Some(p) = path {
+            p
+        } else {
+            // 优先尝试加载程序目录下的 wimgapi.dll
+            let exe_dir_dll = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|d| d.join("wimgapi.dll")));
+            
+            if let Some(ref local_dll) = exe_dir_dll {
+                if local_dll.exists() {
+                    println!("[WIMGAPI] 使用程序目录下的 wimgapi.dll: {:?}", local_dll);
+                    local_dll.clone()
+                } else {
+                    println!("[WIMGAPI] 程序目录下未找到 wimgapi.dll，使用系统版本");
+                    PathBuf::from("wimgapi.dll")
+                }
+            } else {
+                PathBuf::from("wimgapi.dll")
+            }
+        };
+        
+        println!("[WIMGAPI] 加载 DLL: {:?}", lib_path);
         let lib = unsafe { Library::new(&lib_path) }?;
 
         unsafe {
@@ -1170,19 +1195,49 @@ impl WimManager {
     /// - `image_file`: WIM/ESD 文件路径
     pub fn get_image_info(&self, image_file: &str) -> Result<Vec<ImageInfo>, WimApiError> {
         let image_path = Path::new(image_file);
-        let temp_dir = std::env::temp_dir();
+        
+        // 尝试多个临时目录，PE环境中 %TEMP% 可能无效
+        let temp_candidates = [
+            std::env::temp_dir(),
+            PathBuf::from("X:\\Windows\\Temp"),
+            PathBuf::from("C:\\Windows\\Temp"),
+            PathBuf::from("X:\\Temp"),
+            PathBuf::from("C:\\Temp"),
+        ];
+        
+        let temp_dir = temp_candidates.iter()
+            .find(|p| p.exists() || std::fs::create_dir_all(p).is_ok())
+            .cloned()
+            .unwrap_or_else(std::env::temp_dir);
+        
+        println!("[WIMGAPI] 使用临时目录: {:?}", temp_dir);
+        println!("[WIMGAPI] 打开镜像文件: {}", image_file);
 
         let wim_handle = self.wimgapi.open(
             image_path,
             WIM_GENERIC_READ,
             WIM_OPEN_EXISTING,
             WIM_COMPRESS_NONE,
-        )?;
+        ).map_err(|e| {
+            println!("[WIMGAPI] 打开WIM文件失败: {}", e);
+            e
+        })?;
 
-        self.wimgapi.set_temp_path(wim_handle, &temp_dir)?;
+        if let Err(e) = self.wimgapi.set_temp_path(wim_handle, &temp_dir) {
+            println!("[WIMGAPI] 设置临时目录失败: {} (继续尝试)", e);
+            // 不直接返回错误，某些情况下即使设置失败也能继续
+        }
 
-        let xml = self.wimgapi.get_image_information(wim_handle)?;
+        let xml = self.wimgapi.get_image_information(wim_handle).map_err(|e| {
+            println!("[WIMGAPI] 获取镜像信息失败: {}", e);
+            let _ = self.wimgapi.close(wim_handle);
+            e
+        })?;
+        
+        println!("[WIMGAPI] 成功获取XML元数据，长度: {} 字符", xml.len());
+        
         let images = Wimgapi::parse_image_info_from_xml(&xml);
+        println!("[WIMGAPI] 解析出 {} 个镜像", images.len());
 
         self.wimgapi.close(wim_handle)?;
 

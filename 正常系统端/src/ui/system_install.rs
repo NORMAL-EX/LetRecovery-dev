@@ -582,6 +582,8 @@ impl App {
                                 println!("[IMAGE INFO] 加载失败: {}", error);
                                 self.image_volumes.clear();
                                 self.selected_volume = None;
+                                // 保存错误信息供UI显示
+                                self.iso_mount_error = Some(format!("镜像信息加载失败: {}", error));
                             }
                         }
                     }

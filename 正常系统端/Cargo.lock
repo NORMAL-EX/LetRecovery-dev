@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "LetRecovery"
-version = "2026.1.10"
+version = "2026.1.18"
 dependencies = [
  "anyhow",
  "aria2-ws",

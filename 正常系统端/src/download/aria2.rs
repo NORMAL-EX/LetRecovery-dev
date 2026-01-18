@@ -45,12 +45,14 @@ impl Aria2Manager {
         // 启动 aria2c 进程，启用 RPC
         let process = create_command(&aria2c_path)
             .args([
+                // 以 daemon 方式运行，否则在没有任务时 aria2c 会直接退出，导致 RPC 端口未监听
+                "--daemon=true",
                 "--enable-rpc=true",
                 "--rpc-listen-port=6800",
                 "--rpc-allow-origin-all=true",
                 "--max-concurrent-downloads=5",
                 "--split=32",
-                "--max-connection-per-server=32",
+                "--max-connection-per-server=16",
                 "--min-split-size=1M",
                 "--file-allocation=none",
                 "--continue=true",
@@ -59,11 +61,31 @@ impl Aria2Manager {
             ])
             .spawn()?;
 
-        // 等待 aria2c 启动
-        tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+        log::info!("aria2c 进程已启动，正在等待 RPC 服务就绪...");
 
-        // 连接到 aria2c WebSocket
-        let client = aria2_ws::Client::connect("ws://127.0.0.1:6800/jsonrpc", None).await?;
+        // 重试连接，最多尝试 15 次，每次间隔 500ms（总共约 7.5 秒）
+        let mut client = None;
+        let mut last_error = String::new();
+
+        for i in 0..15 {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+            match aria2_ws::Client::connect("ws://127.0.0.1:6800/jsonrpc", None).await {
+                Ok(c) => {
+                    client = Some(c);
+                    log::info!("aria2c RPC 连接成功 (第 {} 次尝试)", i + 1);
+                    break;
+                }
+                Err(e) => {
+                    last_error = e.to_string();
+                    log::warn!("aria2c RPC 连接失败 (第 {} 次尝试): {}", i + 1, e);
+                }
+            }
+        }
+
+        let client = client.ok_or_else(|| {
+            anyhow::anyhow!("初始化aria2失败: {}", last_error)
+        })?;
 
         Ok(Self {
             client: Some(Arc::new(client)),
@@ -86,7 +108,9 @@ impl Aria2Manager {
         let mut options = aria2_ws::TaskOptions::default();
         options.dir = Some(save_dir.to_string());
         options.split = Some(32);
-        options.max_connection_per_server = Some(32);
+        // aria2c 的 --max-connection-per-server 取值范围通常为 1-16（不同 build 可能不同），
+        // 这里保持与启动参数一致，避免任务级别参数导致 aria2c 侧报错。
+        options.max_connection_per_server = Some(16);
 
         if let Some(name) = filename {
             options.out = Some(name.to_string());

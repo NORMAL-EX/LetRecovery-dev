@@ -1,5 +1,6 @@
 use anyhow::Result;
 use std::path::Path;
+use std::{fs, path::PathBuf};
 
 use crate::utils::command::new_command;
 use crate::utils::encoding::gbk_to_utf8;
@@ -11,6 +12,24 @@ pub struct BootManager {
 }
 
 impl BootManager {
+    /// 选择一个可靠的临时目录并确保它存在（避免 WinPE 下 os error 3）。
+    fn reliable_temp_dir() -> PathBuf {
+        let candidates = [
+            PathBuf::from(r"X:\Windows\Temp"),
+            PathBuf::from(r"X:\Temp"),
+            std::env::temp_dir(),
+            PathBuf::from("X:\\"),
+        ];
+
+        for dir in candidates {
+            let _ = fs::create_dir_all(&dir);
+            if dir.exists() {
+                return dir;
+            }
+        }
+
+        std::env::temp_dir()
+    }
     pub fn new() -> Self {
         let bin_dir = get_bin_dir();
         Self {
@@ -41,7 +60,7 @@ detail volume
             drive_letter
         );
 
-        let script1_path = std::env::temp_dir().join("find_disk.txt");
+        let script1_path = Self::reliable_temp_dir().join("find_disk.txt");
         std::fs::write(&script1_path, &script1)?;
 
         let output = new_command("diskpart")
@@ -80,7 +99,7 @@ list partition
             disk_num
         );
 
-        let script2_path = std::env::temp_dir().join("list_part.txt");
+        let script2_path = Self::reliable_temp_dir().join("list_part.txt");
         std::fs::write(&script2_path, &script2)?;
 
         let output = new_command("diskpart")
@@ -126,7 +145,7 @@ assign letter=S
             disk_num, esp_partition
         );
 
-        let script3_path = std::env::temp_dir().join("assign_esp.txt");
+        let script3_path = Self::reliable_temp_dir().join("assign_esp.txt");
         std::fs::write(&script3_path, &script3)?;
 
         let output = new_command("diskpart")
@@ -182,7 +201,7 @@ list partition
                 disk
             );
 
-            let script_path = std::env::temp_dir().join("check_disk.txt");
+            let script_path = Self::reliable_temp_dir().join("check_disk.txt");
             std::fs::write(&script_path, &script)?;
 
             let output = new_command("diskpart")
@@ -208,7 +227,7 @@ assign letter=S
                                     );
 
                                     let assign_path =
-                                        std::env::temp_dir().join("assign_esp2.txt");
+                                        Self::reliable_temp_dir().join("assign_esp2.txt");
                                     std::fs::write(&assign_path, &assign_script)?;
 
                                     let _ = new_command("diskpart")
