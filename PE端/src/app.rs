@@ -276,7 +276,8 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
         dism.apply_image(&image_path, &apply_dir, config.volume_index, Some(progress_tx))
     };
 
-    drop(progress_handle);
+    // 等待进度监控线程结束
+    let _ = progress_handle.join();
 
     if let Err(e) = apply_result {
         let _ = tx.send(WorkerMessage::Failed(format!("释放镜像失败: {}", e)));
@@ -515,7 +516,8 @@ fn execute_backup_workflow(tx: Sender<WorkerMessage>) {
         }
     };
 
-    drop(progress_handle);
+    // 等待进度监控线程结束
+    let _ = progress_handle.join();
 
     if let Err(e) = backup_result {
         let _ = tx.send(WorkerMessage::Failed(format!("备份失败: {}", e)));

@@ -277,41 +277,67 @@ impl DiskManager {
     }
     
     /// 格式化指定分区（带卷标）
+    /// 
+    /// 使用 cmd /c format 进行格式化，因为直接调用 format.com 在 CREATE_NO_WINDOW 模式下
+    /// 会完成格式化但进程不退出，导致程序卡死。通过 cmd /c 包装可以正常退出。
     pub fn format_partition_with_label(partition: &str, volume_label: Option<&str>) -> Result<String> {
         log::info!("格式化分区: {} 卷标: {:?}", partition, volume_label);
 
-        let bin_dir = get_bin_dir();
-        let format_exe = bin_dir.join("format.com").to_string_lossy().to_string();
+        // 提取盘符
+        let drive_letter = partition
+            .chars()
+            .next()
+            .unwrap_or('C')
+            .to_ascii_uppercase();
 
-        // 优先使用 bin 目录下的 format.com，如果不存在则使用系统的
-        let format_cmd = if Path::new(&format_exe).exists() {
-            format_exe
-        } else {
-            "format.com".to_string()
+        let drive = format!("{}:", drive_letter);
+
+        // 卷标处理
+        let vol_label = match volume_label {
+            Some(label) if !label.is_empty() => label,
+            _ => "NewVolume",
         };
 
-        let mut args = vec![partition.to_string(), "/FS:NTFS".to_string(), "/q".to_string(), "/y".to_string()];
+        // 使用 cmd /c format 命令: format D: /FS:NTFS /V:Label /Q /Y
+        let cmd_args = format!("format {} /FS:NTFS /V:{} /Q /Y", drive, vol_label);
         
-        // 如果有卷标，添加 /V:label 参数
-        if let Some(label) = volume_label {
-            if !label.is_empty() {
-                args.push(format!("/V:{}", label));
-            }
-        }
+        log::info!("执行命令: cmd /c {}", cmd_args);
 
-        let output = new_command(&format_cmd)
-            .args(&args)
+        let output = new_command("cmd")
+            .args(["/c", &cmd_args])
             .output()?;
 
-        let result = gbk_to_utf8(&output.stdout);
-        log::info!("格式化结果: {}", result);
+        let stdout = gbk_to_utf8(&output.stdout);
+        let stderr = gbk_to_utf8(&output.stderr);
 
-        if !output.status.success() {
-            let stderr = gbk_to_utf8(&output.stderr);
-            anyhow::bail!("格式化失败: {}", stderr);
+        log::info!("format 输出:\n{}", stdout);
+        if !stderr.is_empty() {
+            log::warn!("format 错误输出:\n{}", stderr);
         }
 
-        Ok(result)
+        // 检查执行结果
+        let stdout_lower = stdout.to_lowercase();
+        let success_indicators = ["格式化完成", "format complete", "已完成", "complete"];
+        let has_success_indicator = success_indicators
+            .iter()
+            .any(|s| stdout_lower.contains(&s.to_lowercase()));
+        
+        if output.status.success() || has_success_indicator {
+            log::info!("分区 {} 格式化成功", drive);
+            Ok(stdout)
+        } else {
+            let error_msg = if !stderr.is_empty() {
+                stderr.trim().to_string()
+            } else if stdout.contains("无法") || stdout.contains("错误") || stdout.contains("失败") 
+                || stdout.contains("denied") || stdout.contains("error") || stdout.contains("拒绝") {
+                stdout.trim().to_string()
+            } else {
+                format!("格式化失败: {}", stdout.trim())
+            };
+            
+            log::error!("格式化失败: {}", error_msg);
+            anyhow::bail!("{}", error_msg);
+        }
     }
 
     /// 检测是否为UEFI模式

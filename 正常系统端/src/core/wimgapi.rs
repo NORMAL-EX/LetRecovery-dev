@@ -100,21 +100,25 @@ pub const WIM_REFERENCE_REPLACE: u32 = 0x0002_0000;
 pub const WIM_COMMIT_FLAG_APPEND: u32 = 0x0000_0001;
 
 // 消息类型
-pub const WIM_MSG_PROGRESS: u32 = 0x00009468;
-pub const WIM_MSG_PROCESS: u32 = 0x00009469;
-pub const WIM_MSG_SCANNING: u32 = 0x0000946A;
-pub const WIM_MSG_SETRANGE: u32 = 0x0000946B;
-pub const WIM_MSG_SETPOS: u32 = 0x0000946C;
-pub const WIM_MSG_STEPIT: u32 = 0x0000946D;
-pub const WIM_MSG_COMPRESS: u32 = 0x0000946E;
-pub const WIM_MSG_ERROR: u32 = 0x0000946F;
-pub const WIM_MSG_ALIGNMENT: u32 = 0x00009470;
-pub const WIM_MSG_RETRY: u32 = 0x00009471;
-pub const WIM_MSG_SPLIT: u32 = 0x00009472;
-pub const WIM_MSG_FILEINFO: u32 = 0x00009473;
-pub const WIM_MSG_INFO: u32 = 0x00009474;
-pub const WIM_MSG_WARNING: u32 = 0x00009475;
-pub const WIM_MSG_CHK_PROCESS: u32 = 0x00009476;
+// WIM_MSG = WM_APP + 0x1476 = 0x8000 + 0x1476 = 0x9476
+// WIM_MSG_TEXT = WIM_MSG + 1 = 0x9477
+// WIM_MSG_PROGRESS = WIM_MSG + 2 = 0x9478
+// 详见: https://github.com/jeffkl/ManagedWimgApi/blob/main/wimgapi.h
+pub const WIM_MSG_PROGRESS: u32 = 0x00009478;
+pub const WIM_MSG_PROCESS: u32 = 0x00009479;
+pub const WIM_MSG_SCANNING: u32 = 0x0000947A;
+pub const WIM_MSG_SETRANGE: u32 = 0x0000947B;
+pub const WIM_MSG_SETPOS: u32 = 0x0000947C;
+pub const WIM_MSG_STEPIT: u32 = 0x0000947D;
+pub const WIM_MSG_COMPRESS: u32 = 0x0000947E;
+pub const WIM_MSG_ERROR: u32 = 0x0000947F;
+pub const WIM_MSG_ALIGNMENT: u32 = 0x00009480;
+pub const WIM_MSG_RETRY: u32 = 0x00009481;
+pub const WIM_MSG_SPLIT: u32 = 0x00009482;
+pub const WIM_MSG_FILEINFO: u32 = 0x00009483;
+pub const WIM_MSG_INFO: u32 = 0x00009484;
+pub const WIM_MSG_WARNING: u32 = 0x00009485;
+pub const WIM_MSG_CHK_PROCESS: u32 = 0x00009486;
 pub const WIM_MSG_SUCCESS: u32 = 0x00000000;
 pub const WIM_MSG_ABORT_IMAGE: u32 = 0xFFFFFFFF;
 
@@ -309,6 +313,12 @@ pub struct WimProgress {
 static GLOBAL_PROGRESS: AtomicU8 = AtomicU8::new(0);
 
 /// 进度回调函数
+/// 
+/// 根据 Microsoft 文档，WIM_MSG_PROGRESS 消息中：
+/// - wParam: 进度百分比 (0-100)
+/// - lParam: 预计剩余时间（毫秒）
+/// 
+/// 参考: https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/wim/dd834944
 extern "system" fn progress_callback(
     msg_id: u32,
     wparam: usize,
@@ -317,24 +327,35 @@ extern "system" fn progress_callback(
 ) -> u32 {
     match msg_id {
         WIM_MSG_PROGRESS => {
-            let percent = (wparam & 0xFF) as u8;
-            GLOBAL_PROGRESS.store(percent, Ordering::SeqCst);
-            println!("[WIMGAPI] 进度: {}%", percent);
+            // wParam 直接是 DWORD 百分比值 (0-100)
+            // 使用 min(100) 防止异常值
+            let percent = (wparam as u32).min(100) as u8;
+            let old_progress = GLOBAL_PROGRESS.swap(percent, Ordering::SeqCst);
+            
+            // 只在进度变化时记录日志，避免日志过多
+            if percent != old_progress && (percent % 5 == 0 || percent == 100) {
+                log::info!("[WIMGAPI] 镜像操作进度: {}%", percent);
+            }
         }
         WIM_MSG_SCANNING => {
-            println!("[WIMGAPI] 正在扫描...");
+            log::info!("[WIMGAPI] 正在扫描文件...");
         }
         WIM_MSG_COMPRESS => {
-            println!("[WIMGAPI] 正在压缩...");
+            log::info!("[WIMGAPI] 正在压缩数据...");
         }
         WIM_MSG_ERROR => {
-            println!("[WIMGAPI] 发生错误");
+            log::error!("[WIMGAPI] WIM操作发生错误 (msg_id={:#x})", msg_id);
             return WIM_MSG_ABORT_IMAGE;
         }
         WIM_MSG_PROCESS => {
-            // 文件处理消息
+            // 文件处理消息，静默处理
         }
-        _ => {}
+        _ => {
+            // 记录未知消息类型，便于调试
+            if msg_id >= 0x9476 && msg_id <= 0x94A0 {
+                log::trace!("[WIMGAPI] 收到WIM消息: {:#x}, wparam={}", msg_id, wparam);
+            }
+        }
     }
     WIM_MSG_SUCCESS
 }
@@ -532,14 +553,27 @@ impl Wimgapi {
     }
 
     /// 注册消息回调
+    /// 返回注册结果，INVALID_CALLBACK_VALUE (0xFFFFFFFF) 表示失败
     ///
     /// # 参数
     /// - `handle`: WIM 文件句柄
     pub fn register_callback(&self, handle: Handle) -> u32 {
+        // 重置全局进度为0
         GLOBAL_PROGRESS.store(0, Ordering::SeqCst);
-        unsafe {
+        
+        let result = unsafe {
             (self.wim_register_message_callback)(handle, Some(progress_callback), null_mut())
+        };
+        
+        // 检查注册结果
+        if result == 0xFFFFFFFF {
+            let err = get_last_error();
+            log::error!("[WIMGAPI] 回调注册失败, 错误码={}", err);
+        } else {
+            log::info!("[WIMGAPI] 回调注册成功, callback_id={}", result);
         }
+        
+        result
     }
 
     /// 取消注册消息回调

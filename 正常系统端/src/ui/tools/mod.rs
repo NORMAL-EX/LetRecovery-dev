@@ -189,7 +189,7 @@ impl App {
                 }
 
                 if ui
-                    .add(egui::Button::new("搜索万能驱动").min_size(button_size))
+                    .add(egui::Button::new("万能驱动").min_size(button_size))
                     .clicked()
                 {
                     self.launch_wandrv_tool();
@@ -260,7 +260,7 @@ impl App {
     fn launch_wandrv_tool(&mut self) {
         match actions::launch_wandrv() {
             Ok(_) => {
-                self.tool_message = "已启动: RunWanDrv.exe".to_string();
+                self.tool_message = "已启动: QDZC.exe".to_string();
             }
             Err(e) => {
                 self.tool_message = e;

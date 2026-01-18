@@ -86,18 +86,22 @@ pub const WIM_COMPRESS_LZX: u32 = 2;
 pub const WIM_COMPRESS_LZMS: u32 = 3;
 
 // 消息类型
-pub const WIM_MSG_PROGRESS: u32 = 0x00009468;
+// WIM_MSG = WM_APP + 0x1476 = 0x8000 + 0x1476 = 0x9476
+// WIM_MSG_TEXT = WIM_MSG + 1 = 0x9477
+// WIM_MSG_PROGRESS = WIM_MSG + 2 = 0x9478
+// 详见: https://github.com/jeffkl/ManagedWimgApi/blob/main/wimgapi.h
+pub const WIM_MSG_PROGRESS: u32 = 0x00009478;
 #[allow(dead_code)]
-pub const WIM_MSG_PROCESS: u32 = 0x00009469;
-pub const WIM_MSG_SCANNING: u32 = 0x0000946A;
+pub const WIM_MSG_PROCESS: u32 = 0x00009479;
+pub const WIM_MSG_SCANNING: u32 = 0x0000947A;
 #[allow(dead_code)]
-pub const WIM_MSG_SETRANGE: u32 = 0x0000946B;
+pub const WIM_MSG_SETRANGE: u32 = 0x0000947B;
 #[allow(dead_code)]
-pub const WIM_MSG_SETPOS: u32 = 0x0000946C;
+pub const WIM_MSG_SETPOS: u32 = 0x0000947C;
 #[allow(dead_code)]
-pub const WIM_MSG_STEPIT: u32 = 0x0000946D;
-pub const WIM_MSG_COMPRESS: u32 = 0x0000946E;
-pub const WIM_MSG_ERROR: u32 = 0x0000946F;
+pub const WIM_MSG_STEPIT: u32 = 0x0000947D;
+pub const WIM_MSG_COMPRESS: u32 = 0x0000947E;
+pub const WIM_MSG_ERROR: u32 = 0x0000947F;
 pub const WIM_MSG_SUCCESS: u32 = 0x00000000;
 pub const WIM_MSG_ABORT_IMAGE: u32 = 0xFFFFFFFF;
 
@@ -260,6 +264,12 @@ pub struct WimProgress {
 static GLOBAL_PROGRESS: AtomicU8 = AtomicU8::new(0);
 
 /// 进度回调函数
+/// 
+/// 根据 Microsoft 文档，WIM_MSG_PROGRESS 消息中：
+/// - wParam: 进度百分比 (0-100)
+/// - lParam: 预计剩余时间（毫秒）
+/// 
+/// 参考: https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/wim/dd834944
 extern "system" fn progress_callback(
     msg_id: u32,
     wparam: usize,
@@ -268,21 +278,32 @@ extern "system" fn progress_callback(
 ) -> u32 {
     match msg_id {
         WIM_MSG_PROGRESS => {
-            let percent = (wparam & 0xFF) as u8;
-            GLOBAL_PROGRESS.store(percent, Ordering::SeqCst);
-            log::debug!("[WIMGAPI] 进度: {}%", percent);
+            // wParam 直接是 DWORD 百分比值 (0-100)
+            // 使用 min(100) 防止异常值
+            let percent = (wparam as u32).min(100) as u8;
+            let old_progress = GLOBAL_PROGRESS.swap(percent, Ordering::SeqCst);
+            
+            // 只在进度变化时记录日志，避免日志过多
+            if percent != old_progress && (percent % 5 == 0 || percent == 100) {
+                log::info!("[WIMGAPI] 镜像操作进度: {}%", percent);
+            }
         }
         WIM_MSG_SCANNING => {
-            log::debug!("[WIMGAPI] 正在扫描...");
+            log::info!("[WIMGAPI] 正在扫描文件...");
         }
         WIM_MSG_COMPRESS => {
-            log::debug!("[WIMGAPI] 正在压缩...");
+            log::info!("[WIMGAPI] 正在压缩数据...");
         }
         WIM_MSG_ERROR => {
-            log::error!("[WIMGAPI] 发生错误");
+            log::error!("[WIMGAPI] WIM操作发生错误 (msg_id={:#x})", msg_id);
             return WIM_MSG_ABORT_IMAGE;
         }
-        _ => {}
+        _ => {
+            // 记录未知消息类型，便于调试
+            if msg_id >= 0x9476 && msg_id <= 0x94A0 {
+                log::trace!("[WIMGAPI] 收到WIM消息: {:#x}, wparam={}", msg_id, wparam);
+            }
+        }
     }
     WIM_MSG_SUCCESS
 }
@@ -347,7 +368,52 @@ fn get_last_error() -> u32 {
 impl Wimgapi {
     /// 加载 wimgapi.dll 并解析所需函数
     pub fn new(path: Option<PathBuf>) -> Result<Self, WimApiError> {
-        let lib_path = path.unwrap_or_else(|| PathBuf::from("wimgapi.dll"));
+        // 优先级：
+        // 1. 用户指定的路径
+        // 2. 程序目录下的 wimgapi.dll（用户可放置新版本）
+        // 3. 程序 bin 目录下的 wimgapi.dll
+        // 4. PE 系统目录 X:\Windows\System32\wimgapi.dll
+        // 5. 默认搜索路径
+        let lib_path = if let Some(p) = path {
+            p
+        } else {
+            // 获取程序所在目录
+            let exe_dir = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|p| p.to_path_buf()));
+            
+            // 尝试程序目录
+            if let Some(ref dir) = exe_dir {
+                let local_path = dir.join("wimgapi.dll");
+                if local_path.exists() {
+                    log::info!("[WIMGAPI] 使用程序目录 wimgapi.dll: {:?}", local_path);
+                    local_path
+                } else {
+                    // 尝试 bin 子目录
+                    let bin_path = dir.join("bin").join("wimgapi.dll");
+                    if bin_path.exists() {
+                        log::info!("[WIMGAPI] 使用 bin 目录 wimgapi.dll: {:?}", bin_path);
+                        bin_path
+                    } else {
+                        // 尝试 PE 系统目录
+                        let pe_system_path = PathBuf::from("X:\\Windows\\System32\\wimgapi.dll");
+                        if pe_system_path.exists() {
+                            log::info!("[WIMGAPI] 使用 PE 系统 wimgapi.dll: {:?}", pe_system_path);
+                            pe_system_path
+                        } else {
+                            log::info!("[WIMGAPI] 使用默认 wimgapi.dll");
+                            PathBuf::from("wimgapi.dll")
+                        }
+                    }
+                }
+            } else {
+                // 无法获取程序目录，使用默认
+                log::info!("[WIMGAPI] 使用默认 wimgapi.dll");
+                PathBuf::from("wimgapi.dll")
+            }
+        };
+        
+        log::info!("[WIMGAPI] 加载 wimgapi.dll: {:?}", lib_path);
         let lib = unsafe { Library::new(&lib_path) }?;
 
         unsafe {
@@ -377,8 +443,13 @@ impl Wimgapi {
         disposition: u32,
         compression: u32,
     ) -> Result<Handle, WimApiError> {
+        log::info!("[WIMGAPI] open: 准备打开文件: {:?}", path);
+        log::info!("[WIMGAPI] open: access={:#x}, disposition={}, compression={}", access, disposition, compression);
+        
         let wide_path = path_to_wide(path);
         let mut creation_result: u32 = 0;
+
+        log::info!("[WIMGAPI] open: 即将调用 WIMCreateFile...");
 
         let handle = unsafe {
             (self.wim_create_file)(
@@ -391,10 +462,15 @@ impl Wimgapi {
             )
         };
 
+        log::info!("[WIMGAPI] open: WIMCreateFile 返回, handle={}, creation_result={}", handle, creation_result);
+
         if handle == 0 {
-            return Err(WimApiError::Win32Error(get_last_error()));
+            let err = get_last_error();
+            log::error!("[WIMGAPI] open: 打开失败, 错误码={}", err);
+            return Err(WimApiError::Win32Error(err));
         }
 
+        log::info!("[WIMGAPI] open: 文件打开成功");
         Ok(handle)
     }
 
@@ -409,19 +485,27 @@ impl Wimgapi {
 
     /// 设置临时文件路径
     pub fn set_temp_path(&self, handle: Handle, path: &Path) -> Result<(), WimApiError> {
+        log::info!("[WIMGAPI] set_temp_path: 即将调用 WIMSetTemporaryPath...");
         let wide_path = path_to_wide(path);
         let result = unsafe { (self.wim_set_temporary_path)(handle, wide_path.as_ptr()) };
+        log::info!("[WIMGAPI] set_temp_path: 返回 result={}", result);
         if result == 0 {
-            return Err(WimApiError::Win32Error(get_last_error()));
+            let err = get_last_error();
+            log::error!("[WIMGAPI] set_temp_path: 失败, 错误码={}", err);
+            return Err(WimApiError::Win32Error(err));
         }
         Ok(())
     }
 
     /// 加载镜像
     pub fn load_image(&self, handle: Handle, index: u32) -> Result<Handle, WimApiError> {
+        log::info!("[WIMGAPI] load_image: 即将调用 WIMLoadImage(index={})...", index);
         let image_handle = unsafe { (self.wim_load_image)(handle, index) };
+        log::info!("[WIMGAPI] load_image: 返回 handle={}", image_handle);
         if image_handle == 0 {
-            return Err(WimApiError::Win32Error(get_last_error()));
+            let err = get_last_error();
+            log::error!("[WIMGAPI] load_image: 失败, 错误码={}", err);
+            return Err(WimApiError::Win32Error(err));
         }
         Ok(image_handle)
     }
@@ -433,11 +517,24 @@ impl Wimgapi {
     }
 
     /// 注册消息回调
+    /// 返回注册结果，INVALID_CALLBACK_VALUE (0xFFFFFFFF) 表示失败
     pub fn register_callback(&self, handle: Handle) -> u32 {
+        // 重置全局进度为0
         GLOBAL_PROGRESS.store(0, Ordering::SeqCst);
-        unsafe {
+        
+        let result = unsafe {
             (self.wim_register_message_callback)(handle, Some(progress_callback), null_mut())
+        };
+        
+        // 检查注册结果
+        if result == 0xFFFFFFFF {
+            let err = get_last_error();
+            log::error!("[WIMGAPI] 回调注册失败, 错误码={}", err);
+        } else {
+            log::info!("[WIMGAPI] 回调注册成功, callback_id={}", result);
         }
+        
+        result
     }
 
     /// 取消注册消息回调
@@ -454,10 +551,14 @@ impl Wimgapi {
         target_path: &Path,
         flags: u32,
     ) -> Result<(), WimApiError> {
+        log::info!("[WIMGAPI] apply_image: 即将调用 WIMApplyImage(target={:?}, flags={})...", target_path, flags);
         let wide_path = path_to_wide(target_path);
         let result = unsafe { (self.wim_apply_image)(image_handle, wide_path.as_ptr(), flags) };
+        log::info!("[WIMGAPI] apply_image: 返回 result={}", result);
         if result == 0 {
-            return Err(WimApiError::Win32Error(get_last_error()));
+            let err = get_last_error();
+            log::error!("[WIMGAPI] apply_image: 失败, 错误码={}", err);
+            return Err(WimApiError::Win32Error(err));
         }
         Ok(())
     }
@@ -635,7 +736,20 @@ impl WimManager {
     ) -> Result<(), WimApiError> {
         let image_path = Path::new(image_file);
         let target_path = Path::new(target_dir);
-        let temp_dir = std::env::temp_dir();
+        
+        // PE环境下使用可靠的临时目录
+        // 优先级: X:\Windows\Temp -> 目标分区根目录
+        let temp_dir = {
+            let pe_temp = PathBuf::from("X:\\Windows\\Temp");
+            if pe_temp.exists() {
+                pe_temp
+            } else {
+                // 如果X盘temp不存在，使用目标分区
+                let target_temp = Path::new(target_dir).join("$WIM_TEMP$");
+                let _ = std::fs::create_dir_all(&target_temp);
+                target_temp
+            }
+        };
 
         log::info!("[WIMGAPI] 开始释放镜像: {} -> {}", image_file, target_dir);
         log::info!("[WIMGAPI] 镜像索引: {}", index);
@@ -649,10 +763,14 @@ impl WimManager {
         )?;
 
         // 设置临时路径
+        log::info!("[WIMGAPI] 设置临时路径: {:?}", temp_dir);
         self.wimgapi.set_temp_path(wim_handle, &temp_dir)?;
+        log::info!("[WIMGAPI] 临时路径设置成功");
 
         // 注册进度回调
+        log::info!("[WIMGAPI] 注册进度回调...");
         self.wimgapi.register_callback(wim_handle);
+        log::info!("[WIMGAPI] 进度回调注册成功");
 
         // 启动进度监控线程
         let progress_tx_clone = progress_tx.clone();
@@ -677,9 +795,14 @@ impl WimManager {
         });
 
         // 加载镜像
+        log::info!("[WIMGAPI] 加载镜像索引 {}...", index);
         let image_handle = match self.wimgapi.load_image(wim_handle, index) {
-            Ok(h) => h,
+            Ok(h) => {
+                log::info!("[WIMGAPI] 镜像加载成功, handle={}", h);
+                h
+            }
             Err(e) => {
+                log::error!("[WIMGAPI] 镜像加载失败: {}", e);
                 monitor_running.store(false, Ordering::SeqCst);
                 let _ = monitor_thread.join();
                 self.wimgapi.unregister_callback(wim_handle);
@@ -689,13 +812,16 @@ impl WimManager {
         };
 
         // 应用镜像
+        log::info!("[WIMGAPI] 开始应用镜像到: {:?}", target_path);
         let apply_result = self.wimgapi.apply_image(image_handle, target_path, 0);
+        log::info!("[WIMGAPI] 应用镜像完成, 结果: {:?}", apply_result.is_ok());
 
         // 停止进度监控
         monitor_running.store(false, Ordering::SeqCst);
         let _ = monitor_thread.join();
 
         // 清理
+        log::info!("[WIMGAPI] 清理资源...");
         self.wimgapi.unregister_callback(wim_handle);
         self.wimgapi.close(image_handle)?;
         self.wimgapi.close(wim_handle)?;
@@ -726,9 +852,20 @@ impl WimManager {
     ) -> Result<(), WimApiError> {
         let source_path = Path::new(source_dir);
         let image_path = Path::new(image_file);
-        let temp_dir = std::env::temp_dir();
+        
+        // PE环境下使用可靠的临时目录
+        // 优先级: X:\Windows\Temp -> 系统临时目录
+        let temp_dir = {
+            let pe_temp = PathBuf::from("X:\\Windows\\Temp");
+            if pe_temp.exists() {
+                pe_temp
+            } else {
+                std::env::temp_dir()
+            }
+        };
 
         log::info!("[WIMGAPI] 开始捕获镜像: {} -> {}", source_dir, image_file);
+        log::info!("[WIMGAPI] 临时目录: {:?}", temp_dir);
 
         // 确定是创建新文件还是追加
         let disposition = if image_path.exists() {
@@ -749,6 +886,7 @@ impl WimManager {
         self.wimgapi.set_temp_path(wim_handle, &temp_dir)?;
 
         // 注册进度回调
+        log::info!("[WIMGAPI] 注册进度回调...");
         self.wimgapi.register_callback(wim_handle);
 
         // 启动进度监控线程
@@ -774,11 +912,16 @@ impl WimManager {
         });
 
         // 捕获镜像
+        log::info!("[WIMGAPI] 开始捕获...");
         let capture_result = self.wimgapi.capture_image(wim_handle, source_path, 0);
 
         let image_handle = match capture_result {
-            Ok(h) => h,
+            Ok(h) => {
+                log::info!("[WIMGAPI] 捕获成功, handle={}", h);
+                h
+            }
             Err(e) => {
+                log::error!("[WIMGAPI] 捕获失败: {}", e);
                 monitor_running.store(false, Ordering::SeqCst);
                 let _ = monitor_thread.join();
                 self.wimgapi.unregister_callback(wim_handle);
@@ -799,6 +942,7 @@ impl WimManager {
         let _ = monitor_thread.join();
 
         // 清理
+        log::info!("[WIMGAPI] 清理资源...");
         self.wimgapi.unregister_callback(wim_handle);
         self.wimgapi.close(image_handle)?;
         self.wimgapi.close(wim_handle)?;

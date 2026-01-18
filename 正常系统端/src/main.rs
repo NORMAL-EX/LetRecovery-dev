@@ -209,10 +209,6 @@ fn check_dependencies() -> Result<(), Vec<String>> {
         "bin/format.com",
         "bin/aria2c.exe",
         "bin/ghost/ghost64.exe",
-        // tools 目录 - 工具箱
-        "tools/BOOTICE.exe",
-        "tools/ShowDrives_Gui.exe",
-        "tools/imdisk.cpl",
     ];
     
     let mut missing_files = Vec::new();
