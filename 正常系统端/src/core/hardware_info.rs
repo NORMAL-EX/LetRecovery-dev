@@ -1000,10 +1000,10 @@ impl HardwareInfo {
         lines.push(format!("主板型号: {}", mb_product));
         let mb_serial = if !self.motherboard.serial_number.is_empty() && !is_placeholder(&self.motherboard.serial_number) { &self.motherboard.serial_number } else { "未知" };
         lines.push(format!("主板编号: {}", mb_serial));
-        let mb_version = if !self.motherboard.version.is_empty() && !is_placeholder(&self.motherboard.version) { &self.motherboard.version } else { "None" };
+        let mb_version = if !self.motherboard.version.is_empty() && !is_placeholder(&self.motherboard.version) { &self.motherboard.version } else { "N/A" };
         let bios_version = if !self.bios.version.is_empty() { &self.bios.version } else { "未知" };
         let bios_date = if !self.bios.release_date.is_empty() { &self.bios.release_date } else { "未知" };
-        lines.push(format!("主板插槽: {}  BIOS版本: {}  更新日期: {}", mb_version, bios_version, bios_date));
+        lines.push(format!("主板版本: {}  BIOS版本: {}  更新日期: {}", mb_version, bios_version, bios_date));
         lines.push(format!(" CPU型号: {}", self.cpu.name));
         let ai_str = if self.cpu.supports_ai { " [支持AI人工智能]" } else { "" };
         lines.push(format!("  核心数: {} 线程数: {}{}", self.cpu.cores, self.cpu.logical_processors, ai_str));
@@ -1148,7 +1148,8 @@ impl HardwareInfo {
             let path = format!(r"\\.\PhysicalDrive{}", i);
             if let Some(mut disk) = query_disk_info(&path) {
                 disk.disk_index = i;
-                disk.is_ssd = is_disk_ssd(&disk.model, &disk.interface_type);
+                // 使用综合检测方法判断是否为SSD
+                disk.is_ssd = detect_disk_is_ssd(i, &disk.model, &disk.interface_type);
                 if let Some(style) = partition_styles.get(&i) { disk.partition_style = style.clone(); }
                 // 如果DeviceIoControl没有获取到大小，使用WMI的结果
                 if disk.size == 0 {
@@ -1402,43 +1403,473 @@ fn get_disk_partition_styles() -> HashMap<u32, String> {
     styles
 }
 
-fn is_disk_ssd(model: &str, interface: &str) -> bool {
-    if interface.to_uppercase() == "NVME" { return true; }
+// ============================================================================
+// 硬盘类型检测模块
+// 使用多种方法综合判断硬盘是 SSD 还是 HDD
+// ============================================================================
+
+/// 磁盘类型检测结果
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum DiskMediaType {
+    /// 固态硬盘
+    SSD,
+    /// 机械硬盘
+    HDD,
+    /// USB闪存盘（U盘）
+    USBFlash,
+    /// 无法确定
+    Unknown,
+}
+
+/// 从 MSFT_PhysicalDisk WMI 类获取的磁盘信息
+#[derive(Debug, Clone, Default)]
+struct WmiDiskMediaInfo {
+    /// DeviceId (对应 PhysicalDrive 编号)
+    device_id: String,
+    /// 友好名称
+    friendly_name: String,
+    /// MediaType: 0=Unspecified, 3=HDD, 4=SSD, 5=SCM
+    media_type: u16,
+    /// BusType: 7=USB, 11=SATA, 17=NVMe 等
+    bus_type: u16,
+    /// 转速: 0=SSD/闪存, 0xFFFFFFFF=未知HDD, 其他=HDD转速
+    spindle_speed: u32,
+}
+
+/// 使用 WMI MSFT_PhysicalDisk 类获取所有磁盘的媒体类型信息
+/// 这是 Windows 8+ 上最可靠的方法
+fn get_wmi_disk_media_info() -> HashMap<u32, WmiDiskMediaInfo> {
+    let _com = ComInitGuard::new();
+    let mut disk_info_map = HashMap::new();
+    
+    // 连接到 Storage 命名空间
+    let Some(wmi) = WmiConnection::connect("ROOT\\Microsoft\\Windows\\Storage") else {
+        return disk_info_map;
+    };
+    
+    // 查询 MSFT_PhysicalDisk
+    let Some(result) = wmi.query("SELECT DeviceId, FriendlyName, MediaType, BusType, SpindleSpeed FROM MSFT_PhysicalDisk") else {
+        return disk_info_map;
+    };
+    
+    for obj in result {
+        let device_id = obj.get_string("DeviceId").unwrap_or_default();
+        let friendly_name = obj.get_string("FriendlyName").unwrap_or_default();
+        let media_type = obj.get_u32("MediaType").unwrap_or(0) as u16;
+        let bus_type = obj.get_u32("BusType").unwrap_or(0) as u16;
+        let spindle_speed = obj.get_u32("SpindleSpeed").unwrap_or(0);
+        
+        // DeviceId 通常是数字字符串，如 "0", "1" 等
+        if let Ok(disk_index) = device_id.parse::<u32>() {
+            disk_info_map.insert(disk_index, WmiDiskMediaInfo {
+                device_id,
+                friendly_name,
+                media_type,
+                bus_type,
+                spindle_speed,
+            });
+        }
+    }
+    
+    disk_info_map
+}
+
+/// BusType 常量定义 (来自 MSFT_PhysicalDisk)
+mod bus_type {
+    pub const UNKNOWN: u16 = 0;
+    pub const SCSI: u16 = 1;
+    pub const ATAPI: u16 = 2;
+    pub const ATA: u16 = 3;
+    pub const IEEE1394: u16 = 4;  // FireWire
+    pub const SSA: u16 = 5;
+    pub const FIBRE_CHANNEL: u16 = 6;
+    pub const USB: u16 = 7;
+    pub const RAID: u16 = 8;
+    pub const ISCSI: u16 = 9;
+    pub const SAS: u16 = 10;
+    pub const SATA: u16 = 11;
+    pub const SD: u16 = 12;       // Secure Digital
+    pub const MMC: u16 = 13;      // MultiMedia Card
+    pub const VIRTUAL: u16 = 14;
+    pub const FILE_BACKED_VIRTUAL: u16 = 15;
+    pub const STORAGE_SPACES: u16 = 16;
+    pub const NVME: u16 = 17;
+    pub const SCM: u16 = 18;      // Storage Class Memory
+}
+
+/// MediaType 常量定义 (来自 MSFT_PhysicalDisk)
+mod media_type {
+    pub const UNSPECIFIED: u16 = 0;
+    pub const HDD: u16 = 3;
+    pub const SSD: u16 = 4;
+    pub const SCM: u16 = 5;  // Storage Class Memory
+}
+
+/// 使用 IOCTL_STORAGE_QUERY_PROPERTY 检测硬盘是否有寻道延迟
+/// IncursSeekPenalty = false → SSD
+/// IncursSeekPenalty = true → HDD
+fn detect_seek_penalty(disk_index: u32) -> Option<bool> {
+    // StorageDeviceSeekPenaltyProperty = 7
+    const STORAGE_DEVICE_SEEK_PENALTY_PROPERTY: u32 = 7;
+    const IOCTL_STORAGE_QUERY_PROPERTY_CODE: u32 = 0x002D1400;
+    
+    #[repr(C)]
+    #[allow(non_snake_case, dead_code)]
+    struct DEVICE_SEEK_PENALTY_DESCRIPTOR {
+        Version: u32,
+        Size: u32,
+        IncursSeekPenalty: u8,
+    }
+    
+    unsafe {
+        let disk_path = format!("\\\\.\\PhysicalDrive{}", disk_index);
+        let wide_path: Vec<u16> = disk_path.encode_utf16().chain(std::iter::once(0)).collect();
+        
+        let handle = match CreateFileW(
+            PCWSTR(wide_path.as_ptr()),
+            0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAGS_AND_ATTRIBUTES(0),
+            HANDLE::default(),
+        ) {
+            Ok(h) if h != INVALID_HANDLE_VALUE => h,
+            _ => return None,
+        };
+        
+        let mut query: STORAGE_PROPERTY_QUERY = zeroed();
+        query.PropertyId = windows::Win32::System::Ioctl::STORAGE_PROPERTY_ID(STORAGE_DEVICE_SEEK_PENALTY_PROPERTY as i32);
+        query.QueryType = PropertyStandardQuery;
+        
+        let mut descriptor: DEVICE_SEEK_PENALTY_DESCRIPTOR = zeroed();
+        let mut bytes_returned: u32 = 0;
+        
+        let result = DeviceIoControl(
+            handle,
+            IOCTL_STORAGE_QUERY_PROPERTY_CODE,
+            Some(&query as *const _ as *const std::ffi::c_void),
+            size_of::<STORAGE_PROPERTY_QUERY>() as u32,
+            Some(&mut descriptor as *mut _ as *mut std::ffi::c_void),
+            size_of::<DEVICE_SEEK_PENALTY_DESCRIPTOR>() as u32,
+            Some(&mut bytes_returned),
+            None,
+        );
+        
+        let _ = CloseHandle(handle);
+        
+        if result.is_ok() && bytes_returned >= size_of::<DEVICE_SEEK_PENALTY_DESCRIPTOR>() as u32 {
+            return Some(descriptor.IncursSeekPenalty != 0);
+        }
+        
+        None
+    }
+}
+
+/// 使用 IOCTL 检测硬盘的 Trim 支持
+fn detect_trim_support(disk_index: u32) -> Option<bool> {
+    const STORAGE_DEVICE_TRIM_PROPERTY: u32 = 8;
+    const IOCTL_STORAGE_QUERY_PROPERTY_CODE: u32 = 0x002D1400;
+    
+    #[repr(C)]
+    #[allow(non_snake_case, dead_code)]
+    struct DEVICE_TRIM_DESCRIPTOR {
+        Version: u32,
+        Size: u32,
+        TrimEnabled: u8,
+    }
+    
+    unsafe {
+        let disk_path = format!("\\\\.\\PhysicalDrive{}", disk_index);
+        let wide_path: Vec<u16> = disk_path.encode_utf16().chain(std::iter::once(0)).collect();
+        
+        let handle = match CreateFileW(
+            PCWSTR(wide_path.as_ptr()),
+            0,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAGS_AND_ATTRIBUTES(0),
+            HANDLE::default(),
+        ) {
+            Ok(h) if h != INVALID_HANDLE_VALUE => h,
+            _ => return None,
+        };
+        
+        let mut query: STORAGE_PROPERTY_QUERY = zeroed();
+        query.PropertyId = windows::Win32::System::Ioctl::STORAGE_PROPERTY_ID(STORAGE_DEVICE_TRIM_PROPERTY as i32);
+        query.QueryType = PropertyStandardQuery;
+        
+        let mut descriptor: DEVICE_TRIM_DESCRIPTOR = zeroed();
+        let mut bytes_returned: u32 = 0;
+        
+        let result = DeviceIoControl(
+            handle,
+            IOCTL_STORAGE_QUERY_PROPERTY_CODE,
+            Some(&query as *const _ as *const std::ffi::c_void),
+            size_of::<STORAGE_PROPERTY_QUERY>() as u32,
+            Some(&mut descriptor as *mut _ as *mut std::ffi::c_void),
+            size_of::<DEVICE_TRIM_DESCRIPTOR>() as u32,
+            Some(&mut bytes_returned),
+            None,
+        );
+        
+        let _ = CloseHandle(handle);
+        
+        if result.is_ok() && bytes_returned >= size_of::<DEVICE_TRIM_DESCRIPTOR>() as u32 {
+            return Some(descriptor.TrimEnabled != 0);
+        }
+        
+        None
+    }
+}
+
+/// 通过型号名称判断是否为已知的SSD
+fn is_known_ssd_by_model(model: &str) -> Option<bool> {
     let model_lower = model.to_lowercase();
-    if model_lower.contains("ssd") || model_lower.contains("nvme") || model_lower.contains("solid") { return true; }
-    // 已知SSD品牌和型号前缀
+    
+    // 1. 明确的SSD关键词 → 一定是SSD
+    let ssd_keywords = ["ssd", "nvme", "solid state", "m.2 pcie"];
+    for keyword in &ssd_keywords {
+        if model_lower.contains(keyword) { return Some(true); }
+    }
+    
+    // 2. 明确的HDD关键词/系列 → 一定是HDD
+    let hdd_series = [
+        // Seagate HDD系列
+        "barracuda", "ironwolf", "skyhawk", "exos", "firecuda", "backup plus", "expansion",
+        // WD HDD系列
+        "wd blue", "wd black", "wd red", "wd purple", "wd gold", "wd elements", "my book", "easystore", "my passport ultra",
+        // Toshiba HDD系列
+        "toshiba dt", "toshiba hdw", "toshiba md", "toshiba p300", "toshiba x300", "toshiba n300", "toshiba s300", "canvio",
+        // Hitachi/HGST
+        "hitachi", "hgst", "ultrastar", "deskstar", "travelstar",
+        // 其他HDD特征
+        "hard disk", "hdd"
+    ];
+    for series in &hdd_series {
+        if model_lower.contains(series) {
+            // 特殊处理：某些系列同时有HDD和SSD版本，需要检查是否有"ssd"后缀
+            if !model_lower.contains("ssd") { return Some(false); }
+        }
+    }
+    
+    // 3. 已知SSD品牌和型号前缀
     let ssd_patterns = [
-        // 主流品牌
-        "samsung", "sandisk", "crucial", "kingston", "wd sn", "intel ssd", "hynix", "micron",
-        "toshiba", "adata", "plextor", "corsair", "patriot", "pny", "transcend", "lexar",
+        // 三星 NVMe/SATA SSD
+        "samsung 9", "samsung 8", "samsung 7", "mzvl", "mzvp", "mzql", "pm9", "pm981", "pm991",
+        // 西数 SSD (WD SN系列是NVMe SSD)
+        "wd sn", "wd_black sn", "wd blue sn", "wd green sn",
+        // Intel SSD
+        "intel ssd", "intel optane", "ssdpe", "ssdsc",
+        // 海力士/美光
+        "hynix", "micron", "crucial", "p1", "p2", "p3", "p5", "mx500", "bx500",
+        // 金士顿 SSD
+        "kingston a", "kingston nv", "kingston kc", "kingston snv", "kingston sa", "sa400", "nv1", "nv2",
+        // 闪迪
+        "sandisk", "extreme pro", "extreme portable", "ultra 3d",
+        // 其他品牌
+        "adata", "xpg", "plextor", "corsair", "patriot", "pny", "transcend", "lexar",
         // NVMe型号前缀
-        "hfm", "mzvl", "mzvp", "mzql", "pc711", "pc801", "pm9", "pm981", "pm991", "kxg", "thns",
+        "hfm", "pc711", "pc801", "kxg", "thns", "kbg",
         // 国产品牌
         "fanxiang", "梵想", "zhitai", "致态", "changjiang", "长江", "gloway", "光威",
         "netac", "朗科", "colorful", "七彩虹", "aigo", "爱国者", "hikvision", "海康威视",
-        "orico", "奥睿科", "blueendless", "蓝硕", "ugreen", "绿联",
-        // 移动SSD常见型号
-        "ps2000", "ps1000", "ps500", "t5", "t7", "x5", "extreme portable", "my passport ssd",
-        "u39", "u38", "u37", "s55", "s50", "nvme portable", "thunderbolt"
+        "orico ssd", "kioxia", "铠侠",
+        // 移动SSD
+        "t5", "t7", "x5", "my passport ssd"
     ];
-    for pattern in &ssd_patterns { if model_lower.contains(pattern) { return true; } }
-    // USB接口的特殊处理：检查是否为已知的USB机械硬盘特征
-    if interface.to_uppercase() == "USB" {
-        // 机械硬盘通常有这些特征
-        let hdd_patterns = ["wd elements", "seagate expansion", "seagate backup", "toshiba canvio",
-                           "wd my book", "wd easystore", "lacie", "g-drive", "wd my passport ultra"];
-        for pattern in &hdd_patterns { if model_lower.contains(pattern) { return false; } }
-        // 如果USB设备型号包含数字+字母组合且较短，很可能是移动SSD
-        let is_short_model = model.len() <= 10;
-        let has_alphanumeric = model.chars().any(|c| c.is_ascii_digit()) && model.chars().any(|c| c.is_ascii_alphabetic());
-        if is_short_model && has_alphanumeric { return true; }
+    for pattern in &ssd_patterns {
+        if model_lower.contains(pattern) { return Some(true); }
     }
+    
+    // 4. USB闪存盘品牌/关键词
+    let usb_flash_patterns = [
+        "datatraveler", "cruzer", "sandisk ultra", "usb flash", "flash drive",
+        "transcend jetflash", "pny attache", "lexar jumpdrive", "kingston dtig", "kingston dtse"
+    ];
+    for pattern in &usb_flash_patterns {
+        if model_lower.contains(pattern) { return Some(false); } // 不是SSD，也不是HDD
+    }
+    
+    // 无法通过型号判断
+    None
+}
+
+/// 通过型号名称判断USB设备是否为外置机械硬盘
+fn is_known_usb_hdd(model: &str) -> bool {
+    let model_lower = model.to_lowercase();
+    
+    // 已知的USB外置机械硬盘品牌/系列
+    let usb_hdd_patterns = [
+        "wd elements", "wd easystore", "wd my book", "wd my passport ultra",
+        "seagate expansion", "seagate backup plus", "seagate portable", "seagate game drive",
+        "toshiba canvio", "toshiba store",
+        "lacie", "g-drive", "g-technology",
+        "transcend storejet",
+        "silicon power armor"
+    ];
+    
+    for pattern in &usb_hdd_patterns {
+        if model_lower.contains(pattern) { return true; }
+    }
+    
     false
 }
 
-fn is_placeholder(s: &str) -> bool {
+/// 通过型号名称判断USB设备是否为外置SSD
+fn is_known_usb_ssd(model: &str) -> bool {
+    let model_lower = model.to_lowercase();
+    
+    // 已知的USB外置SSD品牌/系列
+    let usb_ssd_patterns = [
+        "samsung t5", "samsung t7", "samsung x5",
+        "sandisk extreme portable", "sandisk extreme pro portable",
+        "wd my passport ssd", "wd_black p50", "wd_black p40",
+        "crucial x6", "crucial x8", "crucial x9", "crucial x10",
+        "seagate fast ssd", "seagate one touch ssd",
+        "lacie rugged ssd", "lacie portable ssd",
+        "nvme portable", "usb ssd", "portable ssd"
+    ];
+    
+    for pattern in &usb_ssd_patterns {
+        if model_lower.contains(pattern) { return true; }
+    }
+    
+    false
+}
+
+/// 综合检测磁盘类型
+/// 返回 true 表示是 SSD，false 表示是 HDD
+fn detect_disk_is_ssd(disk_index: u32, model: &str, interface: &str) -> bool {
+    // 获取 WMI 信息（如果可用）
+    static WMI_DISK_INFO: std::sync::OnceLock<HashMap<u32, WmiDiskMediaInfo>> = std::sync::OnceLock::new();
+    let wmi_info = WMI_DISK_INFO.get_or_init(get_wmi_disk_media_info);
+    
+    let wmi_disk = wmi_info.get(&disk_index);
+    
+    // =====================================================
+    // 第1层：接口类型快速判断
+    // =====================================================
+    
+    // NVMe 接口 → 一定是 SSD
+    if interface.to_uppercase() == "NVME" { return true; }
+    if let Some(info) = wmi_disk {
+        if info.bus_type == bus_type::NVME { return true; }
+        // SCM (Storage Class Memory) → 类似 SSD
+        if info.bus_type == bus_type::SCM { return true; }
+    }
+    
+    // =====================================================
+    // 第2层：WMI MSFT_PhysicalDisk MediaType（最可靠）
+    // =====================================================
+    
+    if let Some(info) = wmi_disk {
+        match info.media_type {
+            media_type::SSD => return true,
+            media_type::HDD => return false,
+            media_type::SCM => return true,
+            media_type::UNSPECIFIED => {
+                // MediaType = 0 时需要进一步判断
+                // 检查 SpindleSpeed
+                if info.spindle_speed > 0 && info.spindle_speed != 0xFFFFFFFF {
+                    // 有明确转速 → HDD
+                    return false;
+                }
+                // SpindleSpeed = 0 可能是 SSD 或 USB 闪存盘
+                // SpindleSpeed = 0xFFFFFFFF 是未知转速的 HDD
+                if info.spindle_speed == 0xFFFFFFFF {
+                    // 未知转速，很可能是老式 HDD
+                    return false;
+                }
+                
+                // USB 设备特殊处理
+                if info.bus_type == bus_type::USB {
+                    // USB 设备需要更精细的判断
+                    if is_known_usb_ssd(model) { return true; }
+                    if is_known_usb_hdd(model) { return false; }
+                    // USB 闪存盘和小型 USB SSD 通常 SpindleSpeed = 0
+                    // 无法确定时，默认为非 SSD（避免误判）
+                }
+            }
+            _ => {}
+        }
+    }
+    
+    // =====================================================
+    // 第3层：IOCTL 检测
+    // =====================================================
+    
+    // SeekPenalty 检测（非常可靠）
+    if let Some(has_seek_penalty) = detect_seek_penalty(disk_index) {
+        // 无寻道延迟 = SSD
+        if !has_seek_penalty {
+            // 但要排除 USB 闪存盘的误判
+            if let Some(info) = wmi_disk {
+                if info.bus_type == bus_type::USB && !is_known_usb_ssd(model) {
+                    // USB 设备且不是已知的 USB SSD，可能是 U 盘
+                    // 继续其他检测
+                } else {
+                    return true;
+                }
+            } else {
+                return true;
+            }
+        } else {
+            // 有寻道延迟 = HDD
+            return false;
+        }
+    }
+    
+    // Trim 支持检测（辅助参考）
+    if let Some(has_trim) = detect_trim_support(disk_index) {
+        if has_trim {
+            // 支持 Trim 通常是 SSD
+            // 但某些 HDD 也可能支持，需要结合型号判断
+            if let Some(is_ssd) = is_known_ssd_by_model(model) {
+                return is_ssd;
+            }
+            // 如果支持 Trim 且不是已知 HDD，认为是 SSD
+            return true;
+        }
+    }
+    
+    // =====================================================
+    // 第4层：型号名称匹配（最后手段）
+    // =====================================================
+    
+    if let Some(is_ssd) = is_known_ssd_by_model(model) {
+        return is_ssd;
+    }
+    
+    // =====================================================
+    // 默认判断
+    // =====================================================
+    
+    // 根据接口类型做最后推断
+    match interface.to_uppercase().as_str() {
+        "NVME" => true,   // 前面应该已经处理了
+        "SCSI" | "SAS" => false,  // 服务器磁盘通常是 HDD
+        "USB" => {
+            // USB 设备默认为非 SSD（保守判断）
+            // 因为 USB 闪存盘很常见，误判会困扰用户
+            false
+        }
+        _ => {
+            // SATA/ATA 等接口无法确定时，保守判断为 HDD
+            false
+        }
+    }
+}
+
+/// 检查字符串是否为占位符值（如 "To Be Filled", "Default string" 等）
+pub fn is_placeholder_str(s: &str) -> bool {
     let lower = s.to_lowercase();
     lower.contains("to be filled") || lower.contains("default string") || lower == "none" || lower == "n/a" || lower == "unknown" || lower.is_empty()
+}
+
+fn is_placeholder(s: &str) -> bool {
+    is_placeholder_str(s)
 }
 
 pub fn beautify_manufacturer_name(name: &str) -> String {

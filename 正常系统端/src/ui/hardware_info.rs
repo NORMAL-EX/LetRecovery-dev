@@ -144,8 +144,8 @@ impl App {
                                     ui.label(if !hw_info.motherboard.serial_number.is_empty() { &hw_info.motherboard.serial_number } else { "未知" });
                                     ui.end_row();
                                     
-                                    ui.label("主板插槽:");
-                                    ui.label(if !hw_info.motherboard.version.is_empty() { &hw_info.motherboard.version } else { "None" });
+                                    ui.label("主板版本:");
+                                    ui.label(if !hw_info.motherboard.version.is_empty() && !crate::core::hardware_info::is_placeholder_str(&hw_info.motherboard.version) { &hw_info.motherboard.version } else { "N/A" });
                                     ui.end_row();
                                     
                                     ui.label("BIOS版本:");

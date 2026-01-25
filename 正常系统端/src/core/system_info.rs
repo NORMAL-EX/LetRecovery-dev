@@ -70,16 +70,9 @@ impl SystemInfo {
     /// 使用 Windows API 检测启动模式
     #[cfg(windows)]
     fn get_boot_mode() -> Result<BootMode> {
-        // 方法1: 检查 EFI 系统分区特征文件/目录
-        if std::path::Path::new("\\EFI").exists()
-            || std::path::Path::new("C:\\EFI").exists()
-            || std::path::Path::new("X:\\EFI").exists()
-        {
-            return Ok(BootMode::UEFI);
-        }
-
-        // 方法2: 使用 GetFirmwareEnvironmentVariableW API
+        // 使用 GetFirmwareEnvironmentVariableW API 检测
         // 这个 API 在 Legacy BIOS 下会返回 ERROR_INVALID_FUNCTION (1)
+        // 在 UEFI 模式下会返回 ERROR_NOACCESS (998) 或其他错误（因为我们查询的是空变量）
         unsafe {
             let name: Vec<u16> = "".encode_utf16().chain(std::iter::once(0)).collect();
             let guid: Vec<u16> = "{00000000-0000-0000-0000-000000000000}"
@@ -101,14 +94,15 @@ impl SystemInfo {
                 let raw_error = error.raw_os_error().unwrap_or(0) as u32;
                 
                 // ERROR_INVALID_FUNCTION (1) 表示是 Legacy BIOS
+                // 这是最可靠的判断方式
                 if raw_error == 1 {
                     return Ok(BootMode::Legacy);
                 }
-                // 其他错误（如 ERROR_NOACCESS 998）表示是 UEFI，只是没有访问权限
+                // 其他错误（如 ERROR_NOACCESS 998, ERROR_ENVVAR_NOT_FOUND 203）表示是 UEFI
                 return Ok(BootMode::UEFI);
             }
 
-            // 如果调用成功，说明是 UEFI
+            // 如果调用成功（不太可能发生，因为我们查询的是空变量），说明是 UEFI
             Ok(BootMode::UEFI)
         }
     }
@@ -118,132 +112,146 @@ impl SystemInfo {
         Ok(BootMode::Legacy)
     }
 
-    /// 获取 TPM 信息（使用注册表）
+    /// 获取 TPM 信息（使用 WMI 和注册表）
     #[cfg(windows)]
     fn get_tpm_info() -> (bool, String) {
-        // 方法1: 检查 TPM 服务注册表键
-        let tpm_present = Self::check_tpm_registry();
-        
-        if tpm_present {
-            // 尝试获取版本
-            let version = Self::get_tpm_version_from_registry();
-            (true, version)
-        } else {
-            (false, String::new())
+        // 方法1: 使用 WMI 查询 Win32_Tpm 类（最可靠）
+        if let Some((enabled, version)) = Self::get_tpm_via_wmi() {
+            return (enabled, version);
         }
-    }
-
-    #[cfg(not(windows))]
-    fn get_tpm_info() -> (bool, String) {
+        
+        // 方法2: 检查 TPM 设备注册表项
+        if let Some((enabled, version)) = Self::get_tpm_via_registry() {
+            return (enabled, version);
+        }
+        
         (false, String::new())
     }
-
-    /// 检查 TPM 是否存在（通过注册表）
+    
+    /// 通过 WMI 查询 TPM 状态
     #[cfg(windows)]
-    fn check_tpm_registry() -> bool {
+    fn get_tpm_via_wmi() -> Option<(bool, String)> {
+        use windows::core::BSTR;
+        use windows::Win32::System::Com::{
+            CoCreateInstance, CoInitializeEx, CoSetProxyBlanket, CoUninitialize,
+            CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, EOAC_NONE,
+            RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE,
+        };
+        use windows::Win32::System::Wmi::{
+            IWbemLocator, WbemLocator, WBEM_FLAG_FORWARD_ONLY, WBEM_FLAG_RETURN_IMMEDIATELY,
+            WBEM_INFINITE,
+        };
+        
+        const RPC_C_AUTHN_DEFAULT: u32 = 0xFFFFFFFF;
+        const RPC_C_AUTHZ_NONE: u32 = 0;
+        
         unsafe {
-            // 检查 TPM 服务
-            let subkey: Vec<u16> = "SYSTEM\\CurrentControlSet\\Services\\TPM"
-                .encode_utf16()
-                .chain(std::iter::once(0))
-                .collect();
-
-            let mut hkey = HKEY::default();
-            let result = RegOpenKeyExW(
-                HKEY_LOCAL_MACHINE,
-                PCWSTR::from_raw(subkey.as_ptr()),
-                0,
-                KEY_READ,
-                &mut hkey,
-            );
-
-            if result.is_ok() {
-                let _ = RegCloseKey(hkey);
-                return true;
+            // 初始化 COM
+            let com_init = CoInitializeEx(None, COINIT_MULTITHREADED);
+            let should_uninit = com_init.is_ok();
+            
+            let result = (|| -> Option<(bool, String)> {
+                // 创建 WMI 定位器
+                let locator: IWbemLocator = CoCreateInstance(
+                    &WbemLocator,
+                    None,
+                    CLSCTX_INPROC_SERVER,
+                ).ok()?;
+                
+                // 连接到 TPM 命名空间
+                let namespace = BSTR::from("ROOT\\CIMV2\\Security\\MicrosoftTpm");
+                let services = locator.ConnectServer(
+                    &namespace,
+                    &BSTR::new(),
+                    &BSTR::new(),
+                    &BSTR::new(),
+                    0,
+                    &BSTR::new(),
+                    None,
+                ).ok()?;
+                
+                // 设置代理安全级别
+                CoSetProxyBlanket(
+                    &services,
+                    RPC_C_AUTHN_DEFAULT,
+                    RPC_C_AUTHZ_NONE,
+                    None,
+                    RPC_C_AUTHN_LEVEL_CALL,
+                    RPC_C_IMP_LEVEL_IMPERSONATE,
+                    None,
+                    EOAC_NONE,
+                ).ok()?;
+                
+                // 查询 Win32_Tpm
+                let query_lang = BSTR::from("WQL");
+                let query = BSTR::from("SELECT * FROM Win32_Tpm");
+                
+                let enumerator = services.ExecQuery(
+                    &query_lang,
+                    &query,
+                    WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY,
+                    None,
+                ).ok()?;
+                
+                let mut objects = [None];
+                let mut returned: u32 = 0;
+                
+                if enumerator.Next(WBEM_INFINITE, &mut objects, &mut returned).is_ok() && returned > 0 {
+                    if let Some(obj) = objects[0].take() {
+                        // 获取 IsEnabled_InitialValue 属性
+                        let prop_name = BSTR::from("IsEnabled_InitialValue");
+                        let mut value = windows::core::VARIANT::default();
+                        
+                        let is_enabled = if obj.Get(&prop_name, 0, &mut value, None, None).is_ok() {
+                            // 尝试获取布尔值
+                            bool::try_from(&value).unwrap_or(false)
+                        } else {
+                            // 如果能查询到 Win32_Tpm 对象，说明 TPM 存在
+                            true
+                        };
+                        
+                        // 获取 SpecVersion 属性
+                        let spec_prop = BSTR::from("SpecVersion");
+                        let mut spec_value = windows::core::VARIANT::default();
+                        
+                        let version = if obj.Get(&spec_prop, 0, &mut spec_value, None, None).is_ok() {
+                            if let Ok(bstr) = BSTR::try_from(&spec_value) {
+                                let full_version = bstr.to_string();
+                                // SpecVersion 格式通常是 "2.0, 0, 1.59" 取第一部分
+                                full_version.split(',').next().unwrap_or("").trim().to_string()
+                            } else {
+                                "2.0".to_string()
+                            }
+                        } else {
+                            "2.0".to_string()
+                        };
+                        
+                        return Some((is_enabled, version));
+                    }
+                }
+                
+                None
+            })();
+            
+            if should_uninit {
+                CoUninitialize();
             }
-
-            // 备选：检查 TPM 设备注册表 (TPM 2.0)
-            let subkey: Vec<u16> = "SYSTEM\\CurrentControlSet\\Enum\\ACPI\\MSFT0101"
-                .encode_utf16()
-                .chain(std::iter::once(0))
-                .collect();
-
-            let result = RegOpenKeyExW(
-                HKEY_LOCAL_MACHINE,
-                PCWSTR::from_raw(subkey.as_ptr()),
-                0,
-                KEY_READ,
-                &mut hkey,
-            );
-
-            if result.is_ok() {
-                let _ = RegCloseKey(hkey);
-                return true;
-            }
-
-            false
+            
+            result
         }
     }
-
-    /// 从注册表获取 TPM 版本
+    
+    /// 通过注册表检测 TPM
     #[cfg(windows)]
-    fn get_tpm_version_from_registry() -> String {
+    fn get_tpm_via_registry() -> Option<(bool, String)> {
         unsafe {
-            // 尝试从 TPM 注册表读取版本信息
-            let subkey: Vec<u16> = "SOFTWARE\\Microsoft\\Tpm"
-                .encode_utf16()
-                .chain(std::iter::once(0))
-                .collect();
-
-            let mut hkey = HKEY::default();
-            let result = RegOpenKeyExW(
-                HKEY_LOCAL_MACHINE,
-                PCWSTR::from_raw(subkey.as_ptr()),
-                0,
-                KEY_READ,
-                &mut hkey,
-            );
-
-            if result.is_ok() {
-                // 尝试读取 SpecVersion
-                let value_name: Vec<u16> = "SpecVersion"
-                    .encode_utf16()
-                    .chain(std::iter::once(0))
-                    .collect();
-                
-                let mut buffer = [0u8; 256];
-                let mut buffer_size = buffer.len() as u32;
-                let mut value_type = REG_SZ;
-
-                let result = RegQueryValueExW(
-                    hkey,
-                    PCWSTR::from_raw(value_name.as_ptr()),
-                    None,
-                    Some(&mut value_type),
-                    Some(buffer.as_mut_ptr()),
-                    Some(&mut buffer_size),
-                );
-
-                let _ = RegCloseKey(hkey);
-
-                if result.is_ok() && buffer_size > 0 {
-                    let wide_str: &[u16] = std::slice::from_raw_parts(
-                        buffer.as_ptr() as *const u16,
-                        (buffer_size as usize / 2).saturating_sub(1),
-                    );
-                    let version = String::from_utf16_lossy(wide_str);
-                    // 取逗号前的第一部分
-                    return version.split(',').next().unwrap_or("").trim().to_string();
-                }
-            }
-
-            // 通过设备枚举检测版本
-            // TPM 2.0 设备路径
+            // 检查 TPM 2.0 设备
             let subkey_20: Vec<u16> = "SYSTEM\\CurrentControlSet\\Enum\\ACPI\\MSFT0101"
                 .encode_utf16()
                 .chain(std::iter::once(0))
                 .collect();
-
+            
+            let mut hkey = HKEY::default();
             let result = RegOpenKeyExW(
                 HKEY_LOCAL_MACHINE,
                 PCWSTR::from_raw(subkey_20.as_ptr()),
@@ -251,15 +259,89 @@ impl SystemInfo {
                 KEY_READ,
                 &mut hkey,
             );
-
+            
             if result.is_ok() {
                 let _ = RegCloseKey(hkey);
-                return "2.0".to_string();
+                // TPM 2.0 设备存在
+                // 检查是否启用
+                let is_enabled = Self::check_tpm_enabled_registry();
+                return Some((is_enabled, "2.0".to_string()));
             }
-
-            // 默认返回 2.0（现代系统大多是 TPM 2.0）
-            "2.0".to_string()
+            
+            // 检查 TPM 1.2 设备
+            let subkey_12: Vec<u16> = "SYSTEM\\CurrentControlSet\\Enum\\Root\\SecurityDevices\\0000"
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+            
+            let result = RegOpenKeyExW(
+                HKEY_LOCAL_MACHINE,
+                PCWSTR::from_raw(subkey_12.as_ptr()),
+                0,
+                KEY_READ,
+                &mut hkey,
+            );
+            
+            if result.is_ok() {
+                let _ = RegCloseKey(hkey);
+                let is_enabled = Self::check_tpm_enabled_registry();
+                return Some((is_enabled, "1.2".to_string()));
+            }
+            
+            None
         }
+    }
+    
+    /// 检查 TPM 是否启用（通过 SOFTWARE\Microsoft\Tpm 注册表键）
+    #[cfg(windows)]
+    fn check_tpm_enabled_registry() -> bool {
+        unsafe {
+            let subkey: Vec<u16> = "SOFTWARE\\Microsoft\\Tpm"
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+            
+            let mut hkey = HKEY::default();
+            let result = RegOpenKeyExW(
+                HKEY_LOCAL_MACHINE,
+                PCWSTR::from_raw(subkey.as_ptr()),
+                0,
+                KEY_READ,
+                &mut hkey,
+            );
+            
+            if result.is_err() {
+                return false;
+            }
+            
+            // 检查 SpecVersion 是否存在（如果存在说明 TPM 已被初始化/启用）
+            let value_name: Vec<u16> = "SpecVersion"
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+            
+            let mut buffer = [0u8; 256];
+            let mut buffer_size = buffer.len() as u32;
+            let mut value_type = REG_SZ;
+            
+            let result = RegQueryValueExW(
+                hkey,
+                PCWSTR::from_raw(value_name.as_ptr()),
+                None,
+                Some(&mut value_type),
+                Some(buffer.as_mut_ptr()),
+                Some(&mut buffer_size),
+            );
+            
+            let _ = RegCloseKey(hkey);
+            
+            result.is_ok() && buffer_size > 0
+        }
+    }
+    
+    #[cfg(not(windows))]
+    fn get_tpm_info() -> (bool, String) {
+        (false, String::new())
     }
 
     /// 使用注册表 API 检测安全启动状态
