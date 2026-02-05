@@ -117,16 +117,6 @@ impl OfflineRegistry {
         Ok(())
     }
 
-    /// 删除注册表键
-    pub fn delete_key(key_path: &str) -> Result<()> {
-        let _ = create_command("reg.exe")
-            .args(["delete", key_path, "/f"])
-            .output();
-
-        // 忽略不存在的情况
-        Ok(())
-    }
-
     /// 创建注册表键（如果不存在）
     pub fn create_key(key_path: &str) -> Result<()> {
         let output = create_command("reg.exe")
@@ -136,28 +126,6 @@ impl OfflineRegistry {
         if !output.status.success() {
             let stderr = gbk_to_utf8(&output.stderr);
             anyhow::bail!("Failed to create registry key: {}", stderr);
-        }
-        Ok(())
-    }
-
-    /// 删除注册表值
-    pub fn delete_value(key_path: &str, value_name: &str) -> Result<()> {
-        let _ = create_command("reg.exe")
-            .args(["delete", key_path, "/v", value_name, "/f"])
-            .output();
-
-        Ok(())
-    }
-
-    /// 导入 .reg 文件
-    pub fn import_reg_file(reg_file: &str) -> Result<()> {
-        let output = create_command("reg.exe")
-            .args(["import", reg_file])
-            .output()?;
-
-        if !output.status.success() {
-            let stderr = gbk_to_utf8(&output.stderr);
-            anyhow::bail!("Failed to import reg file: {}", stderr);
         }
         Ok(())
     }

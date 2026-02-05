@@ -1,6 +1,6 @@
 [package]
 name = "letrecovery-pe"
-version = "2026.2.1"
+version = "2026.2.6"
 edition = "2021"
 authors = ["NORMAL-EX"]
 description = "LetRecovery PE安装助手"

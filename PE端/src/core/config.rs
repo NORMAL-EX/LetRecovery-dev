@@ -23,11 +23,6 @@ impl DriverActionMode {
         }
     }
     
-    /// 转换为数值
-    pub fn as_u8(&self) -> u8 {
-        *self as u8
-    }
-    
     /// 是否需要导入驱动
     pub fn should_import(&self) -> bool {
         *self == Self::AutoImport
@@ -140,26 +135,6 @@ impl BackupFormat {
             2 => Self::Swm,
             3 => Self::Gho,
             _ => Self::Wim,
-        }
-    }
-    
-    /// 获取文件扩展名
-    pub fn extension(&self) -> &'static str {
-        match self {
-            Self::Wim => "wim",
-            Self::Esd => "esd",
-            Self::Swm => "swm",
-            Self::Gho => "gho",
-        }
-    }
-    
-    /// 获取格式描述
-    pub fn description(&self) -> &'static str {
-        match self {
-            Self::Wim => "WIM格式",
-            Self::Esd => "ESD格式（高压缩）",
-            Self::Swm => "SWM格式（分卷）",
-            Self::Gho => "GHO格式（Ghost）",
         }
     }
 }

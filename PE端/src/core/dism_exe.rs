@@ -428,66 +428,6 @@ impl DismExe {
         Ok(())
     }
 
-    /// 批量添加驱动到离线系统镜像
-    ///
-    /// 递归搜索指定目录下的所有驱动并添加到离线系统。
-    ///
-    /// # 参数
-    /// - `image_path`: 离线系统根目录
-    /// - `driver_dirs`: 驱动目录列表
-    /// - `progress_tx`: 进度通道（可选）
-    ///
-    /// # 返回
-    /// - (成功数, 失败数)
-    pub fn add_drivers_batch(
-        &self,
-        image_path: &str,
-        driver_dirs: &[&str],
-        progress_tx: Option<Sender<DismExeProgress>>,
-    ) -> Result<(usize, usize)> {
-        let total = driver_dirs.len();
-        let mut success_count = 0;
-        let mut fail_count = 0;
-
-        for (index, driver_dir) in driver_dirs.iter().enumerate() {
-            // 发送当前进度
-            if let Some(ref tx) = progress_tx {
-                let overall_pct = ((index * 100) / total.max(1)) as u8;
-                let _ = tx.send(DismExeProgress {
-                    percentage: overall_pct,
-                    status: format!("添加驱动 {}/{}", index + 1, total),
-                });
-            }
-
-            match self.add_driver_offline(image_path, driver_dir, true, false, None) {
-                Ok(_) => {
-                    success_count += 1;
-                    log::info!("[DISM.EXE] 驱动添加成功: {}", driver_dir);
-                }
-                Err(e) => {
-                    fail_count += 1;
-                    log::warn!("[DISM.EXE] 驱动添加失败: {} - {}", driver_dir, e);
-                }
-            }
-        }
-
-        // 发送完成进度
-        if let Some(ref tx) = progress_tx {
-            let _ = tx.send(DismExeProgress {
-                percentage: 100,
-                status: format!("完成: {} 成功, {} 失败", success_count, fail_count),
-            });
-        }
-
-        log::info!(
-            "[DISM.EXE] 批量驱动添加完成: 成功 {}, 失败 {}",
-            success_count,
-            fail_count
-        );
-
-        Ok((success_count, fail_count))
-    }
-
     // =========================================================================
     // 公共 API - 更新包操作
     // =========================================================================
@@ -671,118 +611,12 @@ impl DismExe {
 
         cab_files
     }
-
-    // =========================================================================
-    // 公共 API - 信息查询
-    // =========================================================================
-
-    /// 获取离线系统镜像信息
-    ///
-    /// 使用 dism.exe /Get-ImageInfo 获取镜像信息
-    pub fn get_image_info(&self, image_path: &str) -> Result<String> {
-        let normalized = if image_path.ends_with('\\') {
-            image_path.to_string()
-        } else {
-            format!("{}\\", image_path)
-        };
-
-        let args = [
-            &format!("/Image:{}", normalized),
-            "/Get-CurrentEdition",
-        ];
-
-        self.execute_with_progress(&args, None)
-    }
-
-    /// 获取离线系统中已安装的驱动列表
-    pub fn get_drivers(&self, image_path: &str) -> Result<String> {
-        let normalized = if image_path.ends_with('\\') {
-            image_path.to_string()
-        } else {
-            format!("{}\\", image_path)
-        };
-
-        let args = [
-            &format!("/Image:{}", normalized),
-            "/Get-Drivers",
-        ];
-
-        self.execute_with_progress(&args, None)
-    }
-
-    /// 获取离线系统中已安装的更新包列表
-    pub fn get_packages(&self, image_path: &str) -> Result<String> {
-        let normalized = if image_path.ends_with('\\') {
-            image_path.to_string()
-        } else {
-            format!("{}\\", image_path)
-        };
-
-        let args = [
-            &format!("/Image:{}", normalized),
-            "/Get-Packages",
-        ];
-
-        self.execute_with_progress(&args, None)
-    }
 }
 
 impl Default for DismExe {
     fn default() -> Self {
         Self::new().expect("无法创建 DismExe 实例")
     }
-}
-
-// =============================================================================
-// 便捷函数
-// =============================================================================
-
-/// 添加驱动到离线系统镜像（便捷函数）
-///
-/// # 参数
-/// - `image_path`: 离线系统根目录
-/// - `driver_path`: 驱动目录或 INF 文件路径
-/// - `progress_tx`: 进度通道（可选）
-pub fn add_drivers_to_offline_image(
-    image_path: &str,
-    driver_path: &str,
-    progress_tx: Option<Sender<DismExeProgress>>,
-) -> Result<()> {
-    let dism = DismExe::new()?;
-    dism.add_driver_offline(image_path, driver_path, true, false, progress_tx)
-}
-
-/// 添加 CAB 包到离线系统镜像（便捷函数）
-///
-/// # 参数
-/// - `image_path`: 离线系统根目录
-/// - `cab_path`: CAB 包文件路径
-/// - `progress_tx`: 进度通道（可选）
-pub fn add_package_to_offline_image(
-    image_path: &str,
-    cab_path: &str,
-    progress_tx: Option<Sender<DismExeProgress>>,
-) -> Result<()> {
-    let dism = DismExe::new()?;
-    dism.add_package_offline(image_path, cab_path, false, progress_tx)
-}
-
-/// 从目录批量安装 CAB 包到离线系统镜像（便捷函数）
-///
-/// # 参数
-/// - `image_path`: 离线系统根目录
-/// - `cab_dir`: 包含 CAB 文件的目录
-/// - `progress_tx`: 进度通道（可选）
-///
-/// # 返回
-/// - (成功数, 失败数)
-pub fn add_packages_from_directory(
-    image_path: &str,
-    cab_dir: &Path,
-    progress_tx: Option<Sender<DismExeProgress>>,
-) -> Result<(usize, usize)> {
-    let dism = DismExe::new()?;
-    dism.add_packages_from_directory(image_path, cab_dir, progress_tx)
 }
 
 #[cfg(test)]

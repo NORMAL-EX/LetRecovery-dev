@@ -11,7 +11,6 @@ use std::path::Path;
 use std::sync::mpsc::Sender;
 
 use crate::core::dism_exe::{DismExe, DismExeProgress};
-use crate::core::driver::DriverManager;
 use crate::core::wimgapi::{WimManager, WimProgress, WIM_COMPRESS_LZX, WIM_COMPRESS_LZMS};
 
 /// 操作进度
@@ -452,80 +451,6 @@ impl Dism {
                 anyhow::bail!("批量 CAB 更新包安装失败: {}", e)
             }
         }
-    }
-
-    /// 检测当前是否在 PE 环境中运行
-    pub fn is_pe_environment(&self) -> bool {
-        // 检查 X: 盘是否存在（PE 环境的典型特征）
-        if Path::new("X:\\Windows\\System32").exists() {
-            return true;
-        }
-
-        // 检查系统盘符是否为 X:
-        if let Ok(system_root) = std::env::var("SystemRoot") {
-            if system_root.to_uppercase().starts_with("X:") {
-                return true;
-            }
-        }
-
-        // 检查是否存在 PE 特有的文件
-        let pe_markers = [
-            "X:\\Windows\\System32\\winpeshl.exe",
-            "X:\\Windows\\System32\\wpeinit.exe",
-            "X:\\sources\\boot.wim",
-        ];
-
-        for marker in &pe_markers {
-            if Path::new(marker).exists() {
-                return true;
-            }
-        }
-
-        false
-    }
-
-    // ========================================================================
-    // 驱动导出操作 - 使用 Windows API (导出不需要 dism.exe)
-    // ========================================================================
-
-    /// 从指定系统分区导出驱动 (PE环境下使用)
-    /// 使用 Windows API 直接读取驱动存储
-    pub fn export_drivers_from_system(&self, system_partition: &str, destination: &str) -> Result<()> {
-        std::fs::create_dir_all(destination)?;
-
-        log::info!(
-            "[Dism] 使用 Windows API 从 {} 导出驱动到: {}",
-            system_partition,
-            destination
-        );
-
-        let manager = DriverManager::new()
-            .map_err(|e| anyhow::anyhow!("驱动管理器初始化失败: {}", e))?;
-
-        let count = manager.export_drivers_from_system(
-            Path::new(system_partition),
-            Path::new(destination),
-        )?;
-        log::info!("[Dism] 成功导出 {} 个驱动", count);
-        Ok(())
-    }
-
-    /// 导出当前系统驱动
-    /// 使用 Windows API 导出在线系统的驱动
-    pub fn export_drivers(&self, destination: &str) -> Result<()> {
-        std::fs::create_dir_all(destination)?;
-
-        log::info!(
-            "[Dism] 使用 Windows API 导出当前系统驱动到: {}",
-            destination
-        );
-
-        let manager = DriverManager::new()
-            .map_err(|e| anyhow::anyhow!("驱动管理器初始化失败: {}", e))?;
-
-        let count = manager.export_drivers(Path::new(destination), true)?;
-        log::info!("[Dism] 成功导出 {} 个驱动", count);
-        Ok(())
     }
 
     // ========================================================================
