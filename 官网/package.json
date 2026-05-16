@@ -1,26 +1,32 @@
 {
-  "name": "letrecovery",
+  "name": "letrecovery-website",
   "version": "1.0.0",
-  "description": "built with React, TypeScript, Vite and Coss UI",
-  "author": "dddffgg",
+  "description": "LetRecovery 官方网站源码",
   "license": "MIT",
   "private": true,
   "type": "module",
   "keywords": [
+    "letrecovery",
     "react",
     "typescript",
-    "tailwindcss",
-    "coss-ui"
+    "vite",
+    "tailwindcss"
   ],
+  "homepage": "https://sysre.cn",
   "repository": {
     "type": "git",
-    "url": ""
+    "url": "git+https://github.com/NORMAL-EX/LetRecovery.git",
+    "directory": "官网"
+  },
+  "bugs": {
+    "url": "https://github.com/NORMAL-EX/LetRecovery/issues"
   },
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "preview": "vite preview",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "type-check": "tsc -b --noEmit"
   },
   "dependencies": {
     "@base-ui/react": "^1.0.0",
