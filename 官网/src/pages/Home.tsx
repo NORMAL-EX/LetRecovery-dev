@@ -166,15 +166,6 @@ const Home: React.FC = () => {
                     </DialogHeader>
                     <DialogPanel>
                       <div className="space-y-4">
-                        {/* 警告通知 */}
-                        <Alert variant="warning">
-                          <AlertTriangle className="size-4" />
-                          <AlertTitle>下载服务可能不稳定</AlertTitle>
-                          <AlertDescription>
-                            近期我们的下载服务遭受了来自数百个境外 IP 的恶意请求攻击，累计产生了超过 33TB 的异常流量，
-                            导致上游服务商对我们实施了严格的流量限制。因此，下载功能可能会出现间歇性不可用的情况，敬请谅解。
-                          </AlertDescription>
-                        </Alert>
 
                         {/* 说明信息 */}
                         <Alert variant="info">
