@@ -30,16 +30,6 @@ const contributors: Contributor[] = [
     avatar: 'https://pic1.imgdb.cn/item/6961e0d97488ce4061907c41.jpg',
     links: [{ type: 'github', url: 'https://github.com/HelloWin10-19045' }],
   },
-  {
-    name: 'Hello,World!',
-    avatar: 'https://pic1.imgdb.cn/item/6869262058cb8da5c8917549.jpg',
-    links: [{ type: 'github', url: 'https://github.com/hwyyds-skidder-team' }],
-  },
-  {
-    name: '普普通通のNeko',
-    avatar: 'https://pic1.imgdb.cn/item/6869266b58cb8da5c8917555.jpg',
-    links: [],
-  },
 ]
 
 const About: React.FC = () => {
@@ -111,39 +101,43 @@ const About: React.FC = () => {
 
               <div>
                 <h3 className="text-sm font-medium text-foreground mb-4">贡献人员</h3>
-                <ul className="space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {contributors.map((c) => (
-                    <li key={c.name} className="flex items-center gap-3">
-                      <img
-                        src={c.avatar}
-                        alt={c.name}
-                        className="w-9 h-9 rounded-full object-cover"
-                        loading="lazy"
-                      />
-                      <span className="text-sm text-foreground flex-1">{c.name}</span>
-                      {c.links.length > 0 && (
-                        <div className="flex items-center gap-1">
-                          {c.links.map((link) => (
-                            <a
-                              key={link.url}
-                              href={link.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              aria-label={`${c.name} 的 ${link.type}`}
-                              className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-                            >
-                              {link.type === 'github' ? (
-                                <Github className="size-4" />
-                              ) : (
-                                <Globe className="size-4" />
-                              )}
-                            </a>
-                          ))}
-                        </div>
-                      )}
-                    </li>
+                    <Card key={c.name} className="transition-colors hover:bg-accent/50">
+                      <CardContent className="flex items-center gap-3 py-4">
+                        <img
+                          src={c.avatar}
+                          alt={c.name}
+                          className="w-11 h-11 rounded-full object-cover shrink-0"
+                          loading="lazy"
+                        />
+                        <span className="text-sm font-medium text-foreground flex-1 truncate">
+                          {c.name}
+                        </span>
+                        {c.links.length > 0 && (
+                          <div className="flex items-center gap-1 shrink-0">
+                            {c.links.map((link) => (
+                              <a
+                                key={link.url}
+                                href={link.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                aria-label={`${c.name} 的 ${link.type}`}
+                                className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                              >
+                                {link.type === 'github' ? (
+                                  <Github className="size-4" />
+                                ) : (
+                                  <Globe className="size-4" />
+                                )}
+                              </a>
+                            ))}
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
                   ))}
-                </ul>
+                </div>
               </div>
             </CardContent>
           </Card>
