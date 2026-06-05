@@ -1,4 +1,5 @@
 import { Banner } from '@/components/layout'
+import { ImageWithLoading } from '@/components/common'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
@@ -105,10 +106,12 @@ const About: React.FC = () => {
                   {contributors.map((c) => (
                     <Card key={c.name} className="transition-colors hover:bg-accent/50">
                       <CardContent className="flex items-center gap-3 py-4">
-                        <img
+                        <ImageWithLoading
                           src={c.avatar}
                           alt={c.name}
-                          className="w-11 h-11 rounded-full object-cover shrink-0"
+                          className="w-11 h-11 rounded-full object-cover"
+                          wrapperClassName="shrink-0"
+                          rounded="rounded-full"
                           loading="lazy"
                         />
                         <span className="text-sm font-medium text-foreground flex-1 truncate">

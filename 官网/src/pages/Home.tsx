@@ -15,6 +15,7 @@ import {
   HardDrive
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { ImageWithLoading } from '@/components/common'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import {
   Dialog,
@@ -249,10 +250,13 @@ const Home: React.FC = () => {
             {/* Right Image */}
             <div className="relative">
               <div className="relative overflow-hidden shadow-2xl border border-border/50 bg-card" style={{ borderRadius: 6 }}>
-                <img
+                <ImageWithLoading
                   src="https://pic1.imgdb.cn/item/69613b1d14866864fecdc7dc.png"
                   alt="LetRecovery"
                   className="w-full h-auto"
+                  wrapperClassName="w-full"
+                  rounded="rounded-none"
+                  loadingMinHeight="260px"
                   loading="lazy"
                 />
               </div>
