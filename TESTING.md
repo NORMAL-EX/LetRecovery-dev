@@ -113,6 +113,18 @@
 
 ---
 
+## 二之补充、workspace 重构（分支 workspace-refactor / PR #13）已完成项
+- 仓库已改为 cargo workspace：`lr-core`（共享库）+ `PE端` + `正常系统端`。
+- `wimlib` FFI 封装、镜像元数据类型与 WIM XML 解析已移入 `lr-core`；
+  **两端的 `core/wimgapi.rs` 已彻底删除**（不再有 wimgapi 代码与 wimgapi.dll 依赖）。
+- `libwim-15.dll` 内置于 `lr-core`，运行时自动释放到 exe 目录。
+- CI 改为构建整个 workspace 并用 `cargo generate-lockfile` 重新生成锁文件。
+
+测试方法（需真机回归，因为改了运行时所用的解析/封装代码）：
+- [ ] WIM/ESD/SWM 的「读取信息」「校验」「释放」「备份」全部用例重跑一遍（同第一节）。
+- [ ] 重点确认 `info` 解析出的卷名/版本/类型与重构前一致（解析器从 wimgapi.rs 搬到 lr-core/image_meta.rs，逻辑应等价）。
+- [ ] PE 端备份/安装确认能加载 libwim（启动日志有「已释放内置 libwim-15.dll」或已存在）。
+
 ## 三、构建产物分发提醒
 - 发布时，`LetRecovery.exe` 与 `libwim-15.dll` 必须放同一目录；PE 端打包进 PE 时也要带上该 DLL。
 - 许可证：libwim 为 LGPLv3，动态链接对闭源/商用友好，保留许可证文本并允许用户替换该 DLL 即可。
