@@ -466,9 +466,19 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
     let _ = tx.send(WorkerMessage::SetInstallStep(InstallStep::GenerateUnattend));
 
     if config.unattended {
-        let _ = tx.send(WorkerMessage::SetStatus("正在生成无人值守配置...".to_string()));
-        if let Err(e) = generate_unattend_xml(&target_partition, &config) {
-            log::warn!("生成无人值守配置失败: {}", e);
+        if !config.custom_unattend_file.is_empty() {
+            // 用户提供了自定义无人值守文件：直接复制到目标系统（不再内置生成）
+            let _ = tx.send(WorkerMessage::SetStatus("正在应用自定义无人值守配置...".to_string()));
+            let src = format!("{}\\{}", data_dir, config.custom_unattend_file);
+            match apply_custom_unattend(&target_partition, &src) {
+                Ok(_) => log::info!("[UNATTEND] 已应用自定义无人值守文件: {}", src),
+                Err(e) => log::warn!("应用自定义无人值守文件失败: {}", e),
+            }
+        } else {
+            let _ = tx.send(WorkerMessage::SetStatus("正在生成无人值守配置...".to_string()));
+            if let Err(e) = generate_unattend_xml(&target_partition, &config) {
+                log::warn!("生成无人值守配置失败: {}", e);
+            }
         }
     } else {
         let _ = tx.send(WorkerMessage::SetStatus("跳过无人值守配置".to_string()));
@@ -708,6 +718,22 @@ fn execute_backup_workflow(tx: Sender<WorkerMessage>) {
 /// - windowsPE pass: 基本设置
 /// - specialize pass: 部署脚本执行
 /// - oobeSystem pass: OOBE设置、用户账户、首次登录命令
+/// 应用用户自定义的无人值守文件：复制到目标系统的 Panther 与 Sysprep 目录
+fn apply_custom_unattend(target_partition: &str, src: &str) -> anyhow::Result<()> {
+    let content = std::fs::read(src)
+        .map_err(|e| anyhow::anyhow!("读取自定义无人值守文件失败 {}: {}", src, e))?;
+
+    let panther_dir = format!("{}\\Windows\\Panther", target_partition);
+    std::fs::create_dir_all(&panther_dir)?;
+    std::fs::write(format!("{}\\unattend.xml", panther_dir), &content)?;
+
+    let sysprep_dir = format!("{}\\Windows\\System32\\Sysprep", target_partition);
+    if std::path::Path::new(&sysprep_dir).exists() {
+        let _ = std::fs::write(format!("{}\\unattend.xml", sysprep_dir), &content);
+    }
+    Ok(())
+}
+
 fn generate_unattend_xml(target_partition: &str, config: &crate::core::config::InstallConfig) -> anyhow::Result<()> {
     use crate::ui::advanced_options::get_scripts_dir_name;
     use crate::core::system_utils::{get_file_version, get_offline_system_architecture};
