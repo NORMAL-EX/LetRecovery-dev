@@ -1,3 +1,4 @@
+pub mod account_fix;
 pub mod bcdedit;
 pub mod cabinet;
 pub mod config;
