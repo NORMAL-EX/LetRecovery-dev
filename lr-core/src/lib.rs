@@ -8,8 +8,10 @@
 //! （见仓库 TESTING.md）。
 
 pub mod command;
+pub mod encoding;
 pub mod image_meta;
 pub mod reboot;
+pub mod registry;
 pub mod wimlib;
 pub mod wimlib_dll;
 
