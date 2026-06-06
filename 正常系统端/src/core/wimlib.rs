@@ -27,6 +27,20 @@ use libloading::Library;
 /// 只读校验路径用的全局进度（0-100），供 image_verify 的监控线程读取
 static VERIFY_GLOBAL_PROGRESS: AtomicU8 = AtomicU8::new(0);
 
+/// 进程级 wimlib_global_init 只执行一次（多个 Wimlib/WimlibManager 实例共享）。
+/// 避免重复 init，以及在某实例 Drop 时调用 global_cleanup 影响其它仍在使用的实例。
+static WIMLIB_INIT: std::sync::Once = std::sync::Once::new();
+static WIMLIB_INIT_OK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// 确保 wimlib 全局初始化只发生一次；返回是否初始化成功。
+fn ensure_global_init(init: FnGlobalInit) -> bool {
+    WIMLIB_INIT.call_once(|| {
+        let rc = unsafe { init(0) };
+        WIMLIB_INIT_OK.store(rc == WIMLIB_ERR_SUCCESS, Ordering::SeqCst);
+    });
+    WIMLIB_INIT_OK.load(Ordering::SeqCst)
+}
+
 use crate::core::wimgapi::{ImageInfo, WimProgress, Wimgapi};
 
 // ============================================================================
@@ -387,9 +401,8 @@ impl Wimlib {
         let get_image_description =
             load_sym!(lib, b"wimlib_get_image_description\0", FnGetImageDescription);
 
-        let rc = unsafe { global_init(0) };
-        if rc != WIMLIB_ERR_SUCCESS {
-            return Err(format!("wimlib 初始化失败: {} ({})", err_description(rc), rc));
+        if !ensure_global_init(global_init) {
+            return Err("wimlib 全局初始化失败".to_string());
         }
 
         Ok(Self {
@@ -445,11 +458,9 @@ impl Wimlib {
     }
 }
 
-impl Drop for Wimlib {
-    fn drop(&mut self) {
-        unsafe { (self.global_cleanup)() };
-    }
-}
+// 不在 Drop 中调用 wimlib_global_cleanup：
+// 它是进程级全局操作，多个实例并存时提前 cleanup 会影响其它仍在使用的实例。
+// wimlib 文档说明 cleanup 非必需，进程退出即可释放。
 
 pub struct WimHandle<'a> {
     wim: WIMStruct,
@@ -552,9 +563,8 @@ impl WimlibManager {
         let iterate_dir_tree = load_sym!(lib, b"wimlib_iterate_dir_tree\0", FnIterateDirTree);
         let get_xml_data = load_sym!(lib, b"wimlib_get_xml_data\0", FnGetXmlData);
 
-        let rc = unsafe { global_init(0) };
-        if rc != WIMLIB_ERR_SUCCESS {
-            return Err(format!("wimlib 初始化失败: {} ({})", err_description(rc), rc));
+        if !ensure_global_init(global_init) {
+            return Err("wimlib 全局初始化失败".to_string());
         }
 
         Ok(Self {
@@ -847,11 +857,7 @@ impl WimlibManager {
     }
 }
 
-impl Drop for WimlibManager {
-    fn drop(&mut self) {
-        unsafe { (self.global_cleanup)() };
-    }
-}
+// 同上：不在 Drop 中调用 wimlib_global_cleanup。
 
 /// UTF-16LE 字节数组（可能带 BOM）解码为 String
 fn decode_utf16le(data: &[u8]) -> String {
