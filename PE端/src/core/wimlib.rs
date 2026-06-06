@@ -385,6 +385,7 @@ pub struct Wimlib {
     get_wim_info: FnGetWimInfo,
     get_image_name: FnGetImageName,
     get_image_description: FnGetImageDescription,
+    reference_resource_files: FnReferenceResourceFiles,
 }
 
 impl Wimlib {
@@ -400,6 +401,8 @@ impl Wimlib {
         let get_image_name = load_sym!(lib, b"wimlib_get_image_name\0", FnGetImageName);
         let get_image_description =
             load_sym!(lib, b"wimlib_get_image_description\0", FnGetImageDescription);
+        let reference_resource_files =
+            load_sym!(lib, b"wimlib_reference_resource_files\0", FnReferenceResourceFiles);
 
         if !ensure_global_init(global_init) {
             return Err("wimlib 全局初始化失败".to_string());
@@ -415,6 +418,7 @@ impl Wimlib {
             get_wim_info,
             get_image_name,
             get_image_description,
+            reference_resource_files,
         })
     }
 
@@ -471,6 +475,25 @@ impl<'a> WimHandle<'a> {
     /// 校验完整性（无完整性表时 wimlib 直接返回成功）
     pub fn verify(&self) -> Result<(), String> {
         let rc = unsafe { (self.lib.verify_wim)(self.wim, 0) };
+        if rc != WIMLIB_ERR_SUCCESS {
+            return Err(self.lib.error_message(rc));
+        }
+        Ok(())
+    }
+
+    /// 为分卷 WIM（SWM）引入其余分卷。`globs` 为通配路径（如 "dir/install*.swm"）。
+    pub fn reference_resource_globs(&self, globs: &[&str]) -> Result<(), String> {
+        let wide: Vec<Vec<u16>> = globs.iter().map(|g| to_wide(g)).collect();
+        let ptrs: Vec<*const u16> = wide.iter().map(|v| v.as_ptr()).collect();
+        let rc = unsafe {
+            (self.lib.reference_resource_files)(
+                self.wim,
+                ptrs.as_ptr(),
+                ptrs.len() as c_uint,
+                WIMLIB_REF_FLAG_GLOB_ENABLE,
+                0,
+            )
+        };
         if rc != WIMLIB_ERR_SUCCESS {
             return Err(self.lib.error_message(rc));
         }
