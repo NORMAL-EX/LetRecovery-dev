@@ -187,13 +187,6 @@ impl App {
                 // ========== 第四行 ==========
 
                 if ui
-                    .add(egui::Button::new("万能驱动").min_size(button_size))
-                    .clicked()
-                {
-                    self.launch_wandrv_tool();
-                }
-
-                if ui
                     .add(egui::Button::new("查看GHO密码").min_size(button_size))
                     .clicked()
                 {
@@ -269,18 +262,6 @@ impl App {
         match actions::launch_ghost() {
             Ok(_) => {
                 self.tool_message = "已启动: Ghost64.exe".to_string();
-            }
-            Err(e) => {
-                self.tool_message = e;
-            }
-        }
-    }
-
-    /// 启动万能驱动工具
-    fn launch_wandrv_tool(&mut self) {
-        match actions::launch_wandrv() {
-            Ok(_) => {
-                self.tool_message = "已启动: QDZC.exe".to_string();
             }
             Err(e) => {
                 self.tool_message = e;

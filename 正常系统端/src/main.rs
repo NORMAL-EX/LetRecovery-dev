@@ -65,6 +65,11 @@ fn main() -> eframe::Result<()> {
 
     log::info!("已获得管理员权限");
 
+    // 记录本机配置信息，便于用户反馈问题时开发者排查
+    if app_config.log_enabled {
+        log_machine_info();
+    }
+
     // 检查是否为64位系统
     if !cfg!(target_arch = "x86_64") {
         log::error!("本程序仅支持64位系统");
@@ -253,6 +258,32 @@ fn check_dependencies() -> Result<(), Vec<String>> {
     } else {
         Err(missing_files)
     }
+}
+
+/// 收集并记录本机配置信息到日志（便于用户反馈问题时排查）
+fn log_machine_info() {
+    log::info!("========== 本机配置信息 ==========");
+    let sys_info = core::system_info::SystemInfo::collect().ok();
+    match core::hardware_info::HardwareInfo::collect() {
+        Ok(hw) => {
+            let text = hw.to_formatted_text(sys_info.as_ref());
+            for line in text.lines() {
+                if !line.trim().is_empty() {
+                    log::info!("{}", line);
+                }
+            }
+        }
+        Err(e) => {
+            log::warn!("采集硬件信息失败: {}", e);
+            if let Some(si) = &sys_info {
+                log::info!(
+                    "启动模式: {} | 安全启动: {} | TPM: {} | 64位: {}",
+                    si.boot_mode, si.secure_boot, si.tpm_enabled, si.is_64bit
+                );
+            }
+        }
+    }
+    log::info!("==================================");
 }
 
 /// 检查系统核心组件完整性（用于检测极限精简系统）
