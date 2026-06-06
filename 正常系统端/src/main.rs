@@ -696,7 +696,7 @@ fn generate_unattend_xml_pe(target_partition: &str, username: &str) -> anyhow::R
                         <Description>Local User</Description>
                         <DisplayName>{user}</DisplayName>
                         <Group>Administrators</Group>
-                        <n>{user}</n>
+                        <Name>{user}</Name>
                     </LocalAccount>
                 </LocalAccounts>
             </UserAccounts>

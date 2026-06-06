@@ -1011,7 +1011,7 @@ fn generate_unattend_xml(target_partition: &str, options: &AdvancedOptions) -> a
                         <Description>Local User</Description>
                         <DisplayName>{username}</DisplayName>
                         <Group>Administrators</Group>
-                        <n>{username}</n>
+                        <Name>{username}</Name>
                     </LocalAccount>
                 </LocalAccounts>
             </UserAccounts>
