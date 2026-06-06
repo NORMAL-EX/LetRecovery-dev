@@ -4,7 +4,6 @@ pub mod cabinet;
 pub mod config;
 pub mod dism;
 pub mod dism_exe;
-pub mod dismapi;
 pub mod disk;
 pub mod driver;
 pub mod ghost;
