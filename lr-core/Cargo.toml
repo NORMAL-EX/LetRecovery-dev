@@ -1,0 +1,13 @@
+[package]
+name = "lr-core"
+version = "2026.2.6"
+edition = "2021"
+authors = ["NORMAL-EX"]
+description = "LetRecovery 两端共享的核心库（逐步收纳重复模块）"
+
+[dependencies]
+log = "0.4"
+
+[lib]
+name = "lr_core"
+path = "src/lib.rs"
