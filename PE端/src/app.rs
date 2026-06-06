@@ -85,34 +85,55 @@ impl App {
         }
     }
 
-    /// 设置中文字体（从PE的X盘加载微软雅黑）
+    /// 设置中文字体（从当前运行系统的 Fonts 目录加载微软雅黑）
+    ///
+    /// 不写死盘符：PE 的系统盘不一定是 X:，应根据正在运行系统的 Windows 目录
+    /// 动态解析字体路径。
     fn setup_fonts(ctx: &egui::Context) {
         let mut fonts = egui::FontDefinitions::default();
 
-        // PE环境下字体路径固定为 X:\Windows\Fonts\msyh.ttc
-        let font_path = std::path::Path::new("X:\\Windows\\Fonts\\msyh.ttc");
+        // 候选字体路径：优先用 %SystemRoot%（指向当前运行系统的 Windows 目录），
+        // 再用 PE 系统盘探测结果，最后回退到常见盘符。
+        let mut candidates: Vec<std::path::PathBuf> = Vec::new();
 
-        if let Ok(font_data) = std::fs::read(font_path) {
-            fonts.font_data.insert(
-                "msyh".to_owned(),
-                std::sync::Arc::new(egui::FontData::from_owned(font_data)),
-            );
+        if let Ok(system_root) = std::env::var("SystemRoot") {
+            candidates.push(std::path::Path::new(&system_root).join("Fonts").join("msyh.ttc"));
+            candidates.push(std::path::Path::new(&system_root).join("Fonts").join("msyh.ttf"));
+        }
+        if let Some(drive) = crate::core::system_utils::get_pe_system_drive() {
+            candidates.push(std::path::PathBuf::from(format!("{}\\Windows\\Fonts\\msyh.ttc", drive)));
+            candidates.push(std::path::PathBuf::from(format!("{}\\Windows\\Fonts\\msyh.ttf", drive)));
+        }
+        // 最后兜底：常见 PE/系统盘符
+        for d in ["X", "Y", "Z", "W", "C"] {
+            candidates.push(std::path::PathBuf::from(format!("{}:\\Windows\\Fonts\\msyh.ttc", d)));
+        }
 
-            fonts
-                .families
-                .get_mut(&egui::FontFamily::Proportional)
-                .unwrap()
-                .insert(0, "msyh".to_owned());
+        let mut loaded = false;
+        for font_path in &candidates {
+            if let Ok(font_data) = std::fs::read(font_path) {
+                fonts.font_data.insert(
+                    "msyh".to_owned(),
+                    std::sync::Arc::new(egui::FontData::from_owned(font_data)),
+                );
+                fonts
+                    .families
+                    .get_mut(&egui::FontFamily::Proportional)
+                    .unwrap()
+                    .insert(0, "msyh".to_owned());
+                fonts
+                    .families
+                    .get_mut(&egui::FontFamily::Monospace)
+                    .unwrap()
+                    .insert(0, "msyh".to_owned());
+                log::info!("已加载中文字体: {}", font_path.display());
+                loaded = true;
+                break;
+            }
+        }
 
-            fonts
-                .families
-                .get_mut(&egui::FontFamily::Monospace)
-                .unwrap()
-                .insert(0, "msyh".to_owned());
-
-            log::info!("已加载中文字体: X:\\Windows\\Fonts\\msyh.ttc");
-        } else {
-            log::warn!("无法加载中文字体: X:\\Windows\\Fonts\\msyh.ttc");
+        if !loaded {
+            log::warn!("未能从任何候选路径加载中文字体（msyh.ttc/ttf）");
         }
 
         ctx.set_fonts(fonts);
@@ -482,6 +503,14 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
         }
     } else {
         let _ = tx.send(WorkerMessage::SetStatus("跳过无人值守配置".to_string()));
+    }
+
+    // 离线登录兜底：放开空密码登录策略 +（已知用户名时）配置空密码自动登录。
+    // 解决整盘备份/未 sysprep 镜像下 unattend 不生效、登录界面退化为"其他用户"的问题。
+    if let Err(e) = crate::core::account_fix::ensure_offline_login(&target_partition, &config.custom_username) {
+        log::warn!("离线登录兜底设置失败（不影响安装）: {}", e);
+    } else {
+        log::info!("[LOGIN] 已应用离线登录兜底设置");
     }
     let _ = tx.send(WorkerMessage::SetProgress(100));
 

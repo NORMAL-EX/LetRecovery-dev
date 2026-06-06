@@ -315,6 +315,15 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
             }
         }
 
+        // Step 7.5: 离线登录兜底（放开空密码策略 + 已知用户名时配置自动登录）
+        if let Err(e) =
+            core::account_fix::ensure_offline_login(&target_partition, &config.custom_username)
+        {
+            eprintln!("[PE INSTALL] 离线登录兜底设置失败（不影响安装）: {}", e);
+        } else {
+            println!("[PE INSTALL] 已应用离线登录兜底设置");
+        }
+
         // Step 8: 清理
         println!("[PE INSTALL] Step 8: 清理临时文件");
         ConfigFileManager::cleanup_all(&data_partition, &target_partition);
