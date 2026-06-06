@@ -335,7 +335,29 @@ unsafe extern "C" fn verify_progress_callback(
 // DLL 加载（共享给 Wimlib 与 WimlibManager）
 // ============================================================================
 
+/// 编译期嵌入的 libwim-15.dll。用于在 PE 等默认不含该 DLL 的环境下兜底释放，
+/// 确保 wimlib 一定能被加载（旧版用的 wimgapi.dll 是 PE 自带的，迁移到 wimlib 后
+/// 若 PE 打包未带上 libwim-15.dll 会导致所有镜像操作失败）。
+static EMBEDDED_WIMLIB_DLL: &[u8] = include_bytes!("../../vendor/libwim-15.dll");
+
+/// 确保 libwim-15.dll 在可执行文件同目录存在；不存在则从嵌入数据释放。幂等。
+pub fn ensure_dll_available() {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let dst = dir.join("libwim-15.dll");
+            if !dst.exists() {
+                match std::fs::write(&dst, EMBEDDED_WIMLIB_DLL) {
+                    Ok(_) => log::info!("已释放内置 libwim-15.dll 到 {}", dst.display()),
+                    Err(e) => log::warn!("释放内置 libwim-15.dll 失败 {}: {}", dst.display(), e),
+                }
+            }
+        }
+    }
+}
+
 fn find_and_load_dll() -> Result<Library, String> {
+    // 先确保 DLL 就位（PE 环境兜底），再尝试加载
+    ensure_dll_available();
     let names = ["libwim-15.dll", "wimlib-15.dll", "libwim.dll", "wimlib.dll"];
     let mut last = String::new();
 
