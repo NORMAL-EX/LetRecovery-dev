@@ -339,7 +339,7 @@ impl ImageVerifier {
     // ========================================================================
 
     fn verify_wim_esd(&self, file_path: &str, reporter: &ProgressReporter) -> VerifyResult {
-        reporter.report(5, "正在加载 wimlib...", file_path);
+        reporter.report(0, "正在加载 wimlib...", file_path);
 
         // 加载 wimlib
         let wimlib = match Wimlib::new() {
@@ -347,7 +347,7 @@ impl ImageVerifier {
             Err(e) => return VerifyResult::error(file_path, ImageType::Wim, format!("无法加载 wimlib: {}", e)),
         };
 
-        reporter.report(10, "正在打开镜像文件...", file_path);
+        reporter.report(1, "正在打开镜像文件...", file_path);
 
         // 打开 WIM 文件
         let wim_handle = match wimlib.open_wim(file_path) {
@@ -355,7 +355,7 @@ impl ImageVerifier {
             Err(e) => return VerifyResult::corrupted(file_path, ImageType::Wim, format!("无法打开镜像: {}", e)),
         };
 
-        reporter.report(20, "正在读取镜像信息...", file_path);
+        reporter.report(2, "正在读取镜像信息...", file_path);
 
         // 获取镜像数量
         let image_count = wim_handle.get_image_count();
@@ -370,7 +370,7 @@ impl ImageVerifier {
         let mut result = VerifyResult::default();
         result.image_count = image_count as u32;
 
-        reporter.report(30, format!("发现 {} 个镜像，正在获取详细信息...", image_count), file_path);
+        reporter.report(3, format!("发现 {} 个镜像，正在获取详细信息...", image_count), file_path);
 
         // 获取镜像详细信息
         for i in 1..=image_count {
@@ -385,7 +385,7 @@ impl ImageVerifier {
             result.details.push(display);
         }
 
-        reporter.report(50, "正在校验完整性...", file_path);
+        reporter.report(5, "正在校验完整性...", file_path);
 
         // 启动进度监控线程
         let cancel_flag = Arc::clone(&self.cancel_flag);
@@ -406,8 +406,8 @@ impl ImageVerifier {
                 if current > last_progress {
                     last_progress = current;
                     if let Some(ref tx) = reporter_tx {
-                        // 把 0-100 的数据校验进度映射到 50-100 显示区间
-                        let mapped = 50 + (current as u32 * 50 / 100) as u8;
+                        // 准备阶段只占 0-5%，真正的数据校验进度映射到 5-100 显示区间
+                        let mapped = 5 + (current as u32 * 95 / 100) as u8;
                         let _ = tx.send(VerifyProgress::new(
                             mapped.min(99),
                             format!("正在校验完整性 ({}%)...", current),
@@ -458,7 +458,7 @@ impl ImageVerifier {
     // ========================================================================
 
     fn verify_swm(&self, file_path: &str, reporter: &ProgressReporter) -> VerifyResult {
-        reporter.report(5, "正在扫描分卷文件...", file_path);
+        reporter.report(0, "正在扫描分卷文件...", file_path);
 
         // 查找所有分卷
         let swm_files = match Self::find_swm_parts(file_path) {
@@ -475,7 +475,7 @@ impl ImageVerifier {
         result.details.push(format!("找到 {} 个分卷文件", swm_files.len()));
         let total_parts = swm_files.len();
 
-        reporter.report(10, format!("找到 {} 个分卷，正在加载...", swm_files.len()), file_path);
+        reporter.report(1, format!("找到 {} 个分卷，正在加载...", swm_files.len()), file_path);
 
         // 加载 wimlib
         let wimlib = match Wimlib::new() {
@@ -483,7 +483,7 @@ impl ImageVerifier {
             Err(e) => return VerifyResult::error(file_path, ImageType::Swm, format!("无法加载 wimlib: {}", e)),
         };
 
-        reporter.report(20, "正在打开主分卷...", file_path);
+        reporter.report(2, "正在打开主分卷...", file_path);
 
         // 打开主 SWM 文件
         let wim_handle = match wimlib.open_wim(&swm_files[0]) {
@@ -491,7 +491,7 @@ impl ImageVerifier {
             Err(e) => return VerifyResult::corrupted(file_path, ImageType::Swm, format!("无法打开主分卷: {}", e)),
         };
 
-        reporter.report(40, "正在引入其余分卷...", file_path);
+        reporter.report(3, "正在引入其余分卷...", file_path);
 
         // 用 glob 引入同目录其余分卷（如 dir/install*.swm）
         let glob = Self::build_swm_glob(&swm_files[0]);
@@ -503,7 +503,7 @@ impl ImageVerifier {
             );
         }
 
-        reporter.report(55, "正在读取镜像信息...", file_path);
+        reporter.report(4, "正在读取镜像信息...", file_path);
 
         // 获取镜像数量
         let image_count = wim_handle.get_image_count();
@@ -519,7 +519,7 @@ impl ImageVerifier {
             }
         }
 
-        reporter.report(60, "正在校验完整性...", file_path);
+        reporter.report(5, "正在校验完整性...", file_path);
 
         // 进度监控线程（复用全局进度，与 WIM/ESD 校验一致）
         let cancel_flag = Arc::clone(&self.cancel_flag);
@@ -537,7 +537,8 @@ impl ImageVerifier {
                 if current > last_progress {
                     last_progress = current;
                     if let Some(ref tx) = reporter_tx {
-                        let mapped = 60 + (current as u32 * 35 / 100) as u8;
+                        // 准备阶段只占 0-5%，真正的数据校验进度映射到 5-100 显示区间
+                        let mapped = 5 + (current as u32 * 95 / 100) as u8;
                         let _ = tx.send(VerifyProgress::new(
                             mapped.min(99),
                             format!("正在校验完整性 ({}%)...", current),
