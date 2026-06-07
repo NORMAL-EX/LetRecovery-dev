@@ -627,7 +627,7 @@ impl Default for App {
             repair_boot: true,
             unattended_install: true,
             export_drivers: true,
-            auto_reboot: false,
+            auto_reboot: true,
             selected_boot_mode: BootModeSelection::Auto,
             driver_action: DriverAction::AutoImport,
             advanced_options: AdvancedOptions::default(),

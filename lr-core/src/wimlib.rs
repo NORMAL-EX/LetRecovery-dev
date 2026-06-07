@@ -52,6 +52,8 @@ mod progress_msg {
     pub const EXTRACT_STREAMS: i32 = 4;
     pub const WRITE_STREAMS: i32 = 12;
     pub const VERIFY_INTEGRITY: i32 = 16;
+    /// wimlib_verify_wim() 校验文件数据时发送此消息（info 指向 verify_streams）
+    pub const VERIFY_STREAMS: i32 = 29;
 }
 
 /// 进度回调返回值
@@ -312,11 +314,20 @@ unsafe extern "C" fn verify_progress_callback(
     _ctx: *mut c_void,
 ) -> c_int {
     let result = catch_unwind(AssertUnwindSafe(|| {
-        if info.is_null() || msg != progress_msg::VERIFY_INTEGRITY {
+        if info.is_null() {
             return;
         }
-        let total = read_u64(info, 8);
-        let completed = read_u64(info, 0);
+        // 不同消息的 info 结构体布局不同：
+        // - VERIFY_INTEGRITY (整完整性表)：integrity { total_bytes@0, completed_bytes@8 }
+        //   仅在用 CHECK_INTEGRITY 打开时才会收到。
+        // - VERIFY_STREAMS  (校验文件数据)：verify_streams {
+        //     wimfile@0, total_streams@8, total_bytes@16, completed_streams@24, completed_bytes@32 }
+        //   wimlib_verify_wim() 实际发送的是这个消息。
+        let (total, completed) = match msg {
+            progress_msg::VERIFY_INTEGRITY => (read_u64(info, 0), read_u64(info, 8)),
+            progress_msg::VERIFY_STREAMS => (read_u64(info, 16), read_u64(info, 32)),
+            _ => return,
+        };
         if total > 0 {
             let percent = ((completed as f64 / total as f64) * 100.0).min(100.0) as u8;
             let cur = VERIFY_GLOBAL_PROGRESS.load(Ordering::SeqCst);

@@ -216,10 +216,7 @@ impl App {
                     self.launch_space_sniffer_tool();
                 }
 
-                ui.end_row();
-
-                // ========== 第五行 ==========
-
+                // 镜像校验补到本行第 4 格（删除“万能驱动”后填平空缺）
                 if ui
                     .add(egui::Button::new("镜像校验").min_size(button_size))
                     .clicked()
