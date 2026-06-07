@@ -66,36 +66,13 @@ pub struct WimProgress {
 }
 
 /// 解析 WIM/ESD 的 XML 元数据，返回镜像信息列表。
+///
+/// 优先用 roxmltree 做完整 XML 解析；若解析失败或没解析出镜像，回退到
+/// 旧的字符串扫描解析（兜底，保证遇到非常规/截断 XML 仍能尽力提取）。
 pub fn parse_image_info_from_xml(xml: &str) -> Vec<ImageInfo> {
-    let mut images = Vec::new();
-    let mut pos = 0;
+    let mut images = parse_image_info_roxml(xml).unwrap_or_default();
 
-    // 首先尝试标准格式解析 (INDEX="...")
-    while let Some(start) = xml[pos..].find("<IMAGE INDEX=\"") {
-        let abs_start = pos + start;
-        let index_start = abs_start + 14;
-
-        if let Some(index_end) = xml[index_start..].find('"') {
-            let index_str = &xml[index_start..index_start + index_end];
-            let index: u32 = index_str.parse().unwrap_or(0);
-
-            if let Some(image_end) = xml[abs_start..].find("</IMAGE>") {
-                let image_block = &xml[abs_start..abs_start + image_end + 8];
-
-                if let Some(info) = parse_single_image_block(image_block, index) {
-                    images.push(info);
-                }
-
-                pos = abs_start + image_end + 8;
-            } else {
-                pos = abs_start + 14;
-            }
-        } else {
-            pos = abs_start + 14;
-        }
-    }
-
-    // 如果标准格式解析失败，尝试备用解析策略
+    // roxmltree 没解析出内容时回退到字符串扫描
     if images.is_empty() {
         images = parse_image_info_fallback(xml);
     }
@@ -108,34 +85,105 @@ pub fn parse_image_info_from_xml(xml: &str) -> Vec<ImageInfo> {
     images
 }
 
-fn parse_single_image_block(image_block: &str, index: u32) -> Option<ImageInfo> {
-    if index == 0 {
-        return None;
+/// 用 roxmltree 完整解析 WIM XML 的 `<IMAGE>` 块。
+fn parse_image_info_roxml(xml: &str) -> Option<Vec<ImageInfo>> {
+    let trimmed = xml.trim_start_matches('\u{feff}');
+    let doc = roxmltree::Document::parse(trimmed).ok()?;
+
+    let mut images = Vec::new();
+    for image in doc
+        .descendants()
+        .filter(|n| n.is_element() && n.has_tag_name("IMAGE"))
+    {
+        let index: u32 = image
+            .attribute("INDEX")
+            .and_then(|s| s.trim().parse().ok())
+            .unwrap_or(0);
+        if index == 0 {
+            continue;
+        }
+
+        let size_bytes = node_text(image, "TOTALBYTES")
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+        let installation_type = node_text(image, "INSTALLATIONTYPE").unwrap_or_default();
+        let description = node_text(image, "DESCRIPTION").unwrap_or_default();
+        let major_version = node_text(image, "MAJOR").and_then(|s| s.parse::<u16>().ok());
+        let minor_version = node_text(image, "MINOR").and_then(|s| s.parse::<u16>().ok());
+        let name = build_image_name_node(image, &description, index);
+
+        images.push(ImageInfo {
+            index,
+            name,
+            size_bytes,
+            installation_type,
+            description,
+            major_version,
+            minor_version,
+            image_type: WimImageType::Unknown,
+            verified_installable: false,
+        });
     }
 
-    let size_bytes = extract_xml_tag(image_block, "TOTALBYTES")
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
+    if images.is_empty() {
+        None
+    } else {
+        Some(images)
+    }
+}
 
-    let installation_type = extract_xml_tag(image_block, "INSTALLATIONTYPE").unwrap_or_default();
-    let description = extract_xml_tag(image_block, "DESCRIPTION").unwrap_or_default();
+/// 在某节点的所有后代里查找第一个指定标签元素的文本（去空白、过滤空串）。
+fn node_text(node: roxmltree::Node, tag: &str) -> Option<String> {
+    node.descendants()
+        .find(|n| n.is_element() && n.has_tag_name(tag))
+        .and_then(|n| n.text())
+        .map(|t| t.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
 
-    let major_version = extract_version_number(image_block, "MAJOR");
-    let minor_version = extract_version_number(image_block, "MINOR");
+/// roxmltree 版的镜像名称构建（DISPLAYNAME > NAME > WINDOWS(PRODUCTNAME+EDITIONID) > DESCRIPTION+FLAGS > ...）。
+fn build_image_name_node(image: roxmltree::Node, description: &str, index: u32) -> String {
+    if let Some(display_name) = node_text(image, "DISPLAYNAME") {
+        return display_name;
+    }
+    if let Some(name) = node_text(image, "NAME") {
+        return name;
+    }
 
-    let name = build_image_name(image_block, &description, index);
+    if let Some(windows) = image
+        .descendants()
+        .find(|n| n.is_element() && n.has_tag_name("WINDOWS"))
+    {
+        let product_name = node_text(windows, "PRODUCTNAME");
+        let edition_id = node_text(windows, "EDITIONID");
+        match (product_name, edition_id) {
+            (Some(prod), Some(ed)) => {
+                if prod.to_lowercase().contains(&ed.to_lowercase()) {
+                    return prod;
+                }
+                return format!("{} {}", prod, ed);
+            }
+            (Some(prod), _) => return prod,
+            (_, Some(ed)) => return format!("Windows {}", ed),
+            _ => {}
+        }
+    }
 
-    Some(ImageInfo {
-        index,
-        name,
-        size_bytes,
-        installation_type,
-        description,
-        major_version,
-        minor_version,
-        image_type: WimImageType::Unknown,
-        verified_installable: false,
-    })
+    let flags = node_text(image, "FLAGS").unwrap_or_default();
+    if !description.is_empty() && !flags.is_empty() {
+        if description.to_lowercase().contains(&flags.to_lowercase()) {
+            return description.to_string();
+        }
+        return format!("{} {}", description, flags);
+    }
+    if !description.is_empty() {
+        return description.to_string();
+    }
+    if !flags.is_empty() {
+        return format!("Windows {}", flags);
+    }
+
+    format!("镜像 {}", index)
 }
 
 /// 智能构建镜像名称（DISPLAYNAME > NAME > PRODUCTNAME+EDITIONID > DESCRIPTION+FLAGS > ...）
