@@ -17,8 +17,12 @@ impl OfflineRegistry {
 
         if !output.status.success() {
             let stderr = gbk_to_utf8(&output.stderr);
+            // 加载失败是高危错误：后续所有离线注册表修改都会静默无效。
+            // 即使调用方用 `let _ =` 丢弃错误，这里也确保日志里有记录。
+            log::warn!("加载离线注册表配置单元失败 [{}] <- {}: {}", hive_name, hive_file, stderr.trim());
             anyhow::bail!("Failed to load registry hive: {}", stderr);
         }
+        log::info!("已加载离线注册表配置单元 [{}] <- {}", hive_name, hive_file);
         Ok(())
     }
 
@@ -40,6 +44,8 @@ impl OfflineRegistry {
 
         if !output.status.success() {
             let stderr = gbk_to_utf8(&output.stderr);
+            // 卸载失败可能导致 hive 文件被占用、配置未落盘。
+            log::warn!("卸载离线注册表配置单元失败 [{}]: {}", hive_name, stderr.trim());
             anyhow::bail!("Failed to unload registry hive: {}", stderr);
         }
         Ok(())

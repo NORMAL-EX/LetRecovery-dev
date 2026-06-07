@@ -1035,8 +1035,10 @@ fn generate_unattend_xml(target_partition: &str, options: &AdvancedOptions) -> a
     let sysprep_dir = format!("{}\\Windows\\System32\\Sysprep", target_partition);
     if Path::new(&sysprep_dir).exists() {
         let sysprep_unattend = format!("{}\\unattend.xml", sysprep_dir);
-        let _ = std::fs::write(&sysprep_unattend, &xml_content);
-        println!("[UNATTEND] 已写入: {}", sysprep_unattend);
+        match std::fs::write(&sysprep_unattend, &xml_content) {
+            Ok(_) => println!("[UNATTEND] 已写入: {}", sysprep_unattend),
+            Err(e) => println!("[UNATTEND] 警告：写入 Sysprep unattend 失败: {} ({})", sysprep_unattend, e),
+        }
     }
     
     Ok(())
