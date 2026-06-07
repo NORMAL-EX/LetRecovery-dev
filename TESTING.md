@@ -51,7 +51,17 @@
 
 - [ ] 还原**整盘备份（未 sysprep）**且账户为**空密码** → 能进入该账户（`LimitBlankPasswordUse=0` 生效）。
 - [ ] 检查目标注册表：`HKLM\SYSTEM\ControlSet001\Control\Lsa\LimitBlankPasswordUse` = `0`；设了用户名时 `...\Winlogon\AutoAdminLogon` = `1`。
-- [ ] **已知限制**：备份镜像账户**本身有非空密码**时无法清除（见「二、非空密码离线清除」）。
+- [ ] **非空密码**：设了用户名且该账户在备份里带密码 → 已离线清除（见下「3d」）。
+
+**3d. ⚠️ 非空密码离线清除（account_fix::clear_account_password）**
+代码：`PE端/core/account_fix.rs`，已接入 `ensure_offline_login`（仅在**指定了用户名**时触发）。
+思路（chntpw）：离线把 SAM 中目标账户 V 结构的 NT/LM hash **长度字段清零** = 空密码；并清除 F 结构 `ACB_DISABLED` 位启用账户。
+安全：**操作前强制把 SAM 复制为 `SAM.lrbak`**；只覆盖 4 字节长度字段，不改 hive 结构 / 不挪数据；V 解析失败或越界即跳过，绝不写回可疑数据；sysprep 镜像里目标账户不存在 → 无匹配 → 安全空操作。
+
+- [ ] 虚拟机还原"账户带**非空密码**"的备份，且装机时填了该用户名 → 该账户可**空密码登录**且系统正常。
+- [ ] 目标盘存在 `SAM.lrbak` 备份；查 `log` 有 `[SAM] 已备份` / `已清除账户` 记录。
+- [ ] sysprep 安装镜像 → 日志显示"未找到匹配账户，SAM 未改动"，OOBE 正常建号。
+- [ ] 不指定用户名 → 不动 SAM（仅空密码策略 + 跳过自动登录）。
 
 > 诊断："其他用户"取故障机 `C:\Windows\Panther\setupact.log`，搜 `oobeSystem` / `LocalAccount`，看账户创建那步是否执行。
 
@@ -152,20 +162,21 @@
 ### A. lr-core 进一步收纳"差异"模块
 `dism`、`system_utils`、`bcdedit`、`disk`、`config`、`driver`、`ghost`、`cabinet` 两端同名但**行为有差异**，合并需逐个调和，会改运行时行为，**必须真机回归**。建议分步：先抽字节相同的，再调和其余，每步真机测。
 
-### B. 镜像信息 XML 解析换 roxmltree（roxmltree 仅完成了一半）
-- **现状**：unattend 校验已用 roxmltree；但 `lr-core/image_meta.rs::parse_image_info_from_xml` **仍是手写 `.find`**，遇到属性含 `>`、实体转义可能误判。
-- **改法**：复用已引入的 roxmltree 解析 WIM 的 `<WIM>/<IMAGE>` 块。
-- 测试：单卷/多卷/带 DISPLAYNAME/WINDOWS 块/Win7 老格式 WIM、ESD，确认卷名/版本/类型解析与现在一致。
+### B. 镜像信息 XML 解析换 roxmltree ✅ 已完成
+- `lr-core/image_meta.rs::parse_image_info_from_xml` 已改为 **roxmltree 优先**解析 WIM 的 `<WIM>/<IMAGE>` 块；旧的手写 `.find` 仅作**兜底**（roxmltree 解析失败 / 未解析出镜像时回退），对截断或非常规 XML 仍尽力提取。
+- [ ] 回归：单卷/多卷/带 DISPLAYNAME/WINDOWS 块/Win7 老格式 WIM、ESD，确认卷名/版本/类型解析与之前一致。
 
 ### C. ⚠️ 统一 PE 两套安装流程（CLI `run_cli_mode` ↔ GUI `execute_install_workflow`）
 两套几乎重复、易分叉。完整去重未做。改安装主流程，需真机测两种启动：
 - [ ] `LetRecovery.exe /PEINSTALL` 命令行装一遍；
 - [ ] GUI 自动检测配置装一遍；两者结果一致。
 
-### D. ⚠️ 非空密码离线清除 / 凭空创建账户（彻底治"其他用户"）
-当前只放开空密码 + 自动登录，**无法清除已有非空密码**、无法新建账户。需离线编辑 SAM（chntpw 思路：改 F 值启用、V 值清 NT hash）。**写错会损坏 SAM 导致无法启动**：必须先备份 hive、严格校验、不匹配即放弃。
-- [ ] 虚拟机还原"账户有非空密码"的备份 → 清除 → 空密码登录且系统正常。
-- [ ] 结构异常的 SAM → 程序放弃且不损坏原 hive。
+### D. ⚠️ 非空密码离线清除 ✅ 已实现（见上「3d」，待真机回归）
+已实现"指定用户名时离线清空其 NT/LM hash 长度 + 启用账户"，并强制先备份 SAM。
+**尚未实现**「凭空创建全新账户」（需在 SAM 里新建 RID + V/F/C 结构，更复杂）；当前依赖目标账户已存在。
+- [x] 代码已实现并通过 CI 编译。
+- [ ] 真机/虚拟机回归（见「3d」勾选项）。
+- [ ] 结构异常的 SAM → 程序放弃且不损坏原 hive（已有 `SAM.lrbak` 备份兜底）。
 
 ### E. PE CLI 架构 `amd64` 写死
 `PE端/main.rs` 的 `generate_unattend_xml` 把架构写死为 `amd64`，需与版本感知生成统一（ARM64/x86 场景）。
