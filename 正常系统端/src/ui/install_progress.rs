@@ -645,12 +645,9 @@ impl App {
                 let uefiseven_dir = format!("{}\\uefiseven", data_dir);
                 let _ = std::fs::create_dir_all(&uefiseven_dir);
                 
-                // 从程序目录复制 UefiSeven 文件
-                if let Some(program_dir) = std::env::current_exe()
-                    .ok()
-                    .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+                // 从程序目录复制 UefiSeven 文件（bin\uefiseven）
                 {
-                    let source_uefiseven_dir = program_dir.join("uefiseven");
+                    let source_uefiseven_dir = crate::utils::path::get_uefiseven_dir();
                     if source_uefiseven_dir.exists() {
                         // 复制 bootx64.efi
                         let src_efi = source_uefiseven_dir.join("bootx64.efi");

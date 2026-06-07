@@ -1203,8 +1203,7 @@ impl App {
                     self.pending_download_url = Some(pe.download_url.clone());
                     self.pending_download_filename = Some(pe.filename.clone());
                     self.pending_pe_md5 = pe.md5.clone();
-                    let pe_dir = crate::utils::path::get_exe_dir()
-                        .join("PE")
+                    let pe_dir = crate::utils::path::get_pe_dir()
                         .to_string_lossy()
                         .to_string();
                     self.download_save_path = pe_dir;

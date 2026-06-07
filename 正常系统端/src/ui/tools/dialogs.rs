@@ -362,8 +362,7 @@ impl App {
         };
 
         // 检查驱动目录是否存在
-        let driver_dir = crate::utils::path::get_exe_dir()
-            .join("drivers")
+        let driver_dir = crate::utils::path::get_drivers_dir()
             .join("storage_controller");
 
         if !driver_dir.exists() {
