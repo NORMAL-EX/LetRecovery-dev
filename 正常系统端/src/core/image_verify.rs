@@ -390,10 +390,15 @@ impl ImageVerifier {
         // 启动进度监控线程
         let cancel_flag = Arc::clone(&self.cancel_flag);
         let reporter_tx = reporter.tx.clone();
+        // done 标志：校验返回后置位，确保监控线程必定退出（避免 join 永久阻塞）。
+        // 之前仅靠 progress>=100 退出，但很多镜像无完整性表、进度到不了 100，
+        // 导致 verify() 结束后 join 永久阻塞、UI 卡在 50%。
+        let done = Arc::new(AtomicBool::new(false));
+        let done_monitor = Arc::clone(&done);
         let monitor = thread::spawn(move || {
             let mut last_progress = 0u8;
             loop {
-                if cancel_flag.load(Ordering::SeqCst) {
+                if cancel_flag.load(Ordering::SeqCst) || done_monitor.load(Ordering::SeqCst) {
                     break;
                 }
 
@@ -401,8 +406,10 @@ impl ImageVerifier {
                 if current > last_progress {
                     last_progress = current;
                     if let Some(ref tx) = reporter_tx {
+                        // 把 0-100 的数据校验进度映射到 50-100 显示区间
+                        let mapped = 50 + (current as u32 * 50 / 100) as u8;
                         let _ = tx.send(VerifyProgress::new(
-                            current,
+                            mapped.min(99),
                             format!("正在校验完整性 ({}%)...", current),
                             "",
                         ));
@@ -420,7 +427,8 @@ impl ImageVerifier {
         // 执行校验
         let verify_result = wim_handle.verify();
 
-        // 等待监控线程结束
+        // 通知监控线程结束并等待
+        done.store(true, Ordering::SeqCst);
         let _ = monitor.join();
 
         // 检查取消状态
@@ -516,18 +524,22 @@ impl ImageVerifier {
         // 进度监控线程（复用全局进度，与 WIM/ESD 校验一致）
         let cancel_flag = Arc::clone(&self.cancel_flag);
         let reporter_tx = reporter.tx.clone();
+        // done 标志：校验返回后置位，确保监控线程必定退出（避免 join 永久阻塞）
+        let done = Arc::new(AtomicBool::new(false));
+        let done_monitor = Arc::clone(&done);
         let monitor = thread::spawn(move || {
             let mut last_progress = 0u8;
             loop {
-                if cancel_flag.load(Ordering::SeqCst) {
+                if cancel_flag.load(Ordering::SeqCst) || done_monitor.load(Ordering::SeqCst) {
                     break;
                 }
                 let current = Wimlib::get_global_progress();
                 if current > last_progress {
                     last_progress = current;
                     if let Some(ref tx) = reporter_tx {
+                        let mapped = 60 + (current as u32 * 35 / 100) as u8;
                         let _ = tx.send(VerifyProgress::new(
-                            60 + (current as u32 * 35 / 100) as u8,
+                            mapped.min(99),
                             format!("正在校验完整性 ({}%)...", current),
                             "",
                         ));
@@ -541,6 +553,7 @@ impl ImageVerifier {
         });
 
         let verify_result = wim_handle.verify();
+        done.store(true, Ordering::SeqCst);
         let _ = monitor.join();
 
         if self.is_cancelled() {
