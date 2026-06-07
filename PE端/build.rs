@@ -24,6 +24,15 @@ fn main() {
         res.set("ProductVersion", &numeric_version);
         res.set("FileVersion", &numeric_version);
 
+        // 关键：同时写入二进制 FIXEDFILEINFO 版本号。
+        // 资源管理器“文件版本”读取的是 FIXEDFILEINFO，而 winres 默认用
+        // CARGO_PKG_VERSION（Cargo.toml 的包版本）填充，导致文件版本一直停在旧日期。
+        // 这里按编译日期覆盖，确保“文件版本/产品版本”都跟随编译日期。
+        let ver_u64: u64 =
+            ((y as u64 & 0xffff) << 48) | ((m as u64) << 32) | ((d as u64) << 16);
+        res.set_version_info(winres::VersionInfo::FILEVERSION, ver_u64);
+        res.set_version_info(winres::VersionInfo::PRODUCTVERSION, ver_u64);
+
         // 包含 Common Controls 6.0 和管理员权限
         res.set_manifest(r#"
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
