@@ -228,6 +228,22 @@ impl App {
                 }
 
                 ui.end_row();
+
+                // ========== 第五行 ==========
+
+                if ui
+                    .add(egui::Button::new("BitLocker管理").min_size(button_size))
+                    .clicked()
+                {
+                    self.show_bitlocker_manage_dialog = true;
+                    self.bitlocker_manage_message.clear();
+                    self.bitlocker_manage_password.clear();
+                    self.bitlocker_manage_recovery_key.clear();
+                    self.bitlocker_manage_selected = None;
+                    self.start_load_bitlocker_manage_partitions();
+                }
+
+                ui.end_row();
             });
 
         // ========== 对话框渲染 ==========
@@ -245,6 +261,7 @@ impl App {
         self.render_quick_partition_dialog(ui);
         self.render_image_verify_dialog(ui);
         self.render_repair_boot_dialog(ui);
+        self.render_bitlocker_manage_dialog(ui);
 
         // 显示工具状态
         if !self.tool_message.is_empty() {
