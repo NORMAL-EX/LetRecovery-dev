@@ -18,6 +18,7 @@ pub mod nvidia_uninstall;
 pub mod partition_copy;
 pub mod quick_partition;
 pub mod image_verify;
+pub mod hash_verify;
 
 // 重新导出常用类型
 pub use types::{DriverBackupMode, AppxPackageInfo, InstalledSoftware, WindowsPartitionInfo, ImageVerifyResult};
@@ -243,6 +244,18 @@ impl App {
                     self.start_load_bitlocker_manage_partitions();
                 }
 
+                if ui
+                    .add(egui::Button::new("文件哈希校验").min_size(button_size))
+                    .clicked()
+                {
+                    self.show_hash_verify_dialog = true;
+                    self.hash_verify_file_path.clear();
+                    self.hash_verify_expected.clear();
+                    self.hash_verify_result = None;
+                    self.hash_verify_progress = None;
+                    self.hash_verify_loading = false;
+                }
+
                 ui.end_row();
             });
 
@@ -262,6 +275,7 @@ impl App {
         self.render_image_verify_dialog(ui);
         self.render_repair_boot_dialog(ui);
         self.render_bitlocker_manage_dialog(ui);
+        self.render_hash_verify_dialog(ui);
 
         // 显示工具状态
         if !self.tool_message.is_empty() {

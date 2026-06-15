@@ -144,6 +144,9 @@ impl App {
 
         // 检查 BitLocker 管理工具异步操作
         self.check_bitlocker_manage_async_operations();
+
+        // 检查文件哈希校验状态
+        self.check_hash_verify_status();
     }
     
     /// 启动后台加载Windows分区信息

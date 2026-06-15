@@ -451,7 +451,17 @@ pub struct App {
     pub image_verify_progress_rx: Option<Receiver<crate::core::image_verify::VerifyProgress>>,
     pub image_verify_result_rx: Option<Receiver<crate::ui::tools::ImageVerifyResult>>,
     pub image_verify_cancel_flag: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
-    
+
+    // 文件哈希(SHA-256)校验对话框
+    pub show_hash_verify_dialog: bool,
+    pub hash_verify_file_path: String,
+    pub hash_verify_expected: String,
+    pub hash_verify_loading: bool,
+    pub hash_verify_result: Option<crate::ui::tools::hash_verify::HashVerifyResult>,
+    pub hash_verify_progress: Option<u8>,
+    pub hash_verify_progress_rx: Option<Receiver<u8>>,
+    pub hash_verify_result_rx: Option<Receiver<crate::ui::tools::hash_verify::HashVerifyResult>>,
+
     // 应用配置（小白模式等）
     pub app_config: crate::core::app_config::AppConfig,
     
@@ -814,6 +824,15 @@ impl Default for App {
             image_verify_progress_rx: None,
             image_verify_result_rx: None,
             image_verify_cancel_flag: None,
+            // 文件哈希(SHA-256)校验对话框
+            show_hash_verify_dialog: false,
+            hash_verify_file_path: String::new(),
+            hash_verify_expected: String::new(),
+            hash_verify_loading: false,
+            hash_verify_result: None,
+            hash_verify_progress: None,
+            hash_verify_progress_rx: None,
+            hash_verify_result_rx: None,
             // 应用配置（小白模式等）
             app_config: crate::core::app_config::AppConfig::load(),
             // PE下载待校验的MD5
