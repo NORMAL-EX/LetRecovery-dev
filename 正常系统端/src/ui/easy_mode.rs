@@ -166,7 +166,7 @@ impl App {
         system: &EasyModeSystem,
         is_selected: bool,
         width: f32,
-        height: f32,
+        _height: f32,
     ) -> (bool, bool) {
         let mut card_clicked = false;
         let mut install_clicked = false;

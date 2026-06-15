@@ -786,7 +786,10 @@ mod imp {
     }
 }
 
+// FveVolumeHandle 是 open_volume 等公开方法的返回类型，必须随 FveApi 一起再导出
+// （否则触发 private_interfaces 告警）；二进制 crate 内部不会按名引用它，故单独放行。
 #[cfg(windows)]
+#[allow(unused_imports)]
 pub use imp::{FveApi, FveVolumeHandle};
 
 // =====================================================================================

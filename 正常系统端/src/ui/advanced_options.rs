@@ -110,7 +110,7 @@ impl AdvancedOptions {
     /// 它通过在 Windows 启动前安装一个最小的 Int10h 处理程序来工作。
     /// 
     /// 参考: https://github.com/manatails/uefiseven
-    pub fn apply_uefiseven_patch(&self, target_partition: &str) -> anyhow::Result<()> {
+    pub fn apply_uefiseven_patch(&self, _target_partition: &str) -> anyhow::Result<()> {
         if !self.win7_uefi_patch {
             println!("[UEFISEVEN] Win7 UEFI补丁未启用，跳过");
             return Ok(());

@@ -2623,8 +2623,6 @@ impl App {
 
     /// 跳过当前备份时BitLocker分区
     fn skip_current_backup_bitlocker_partition(&mut self) {
-        use crate::core::bitlocker::VolumeStatus;
-
         if let Some(ref current) = self.backup_bitlocker_current.clone() {
             // 从列表中移除当前分区
             self.backup_bitlocker_partitions.retain(|p| p.letter != *current);

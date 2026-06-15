@@ -606,7 +606,7 @@ impl App {
                         }
                         aria2.add_download_with_headers(&final_url, &save_path, filename.as_deref(), Some(hdrs)).await
                     }
-                    Some(hdrs) => {
+                    Some(_hdrs) => {
                         log::warn!("[下载] headers为空列表，使用普通下载方法");
                         aria2.add_download(&final_url, &save_path, filename.as_deref()).await
                     }

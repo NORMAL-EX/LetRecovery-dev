@@ -1,6 +1,6 @@
 use anyhow::Result;
 use std::path::Path;
-use std::{fs, path::PathBuf};
+use std::path::PathBuf;
 
 use crate::utils::command::new_command;
 use crate::utils::encoding::gbk_to_utf8;
