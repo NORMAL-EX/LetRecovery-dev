@@ -570,6 +570,12 @@ pub struct App {
     pub bitlocker_manage_unlock_rx: Option<Receiver<crate::ui::tools::bitlocker::UnlockResult>>,
     /// 解密结果接收器
     pub bitlocker_manage_decrypt_rx: Option<Receiver<crate::core::bitlocker::DecryptResult>>,
+    /// 查看到的恢复密钥（用于展示/导出）
+    pub bitlocker_manage_recovery_display: Option<String>,
+    /// 获取恢复密钥结果接收器
+    pub bitlocker_manage_recovery_rx: Option<Receiver<Result<String, String>>>,
+    /// 挂起/恢复保护结果接收器
+    pub bitlocker_manage_protect_rx: Option<Receiver<Result<String, String>>>,
 
     // 安装时的 BitLocker 解密状态
     /// 正在解密的 BitLocker 分区列表
@@ -892,6 +898,9 @@ impl Default for App {
             bitlocker_manage_partitions_rx: None,
             bitlocker_manage_unlock_rx: None,
             bitlocker_manage_decrypt_rx: None,
+            bitlocker_manage_recovery_display: None,
+            bitlocker_manage_recovery_rx: None,
+            bitlocker_manage_protect_rx: None,
             decrypting_partitions: Vec::new(),
             bitlocker_decryption_needed: false,
         }

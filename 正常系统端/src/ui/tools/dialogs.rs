@@ -1270,6 +1270,10 @@ impl App {
         let mut do_unlock = false;
         let mut do_decrypt = false;
         let mut do_refresh = false;
+        let mut do_get_recovery = false;
+        let mut do_suspend = false;
+        let mut do_resume = false;
+        let mut do_export_recovery = false;
 
         egui::Window::new("🔐 BitLocker管理")
             .resizable(true)
@@ -1316,6 +1320,7 @@ impl App {
                                             self.bitlocker_manage_message.clear();
                                             self.bitlocker_manage_password.clear();
                                             self.bitlocker_manage_recovery_key.clear();
+                                            self.bitlocker_manage_recovery_display = None;
                                         }
 
                                         let status_color = match partition.status {
@@ -1428,6 +1433,25 @@ impl App {
                     ui.colored_label(color, &self.bitlocker_manage_message);
                 }
 
+                // 恢复密钥展示（查看/备份）
+                if let Some(key) = self.bitlocker_manage_recovery_display.clone() {
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.colored_label(
+                        egui::Color32::from_rgb(255, 165, 0),
+                        "⚠ 恢复密钥（48 位数字），请妥善保管、勿泄露：",
+                    );
+                    ui.monospace(key.as_str());
+                    ui.horizontal(|ui| {
+                        if ui.button("导出到文件").clicked() {
+                            do_export_recovery = true;
+                        }
+                        if ui.button("隐藏").clicked() {
+                            self.bitlocker_manage_recovery_display = None;
+                        }
+                    });
+                }
+
                 ui.add_space(15.0);
                 ui.separator();
                 ui.add_space(5.0);
@@ -1458,6 +1482,15 @@ impl App {
                                 if ui.button("关闭 BitLocker（解密）").clicked() {
                                     do_decrypt = true;
                                 }
+                                if ui.button("查看恢复密钥").clicked() {
+                                    do_get_recovery = true;
+                                }
+                                if ui.button("挂起保护").clicked() {
+                                    do_suspend = true;
+                                }
+                                if ui.button("恢复保护").clicked() {
+                                    do_resume = true;
+                                }
                             }
                             _ => {}
                         }
@@ -1480,6 +1513,31 @@ impl App {
         }
         if do_refresh {
             self.start_load_bitlocker_manage_partitions();
+        }
+        if do_get_recovery {
+            self.start_bitlocker_manage_get_recovery();
+        }
+        if do_suspend {
+            self.start_bitlocker_manage_suspend();
+        }
+        if do_resume {
+            self.start_bitlocker_manage_resume();
+        }
+        if do_export_recovery {
+            if let Some(key) = self.bitlocker_manage_recovery_display.clone() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .set_file_name("BitLocker恢复密钥.txt")
+                    .save_file()
+                {
+                    match std::fs::write(&path, key.as_bytes()) {
+                        Ok(_) => {
+                            self.bitlocker_manage_message =
+                                format!("恢复密钥已导出到 {}", path.display())
+                        }
+                        Err(e) => self.bitlocker_manage_message = format!("导出失败: {}", e),
+                    }
+                }
+            }
         }
         if should_close {
             self.show_bitlocker_manage_dialog = false;
@@ -1569,6 +1627,65 @@ impl App {
         });
     }
 
+    /// 启动获取恢复密钥（管理工具，需分区已解锁）
+    fn start_bitlocker_manage_get_recovery(&mut self) {
+        if self.bitlocker_manage_loading {
+            return;
+        }
+        let drive = match &self.bitlocker_manage_selected {
+            Some(d) => d.clone(),
+            None => {
+                self.bitlocker_manage_message = "请先选择分区".to_string();
+                return;
+            }
+        };
+        self.bitlocker_manage_loading = true;
+        self.bitlocker_manage_message = "正在读取恢复密钥...".to_string();
+        self.bitlocker_manage_recovery_display = None;
+        let (tx, rx) = mpsc::channel();
+        self.bitlocker_manage_recovery_rx = Some(rx);
+        std::thread::spawn(move || {
+            let result = super::bitlocker::get_recovery_key_partition(&drive);
+            let _ = tx.send(result);
+        });
+    }
+
+    /// 启动挂起 BitLocker 保护
+    fn start_bitlocker_manage_suspend(&mut self) {
+        self.start_bitlocker_manage_protect(true);
+    }
+
+    /// 启动恢复 BitLocker 保护
+    fn start_bitlocker_manage_resume(&mut self) {
+        self.start_bitlocker_manage_protect(false);
+    }
+
+    fn start_bitlocker_manage_protect(&mut self, suspend: bool) {
+        if self.bitlocker_manage_loading {
+            return;
+        }
+        let drive = match &self.bitlocker_manage_selected {
+            Some(d) => d.clone(),
+            None => {
+                self.bitlocker_manage_message = "请先选择分区".to_string();
+                return;
+            }
+        };
+        self.bitlocker_manage_loading = true;
+        self.bitlocker_manage_message =
+            if suspend { "正在挂起保护..." } else { "正在恢复保护..." }.to_string();
+        let (tx, rx) = mpsc::channel();
+        self.bitlocker_manage_protect_rx = Some(rx);
+        std::thread::spawn(move || {
+            let result = if suspend {
+                super::bitlocker::suspend_partition_protection(&drive)
+            } else {
+                super::bitlocker::resume_partition_protection(&drive)
+            };
+            let _ = tx.send(result);
+        });
+    }
+
     /// 检查 BitLocker 管理工具的异步操作结果
     fn check_bitlocker_manage_async_operations(&mut self) {
         // 分区列表加载结果
@@ -1619,6 +1736,40 @@ impl App {
                 } else {
                     self.bitlocker_manage_message =
                         format!("{} 解密失败: {}", result.letter, result.message);
+                }
+            }
+        }
+
+        // 恢复密钥读取结果
+        if let Some(ref rx) = self.bitlocker_manage_recovery_rx {
+            if let Ok(result) = rx.try_recv() {
+                self.bitlocker_manage_loading = false;
+                self.bitlocker_manage_recovery_rx = None;
+                match result {
+                    Ok(key) => {
+                        self.bitlocker_manage_recovery_display = Some(key);
+                        self.bitlocker_manage_message = "已读取恢复密钥".to_string();
+                    }
+                    Err(e) => {
+                        self.bitlocker_manage_message = format!("读取恢复密钥失败: {}", e);
+                    }
+                }
+            }
+        }
+
+        // 挂起/恢复保护结果
+        if let Some(ref rx) = self.bitlocker_manage_protect_rx {
+            if let Ok(result) = rx.try_recv() {
+                self.bitlocker_manage_loading = false;
+                self.bitlocker_manage_protect_rx = None;
+                match result {
+                    Ok(msg) => {
+                        self.bitlocker_manage_message = msg;
+                        self.start_load_bitlocker_manage_partitions();
+                    }
+                    Err(e) => {
+                        self.bitlocker_manage_message = format!("操作失败: {}", e);
+                    }
                 }
             }
         }

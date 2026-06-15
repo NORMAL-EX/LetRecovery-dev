@@ -988,6 +988,53 @@ impl BitLockerManager {
         )
     }
 
+    /// 挂起 BitLocker 保护（manage-bde -protectors -disable）。
+    /// 卷仍解密可读，但密钥以明文存放；重启后仍挂起，直到手动恢复。常用于换 BIOS/固件前。
+    #[cfg(windows)]
+    pub fn suspend_protection(&self, drive: &str) -> Result<String, String> {
+        self.run_protectors_cmd(drive, "-disable", "已挂起 BitLocker 保护（重启后仍挂起，直到手动恢复）")
+    }
+
+    /// 恢复 BitLocker 保护（manage-bde -protectors -enable）。
+    #[cfg(windows)]
+    pub fn resume_protection(&self, drive: &str) -> Result<String, String> {
+        self.run_protectors_cmd(drive, "-enable", "已恢复 BitLocker 保护")
+    }
+
+    #[cfg(windows)]
+    fn run_protectors_cmd(&self, drive: &str, action: &str, ok_msg: &str) -> Result<String, String> {
+        use std::process::Command;
+        let letter = drive.chars().next().unwrap_or('C');
+        let d = format!("{}:", letter);
+        let output = Command::new("manage-bde")
+            .args(["-protectors", action, &d])
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .output()
+            .map_err(|e| format!("执行 manage-bde 失败: {}", e))?;
+        if output.status.success() {
+            log::info!("BitLocker {} {} 成功", action, d);
+            Ok(format!("{} {}", d, ok_msg))
+        } else {
+            let mut msg = decode_windows_output(&output.stdout);
+            let err = decode_windows_output(&output.stderr);
+            if !err.trim().is_empty() {
+                msg.push_str(&err);
+            }
+            Err(extract_error_message(&msg)
+                .unwrap_or_else(|| format!("操作失败: {}", msg.trim())))
+        }
+    }
+
+    #[cfg(not(windows))]
+    pub fn suspend_protection(&self, _drive: &str) -> Result<String, String> {
+        Err("仅支持Windows系统".to_string())
+    }
+
+    #[cfg(not(windows))]
+    pub fn resume_protection(&self, _drive: &str) -> Result<String, String> {
+        Err("仅支持Windows系统".to_string())
+    }
+
     /// 获取所有BitLocker加密的卷
     #[cfg(windows)]
     pub fn get_encrypted_volumes(&self) -> Vec<VolumeInfo> {
@@ -1508,6 +1555,16 @@ pub fn partition_can_decrypt(drive: &str) -> bool {
 /// 获取指定分区的恢复密钥
 pub fn get_recovery_key_partition(drive: &str) -> Result<String, String> {
     BitLockerManager::new().get_recovery_key(drive)
+}
+
+/// 挂起指定分区的 BitLocker 保护
+pub fn suspend_partition_protection(drive: &str) -> Result<String, String> {
+    BitLockerManager::new().suspend_protection(drive)
+}
+
+/// 恢复指定分区的 BitLocker 保护
+pub fn resume_partition_protection(drive: &str) -> Result<String, String> {
+    BitLockerManager::new().resume_protection(drive)
 }
 
 #[cfg(test)]

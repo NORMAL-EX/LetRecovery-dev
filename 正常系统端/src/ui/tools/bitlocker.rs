@@ -12,6 +12,7 @@ pub use crate::core::bitlocker::{
 // 重新导出便捷函数，保持API兼容
 pub use crate::core::bitlocker::{
     decrypt_partition, get_encrypted_partitions as get_bitlocker_partitions,
+    get_recovery_key_partition, resume_partition_protection, suspend_partition_protection,
     unlock_partition_with_password as unlock_with_password,
     unlock_partition_with_recovery_key as unlock_with_recovery_key,
 };

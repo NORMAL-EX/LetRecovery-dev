@@ -240,6 +240,7 @@ impl App {
                     self.bitlocker_manage_message.clear();
                     self.bitlocker_manage_password.clear();
                     self.bitlocker_manage_recovery_key.clear();
+                    self.bitlocker_manage_recovery_display = None;
                     self.bitlocker_manage_selected = None;
                     self.start_load_bitlocker_manage_partitions();
                 }
