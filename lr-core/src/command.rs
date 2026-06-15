@@ -22,3 +22,15 @@ pub fn new_command<S: AsRef<std::ffi::OsStr>>(program: S) -> Command {
 
     cmd
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsStr;
+
+    #[test]
+    fn keeps_program_name() {
+        let cmd = new_command("reg.exe");
+        assert_eq!(cmd.get_program(), OsStr::new("reg.exe"));
+    }
+}
