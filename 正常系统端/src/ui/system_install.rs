@@ -828,7 +828,7 @@ impl App {
                     "{}::{}::{}",
                     self.local_image_path, vol.index, vol.name
                 ));
-                // 直接使用 wimgapi 解析出的版本号
+                // 直接使用 wimlib 解析出的版本号
                 // major_version >= 10 表示 Windows 10 或更高版本
                 is_win10_or_11 = vol.major_version.map(|v| v >= 10).unwrap_or(false);
             }

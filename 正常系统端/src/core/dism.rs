@@ -1,11 +1,11 @@
 //! 镜像操作模块
 //!
 //! 该模块封装了 Windows 系统镜像操作功能：
-//! - 镜像释放/应用：使用 wimgapi.dll
-//! - 镜像备份/捕获：使用 wimgapi.dll
+//! - 镜像释放/应用：使用 wimlib (libwim-15.dll)
+//! - 镜像备份/捕获：使用 wimlib (libwim-15.dll)
 //! - 离线驱动导入：使用 dism.exe 命令行（优先使用 {程序目录}\bin\Dism\dism.exe）
 //! - 离线 CAB 包导入：使用 dism.exe 命令行
-//! - 镜像信息获取：使用 wimgapi.dll + WIM XML 解析
+//! - 镜像信息获取：使用 wimlib (libwim-15.dll) + WIM XML 解析
 //! - 系统信息获取：使用 advapi32.dll (离线注册表)
 
 use anyhow::{Context, Result};
@@ -61,11 +61,11 @@ impl Dism {
     }
 
     // ========================================================================
-    // 镜像操作 - 使用 wimgapi.dll
+    // 镜像操作 - 使用 wimlib (libwim-15.dll)
     // ========================================================================
 
     /// 应用系统镜像 (WIM/ESD)
-    /// 使用 wimgapi.dll 实现
+    /// 使用 wimlib 实现
     pub fn apply_image(
         &self,
         image_file: &str,
@@ -112,7 +112,7 @@ impl Dism {
     }
 
     /// 捕获系统镜像 (备份)
-    /// 使用 wimgapi.dll 实现
+    /// 使用 wimlib 实现
     pub fn capture_image(
         &self,
         image_file: &str,
@@ -163,7 +163,7 @@ impl Dism {
     }
 
     /// 增量备份镜像
-    /// 使用 wimgapi.dll 实现
+    /// 使用 wimlib 实现
     pub fn append_image(
         &self,
         image_file: &str,
@@ -172,7 +172,7 @@ impl Dism {
         description: &str,
         progress_tx: Option<Sender<DismProgress>>,
     ) -> Result<()> {
-        println!("[Dism] 使用 wimgapi 追加镜像: {} -> {}", capture_dir, image_file);
+        println!("[Dism] 使用 wimlib 追加镜像: {} -> {}", capture_dir, image_file);
 
         // 对于追加操作，WimManager 的 capture_image 在文件存在时会自动追加
         self.capture_image(image_file, capture_dir, name, description, progress_tx)
@@ -311,11 +311,11 @@ impl Dism {
     }
 
     // ========================================================================
-    // 镜像信息 - 使用 wimgapi.dll + WIM XML 解析
+    // 镜像信息 - 使用 wimlib (libwim-15.dll) + WIM XML 解析
     // ========================================================================
 
     /// 获取 WIM/ESD 镜像信息（所有分卷）
-    /// 使用 wimgapi.dll 或直接解析 WIM XML 元数据
+    /// 使用 wimlib 或直接解析 WIM XML 元数据
     pub fn get_image_info(&self, image_file: &str) -> Result<Vec<ImageInfo>> {
         println!("[Dism] 开始获取镜像信息: {}", image_file);
         
@@ -338,12 +338,12 @@ impl Dism {
                         }).collect());
                     }
                     Err(e) => {
-                        println!("[Dism] wimgapi 获取镜像信息失败: {}", e);
+                        println!("[Dism] wimlib 获取镜像信息失败: {}", e);
                     }
                 }
             }
             Err(e) => {
-                println!("[Dism] wimgapi.dll 加载失败: {} (这可能是PE环境缺少该DLL)", e);
+                println!("[Dism] wimlib (libwim-15.dll) 加载失败: {} (PE 环境会自动释放内置 DLL)", e);
             }
         }
 
@@ -359,11 +359,11 @@ impl Dism {
                 }
             }
             Err(e) => {
-                println!("[Dism] WIM XML 直接解析失败: {} (ESD文件的元数据是压缩的，需要wimgapi)", e);
+                println!("[Dism] WIM XML 直接解析失败: {} (ESD 文件的元数据是压缩的，需要 wimlib)", e);
             }
         }
 
-        anyhow::bail!("无法获取镜像信息：wimgapi 打开文件失败。可能原因：1.镜像文件损坏 2.系统 wimgapi.dll 版本过旧不支持此ESD格式，请将新版 wimgapi.dll 放到程序目录")
+        anyhow::bail!("无法获取镜像信息：wimlib 打开文件失败。可能原因：1.镜像文件损坏 2.libwim-15.dll 缺失或版本过旧不支持此格式（程序会自动释放内置的 libwim-15.dll 到程序目录，请确认其存在）")
     }
 
     /// 通过读取 ntdll.dll 文件版本判断是否为 Win10/11 镜像
