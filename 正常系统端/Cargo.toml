@@ -69,7 +69,7 @@ winreg = "0.52"
 # 两端共享核心库
 lr-core = { path = "../lr-core" }
 
-# wimgapi.dll 动态加载
+# 动态加载 DLL（wimlib / fveapi 等）
 libloading = "0.8"
 
 # 编码转换
