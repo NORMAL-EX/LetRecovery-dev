@@ -19,6 +19,7 @@ pub mod partition_copy;
 pub mod quick_partition;
 pub mod image_verify;
 pub mod hash_verify;
+pub mod password_reset;
 
 // 重新导出常用类型
 pub use types::{DriverBackupMode, AppxPackageInfo, InstalledSoftware, WindowsPartitionInfo, ImageVerifyResult};
@@ -257,6 +258,17 @@ impl App {
                     self.hash_verify_loading = false;
                 }
 
+                if ui
+                    .add(egui::Button::new("离线密码重置").min_size(button_size))
+                    .clicked()
+                {
+                    self.show_password_reset_dialog = true;
+                    self.password_reset_partition.clear();
+                    self.password_reset_username.clear();
+                    self.password_reset_message.clear();
+                    self.password_reset_loading = false;
+                }
+
                 ui.end_row();
             });
 
@@ -277,6 +289,7 @@ impl App {
         self.render_repair_boot_dialog(ui);
         self.render_bitlocker_manage_dialog(ui);
         self.render_hash_verify_dialog(ui);
+        self.render_password_reset_dialog(ui);
 
         // 显示工具状态
         if !self.tool_message.is_empty() {

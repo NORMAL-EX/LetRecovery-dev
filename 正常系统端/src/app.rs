@@ -462,6 +462,14 @@ pub struct App {
     pub hash_verify_progress_rx: Option<Receiver<u8>>,
     pub hash_verify_result_rx: Option<Receiver<crate::ui::tools::hash_verify::HashVerifyResult>>,
 
+    // 离线密码重置对话框
+    pub show_password_reset_dialog: bool,
+    pub password_reset_partition: String,
+    pub password_reset_username: String,
+    pub password_reset_loading: bool,
+    pub password_reset_message: String,
+    pub password_reset_rx: Option<Receiver<Result<bool, String>>>,
+
     // 应用配置（小白模式等）
     pub app_config: crate::core::app_config::AppConfig,
     
@@ -839,6 +847,13 @@ impl Default for App {
             hash_verify_progress: None,
             hash_verify_progress_rx: None,
             hash_verify_result_rx: None,
+            // 离线密码重置对话框
+            show_password_reset_dialog: false,
+            password_reset_partition: String::new(),
+            password_reset_username: String::new(),
+            password_reset_loading: false,
+            password_reset_message: String::new(),
+            password_reset_rx: None,
             // 应用配置（小白模式等）
             app_config: crate::core::app_config::AppConfig::load(),
             // PE下载待校验的MD5

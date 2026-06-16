@@ -147,6 +147,9 @@ impl App {
 
         // 检查文件哈希校验状态
         self.check_hash_verify_status();
+
+        // 检查离线密码重置状态
+        self.check_password_reset_status();
     }
     
     /// 启动后台加载Windows分区信息

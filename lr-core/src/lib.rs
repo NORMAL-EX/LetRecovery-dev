@@ -13,6 +13,7 @@ pub mod hash;
 pub mod image_meta;
 pub mod reboot;
 pub mod registry;
+pub mod sam;
 pub mod wimlib;
 pub mod wimlib_dll;
 
