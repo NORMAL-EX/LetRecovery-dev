@@ -97,6 +97,49 @@ fn load_icon() -> egui::IconData {
     egui::IconData::default()
 }
 
+/// 【实验性】BitLocker 密钥透传解锁。
+///
+/// 若正常系统端在注入引导时把恢复密钥文件打包进了 boot.wim，则 PE 启动后该文件位于
+/// `X:\LR_BitLockerKeys.txt`。读取其中的恢复密钥，对 A–Z 各盘逐一尝试
+/// `manage-bde -unlock <盘>: -RecoveryPassword <密钥>`（用退出码判定成功，免去本地化解析）。
+///
+/// best-effort：没有该文件（即未启用透传）、没有锁定卷、或解锁失败都不致命，仅记录日志。
+/// 恢复密钥由卷自校验，错误的密钥解锁会失败，因此对每个盘把所有密钥都试一遍即可。
+fn unlock_bitlocker_passthrough() {
+    let keys_path = format!("X:\\{}", lr_core::bl_passthrough::KEYS_FILE_NAME);
+    let content = match std::fs::read_to_string(&keys_path) {
+        Ok(c) => c,
+        Err(_) => return, // 无密钥文件 = 未启用透传，属正常情况
+    };
+    let keys = lr_core::bl_passthrough::parse_keys(&content);
+    if keys.is_empty() {
+        return;
+    }
+    println!(
+        "[PE INSTALL][实验] 检测到 BitLocker 密钥透传文件（{} 个恢复密钥），尝试解锁锁定卷…",
+        keys.len()
+    );
+
+    for byte in b'A'..=b'Z' {
+        let letter = byte as char;
+        if letter == 'X' {
+            continue; // 跳过 PE 系统盘
+        }
+        let drive = format!("{}:", letter);
+        for key in &keys {
+            let unlocked = std::process::Command::new("manage-bde")
+                .args(["-unlock", &drive, "-RecoveryPassword", key])
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+            if unlocked {
+                println!("[PE INSTALL][实验] {} 已用恢复密钥解锁", drive);
+                break; // 该盘已解锁，换下一个盘
+            }
+        }
+    }
+}
+
 /// 命令行模式执行
 fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
     use core::bcdedit::BootManager;
@@ -131,6 +174,10 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
 
     if is_install {
         println!("[PE INSTALL] ========== PE自动安装模式 ==========");
+
+        // Step 0: 【实验性】BitLocker 密钥透传——若 boot.wim 里带了恢复密钥文件，
+        // 先解锁所有锁定的 BitLocker 卷，否则后续查找数据分区/格式化目标盘都可能因卷锁定而失败。
+        unlock_bitlocker_passthrough();
 
         // 查找配置文件所在分区
         let data_partition = match ConfigFileManager::find_data_partition() {
