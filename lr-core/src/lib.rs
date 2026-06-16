@@ -7,6 +7,7 @@
 //! 后续计划收纳：镜像元数据类型 + XML 解析、wimlib FFI 封装等
 //! （见仓库 TESTING.md）。
 
+pub mod bl_passthrough;
 pub mod command;
 pub mod encoding;
 pub mod hash;
