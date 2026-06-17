@@ -333,12 +333,12 @@ mod imp {
         _library: Library,
         open_volume: FnOpenVolumeW,
         close_volume: FnCloseVolume,
-        get_status_w: FnGetStatusW,
-        get_status: FnGetStatus,
+        get_status_w: Option<FnGetStatusW>,
+        get_status: Option<FnGetStatus>,
         unlock_volume: FnUnlockVolume,
         unlock_volume_access: Option<FnUnlockVolumeWithAccessMode>,
-        conversion_decrypt: FnConversionDecrypt,
-        auth_from_passphrase: FnAuthFromPassphrase,
+        conversion_decrypt: Option<FnConversionDecrypt>,
+        auth_from_passphrase: Option<FnAuthFromPassphrase>,
         auth_from_recovery: FnAuthFromRecovery,
         is_volume_encrypted: Option<FnIsVolumeEncrypted>,
     }
@@ -375,21 +375,26 @@ mod imp {
             let library = unsafe { Library::new("fveapi.dll") }
                 .map_err(|e| format!("无法加载 fveapi.dll: {}", e))?;
 
+            // 恢复密钥解锁真正必需的导出：开卷/关卷/解锁/恢复密钥认证元素。
             let open_volume = req!(library, b"FveOpenVolumeW", FnOpenVolumeW);
             let close_volume = req!(library, b"FveCloseVolume", FnCloseVolume);
-            let get_status_w = req!(library, b"FveGetStatusW", FnGetStatusW);
-            let get_status = req!(library, b"FveGetStatus", FnGetStatus);
             let unlock_volume = req!(library, b"FveUnlockVolume", FnUnlockVolume);
-            let conversion_decrypt = req!(library, b"FveConversionDecrypt", FnConversionDecrypt);
-            let auth_from_passphrase = req!(
-                library,
-                b"FveAuthElementFromPassPhraseW",
-                FnAuthFromPassphrase
-            );
             let auth_from_recovery = req!(
                 library,
                 b"FveAuthElementFromRecoveryPasswordW",
                 FnAuthFromRecovery
+            );
+
+            // 其余非解锁必需的导出设为可选：精简版 WinPE 的 fveapi.dll 可能并不导出
+            // 这些函数，缺了也不应让整个 fveapi 不可用（否则连恢复密钥解锁都做不了）。
+            // 调用处各自对 None 兜底（状态查询/解密/口令解锁缺失时返回错误，由上层回退）。
+            let get_status_w = opt!(library, b"FveGetStatusW", FnGetStatusW);
+            let get_status = opt!(library, b"FveGetStatus", FnGetStatus);
+            let conversion_decrypt = opt!(library, b"FveConversionDecrypt", FnConversionDecrypt);
+            let auth_from_passphrase = opt!(
+                library,
+                b"FveAuthElementFromPassPhraseW",
+                FnAuthFromPassphrase
             );
 
             let unlock_volume_access = opt!(
@@ -444,12 +449,13 @@ mod imp {
         }
 
         fn query_status_by_path(&self, path: &str) -> Result<FveVolumeInfo, FveError> {
+            let get_status_w = self.get_status_w.ok_or(FveError::NotSupported)?;
             let wide = to_wide(path);
             let mut out = FveGetStatusOutput::new(STATUS_OUTPUT_VERSION);
-            let mut hr = unsafe { (self.get_status_w)(wide.as_ptr(), &mut out) };
+            let mut hr = unsafe { get_status_w(wide.as_ptr(), &mut out) };
             if hr == E_INVALIDARG {
                 out = FveGetStatusOutput::new(STATUS_OUTPUT_LEGACY_VERSION);
-                hr = unsafe { (self.get_status_w)(wide.as_ptr(), &mut out) };
+                hr = unsafe { get_status_w(wide.as_ptr(), &mut out) };
             }
             self.interpret_status(hr, &out)
         }
@@ -458,11 +464,12 @@ mod imp {
             if handle.is_null() {
                 return Err(FveError::InvalidParameter);
             }
+            let get_status = self.get_status.ok_or(FveError::NotSupported)?;
             let mut out = FveGetStatusOutput::new(STATUS_OUTPUT_VERSION);
-            let mut hr = unsafe { (self.get_status)(handle, &mut out) };
+            let mut hr = unsafe { get_status(handle, &mut out) };
             if hr == E_INVALIDARG {
                 out = FveGetStatusOutput::new(STATUS_OUTPUT_LEGACY_VERSION);
-                hr = unsafe { (self.get_status)(handle, &mut out) };
+                hr = unsafe { get_status(handle, &mut out) };
             }
             self.interpret_status(hr, &out)
         }
@@ -624,7 +631,10 @@ mod imp {
                 if is_recovery {
                     (self.api.auth_from_recovery)(secret_w.as_ptr(), &mut *auth)
                 } else {
-                    (self.api.auth_from_passphrase)(secret_w.as_ptr(), &mut *auth)
+                    match self.api.auth_from_passphrase {
+                        Some(f) => f(secret_w.as_ptr(), &mut *auth),
+                        None => return Err(FveError::NotSupported),
+                    }
                 }
             };
             if hr_failed(hr) {
@@ -661,7 +671,8 @@ mod imp {
 
         /// 开始解密（关闭 BitLocker）。立即返回，解密在后台进行。
         pub fn start_decryption(&self) -> Result<(), FveError> {
-            let hr = unsafe { (self.api.conversion_decrypt)(self.handle) };
+            let conversion_decrypt = self.api.conversion_decrypt.ok_or(FveError::NotSupported)?;
+            let hr = unsafe { conversion_decrypt(self.handle) };
             if hr == HR_OK {
                 Ok(())
             } else {
