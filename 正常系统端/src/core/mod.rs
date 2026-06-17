@@ -1,7 +1,6 @@
 pub mod app_config;
 pub mod bcdedit;
 pub mod bitlocker;
-pub mod fveapi;
 pub mod cabinet;
 pub mod cli_install;
 pub mod disk;

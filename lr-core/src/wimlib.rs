@@ -184,6 +184,35 @@ type FnGetImageName = unsafe extern "C" fn(wim: WIMStruct, index: c_int) -> *con
 type FnGetImageDescription = unsafe extern "C" fn(wim: WIMStruct, index: c_int) -> *const u16;
 type FnGetVersionString = unsafe extern "C" fn() -> *const u8;
 
+type FnUpdateImage = unsafe extern "C" fn(
+    wim: WIMStruct,
+    image: c_int,
+    cmds: *const WimlibUpdateCommandAdd,
+    num_cmds: usize,
+    update_flags: c_int,
+) -> c_int;
+
+/// wimlib_update_image 的 ADD 命令布局（仅使用 ADD 变体）。
+///
+/// C 定义为 `struct { enum wimlib_update_op op; union { add; delete; rename; } }`。
+/// 64 位下 enum(4B) 之后需对齐到指针(8B)，联合体自偏移 8 起；下面 `#[repr(C)]`
+/// 中 `op`(c_int) 之后会自动补 4 字节，使 `add` 落在偏移 8，布局与 C 端一致。
+/// 由于 ADD 是联合体里最大的成员，把指针指向本结构传给 wimlib 完全合法。
+#[repr(C)]
+struct WimlibAddCommand {
+    fs_source_path: *const u16,
+    wim_target_path: *const u16,
+    config_file: *const u16,
+    add_flags: c_int,
+}
+#[repr(C)]
+struct WimlibUpdateCommandAdd {
+    op: c_int,
+    add: WimlibAddCommand,
+}
+const WIMLIB_UPDATE_OP_ADD: c_int = 0;
+
+
 /// struct wimlib_wim_info（前若干字段，足够取 image_count / 完整性表标志）
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -636,6 +665,7 @@ pub struct WimlibManager {
     reference_resource_files: FnReferenceResourceFiles,
     iterate_dir_tree: FnIterateDirTree,
     get_xml_data: FnGetXmlData,
+    update_image: FnUpdateImage,
 }
 
 impl WimlibManager {
@@ -661,6 +691,7 @@ impl WimlibManager {
             load_sym!(lib, b"wimlib_reference_resource_files\0", FnReferenceResourceFiles);
         let iterate_dir_tree = load_sym!(lib, b"wimlib_iterate_dir_tree\0", FnIterateDirTree);
         let get_xml_data = load_sym!(lib, b"wimlib_get_xml_data\0", FnGetXmlData);
+        let update_image = load_sym!(lib, b"wimlib_update_image\0", FnUpdateImage);
 
         if !ensure_global_init(global_init) {
             return Err("wimlib 全局初始化失败".to_string());
@@ -684,6 +715,7 @@ impl WimlibManager {
             reference_resource_files,
             iterate_dir_tree,
             get_xml_data,
+            update_image,
         })
     }
 
@@ -865,6 +897,48 @@ impl WimlibManager {
 
         unsafe { (self.free_wim)(wim) };
         drop(ctx);
+        result
+    }
+
+    /// 往**已存在** WIM 的第 `image` 个镜像注入一个本地文件，再覆盖写回（wimlib_overwrite）。
+    ///
+    /// - `wim_path`：要修改的 WIM 文件路径
+    /// - `image`：镜像序号（1 起；PE 的 boot.wim 通常注入第 1 个可引导镜像）
+    /// - `src_file`：本地源文件路径
+    /// - `dest_in_wim`：镜像内目标绝对路径（如 `"\\LR_BitLockerKeys.json"`）
+    ///
+    /// 用途：把 BitLocker 恢复密钥文件打包进 PE 的 boot.wim，使 PE 启动后可直接读取。
+    pub fn add_file_to_image(
+        &self,
+        wim_path: &str,
+        image: i32,
+        src_file: &str,
+        dest_in_wim: &str,
+    ) -> Result<(), String> {
+        let wim = self.open(wim_path)?;
+        let result = (|| {
+            let wsrc = to_wide(src_file);
+            let wdest = to_wide(dest_in_wim);
+            let cmd = WimlibUpdateCommandAdd {
+                op: WIMLIB_UPDATE_OP_ADD,
+                add: WimlibAddCommand {
+                    fs_source_path: wsrc.as_ptr(),
+                    wim_target_path: wdest.as_ptr(),
+                    config_file: std::ptr::null(),
+                    add_flags: 0,
+                },
+            };
+            let rc = unsafe { (self.update_image)(wim, image as c_int, &cmd, 1, 0) };
+            if rc != WIMLIB_ERR_SUCCESS {
+                return Err(self.error_message(rc));
+            }
+            let rc = unsafe { (self.overwrite)(wim, 0, optimal_threads()) };
+            if rc != WIMLIB_ERR_SUCCESS {
+                return Err(self.error_message(rc));
+            }
+            Ok(())
+        })();
+        unsafe { (self.free_wim)(wim) };
         result
     }
 
