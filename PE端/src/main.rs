@@ -15,19 +15,63 @@ fn log_file_path() -> std::path::PathBuf {
         .unwrap_or_else(|| std::path::PathBuf::from("LetRecoveryPE.log"))
 }
 
-/// 初始化日志：输出到文件（append）。文件打不开时退回默认 stderr，至少不影响启动。
+/// 文件日志器：每条日志**立即 flush 落盘**。
+/// 之前用 env_logger 的 file pipe，GUI 进程长期不退出导致缓冲日志不落盘，
+/// 安装流程的日志全丢失、无法排查；这里改为自实现、每条 flush。
+struct FileLogger {
+    file: std::sync::Mutex<std::fs::File>,
+    level: log::LevelFilter,
+}
+
+impl log::Log for FileLogger {
+    fn enabled(&self, metadata: &log::Metadata) -> bool {
+        metadata.level() <= self.level
+    }
+
+    fn log(&self, record: &log::Record) {
+        if !self.enabled(record.metadata()) {
+            return;
+        }
+        let ts = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ");
+        if let Ok(mut f) = self.file.lock() {
+            use std::io::Write;
+            let _ = writeln!(
+                f,
+                "[{}] {} {} {}",
+                ts,
+                record.level(),
+                record.target(),
+                record.args()
+            );
+            let _ = f.flush(); // 关键：每条立即落盘，GUI 运行中也能实时看到
+        }
+    }
+
+    fn flush(&self) {
+        if let Ok(mut f) = self.file.lock() {
+            use std::io::Write;
+            let _ = f.flush();
+        }
+    }
+}
+
+/// 初始化日志：自实现的文件日志器（每条 flush）。文件打不开时静默跳过，不影响启动。
 fn init_file_logger() {
-    let mut builder =
-        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"));
-    builder.format_timestamp(Some(env_logger::TimestampPrecision::Millis));
-    if let Ok(file) = std::fs::OpenOptions::new()
+    let file = match std::fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(log_file_path())
     {
-        builder.target(env_logger::Target::Pipe(Box::new(file)));
+        Ok(f) => f,
+        Err(_) => return,
+    };
+    let logger = Box::new(FileLogger {
+        file: std::sync::Mutex::new(file),
+        level: log::LevelFilter::Info,
+    });
+    if log::set_boxed_logger(logger).is_ok() {
+        log::set_max_level(log::LevelFilter::Info);
     }
-    let _ = builder.try_init();
 }
 
 /// 安装 panic 钩子，把线程 panic 的位置与信息写入日志（再调用默认钩子）。
