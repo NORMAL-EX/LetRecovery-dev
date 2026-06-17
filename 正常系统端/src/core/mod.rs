@@ -3,6 +3,7 @@ pub mod bcdedit;
 pub mod bitlocker;
 pub mod fveapi;
 pub mod cabinet;
+pub mod cli_install;
 pub mod disk;
 pub mod dism;
 pub mod dism_cmd;

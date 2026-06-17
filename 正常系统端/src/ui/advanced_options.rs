@@ -6,7 +6,10 @@ use crate::core::registry::OfflineRegistry;
 use std::path::PathBuf;
 
 /// 系统安装高级选项
+///
+/// 容器级 `#[serde(default)]`：命令行安装允许只写需要的字段，缺省项自动取默认值。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AdvancedOptions {
     // 系统优化选项
     pub remove_shortcut_arrow: bool,

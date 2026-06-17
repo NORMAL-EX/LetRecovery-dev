@@ -65,6 +65,14 @@ fn main() -> eframe::Result<()> {
 
     log::info!("已获得管理员权限");
 
+    // 命令行无人值守安装：--install --config <install.json> [--advanced <advanced.json>]
+    // 放在确认管理员权限之后、GUI 初始化之前；不进 GUI，准备好后（默认）重启进 PE 完成安装。
+    if args.contains(&"/INSTALL".to_string()) || args.contains(&"--install".to_string()) {
+        let config = arg_value(&args, &["--config", "/CONFIG"]);
+        let advanced = arg_value(&args, &["--advanced", "/ADVANCED"]);
+        return run_cli_install_entry(config.as_deref(), advanced.as_deref());
+    }
+
     // 记录本机配置信息，便于用户反馈问题时开发者排查
     if app_config.log_enabled {
         log_machine_info();
@@ -321,6 +329,40 @@ fn check_system_components() -> Result<(), Vec<String>> {
 }
 
 /// PE环境下自动执行安装
+/// 从参数列表取某个带值参数的值，支持 `--name value` 与 `--name=value`（名称大小写不敏感）。
+fn arg_value(args: &[String], names: &[&str]) -> Option<String> {
+    for (i, a) in args.iter().enumerate() {
+        for name in names {
+            if a.eq_ignore_ascii_case(name) {
+                return args.get(i + 1).cloned();
+            }
+            let prefix = format!("{}=", name);
+            if a.len() >= prefix.len() && a[..prefix.len()].eq_ignore_ascii_case(&prefix) {
+                return Some(a[prefix.len()..].to_string());
+            }
+        }
+    }
+    None
+}
+
+/// `--install` 入口：校验参数后调用命令行无人值守安装。
+fn run_cli_install_entry(config: Option<&str>, advanced: Option<&str>) -> eframe::Result<()> {
+    let config = match config {
+        Some(c) if !c.is_empty() => c,
+        _ => {
+            eprintln!("[CLI INSTALL] 缺少 --config <install.json>");
+            eprintln!(
+                "用法: LetRecovery.exe --install --config <install.json> [--advanced <advanced.json>]"
+            );
+            return Ok(());
+        }
+    };
+    if let Err(e) = core::cli_install::run_cli_install(config, advanced) {
+        eprintln!("[CLI INSTALL] 失败: {:#}", e);
+    }
+    Ok(())
+}
+
 fn run_pe_install() -> eframe::Result<()> {
     use core::install_config::ConfigFileManager;
     
