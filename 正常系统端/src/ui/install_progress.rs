@@ -101,7 +101,7 @@ impl App {
                     let is_completed = effective_install_step > step_num;
 
                     let prefix = if is_completed {
-                        "✓"
+                        "●"
                     } else if is_current {
                         "→"
                     } else {
@@ -109,7 +109,7 @@ impl App {
                     };
 
                     let color = if is_completed {
-                        egui::Color32::GREEN
+                        egui::Color32::from_rgb(102, 187, 106)
                     } else if is_current {
                         egui::Color32::from_rgb(255, 165, 0)
                     } else {
@@ -131,7 +131,7 @@ impl App {
         if self.install_progress.total_progress >= 100 {
             match self.install_mode {
                 InstallMode::Direct => {
-                    ui.colored_label(egui::Color32::GREEN, "安装完成！");
+                    ui.colored_label(egui::Color32::from_rgb(102, 187, 106), "安装完成！");
                     ui.add_space(10.0);
                     ui.horizontal(|ui| {
                         if ui.button("立即重启").clicked() {
@@ -144,7 +144,7 @@ impl App {
                     });
                 }
                 InstallMode::ViaPE => {
-                    ui.colored_label(egui::Color32::GREEN, "PE环境准备完成！");
+                    ui.colored_label(egui::Color32::from_rgb(102, 187, 106), "PE环境准备完成！");
                     ui.label("系统将重启进入PE环境继续安装。");
                     ui.add_space(10.0);
                     ui.horizontal(|ui| {

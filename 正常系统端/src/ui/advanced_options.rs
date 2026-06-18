@@ -1620,7 +1620,7 @@ Write-Host "UWP应用清理完成"
                     } else {
                         ui.colored_label(
                             egui::Color32::from_rgb(100, 200, 100),
-                            format!("  ✓ 将迁移：{}", self.wifi_ssid),
+                            format!("  将迁移：{}", self.wifi_ssid),
                         );
                     }
                 }

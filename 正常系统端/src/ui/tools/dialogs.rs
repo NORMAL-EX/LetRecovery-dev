@@ -1402,7 +1402,7 @@ impl App {
                             ui.add_space(5.0);
                             ui.colored_label(
                                 egui::Color32::from_rgb(100, 200, 100),
-                                "✓ 该分区已解锁，可彻底关闭 BitLocker（解密）",
+                                "该分区已解锁，可彻底关闭 BitLocker（解密）",
                             );
                             ui.colored_label(
                                 egui::Color32::from_rgb(255, 165, 0),
@@ -2329,7 +2329,7 @@ impl App {
                     ui.add_space(10.0);
                     ui.colored_label(
                         egui::Color32::from_rgb(100, 200, 100),
-                        "✓ 所有分区已解锁，可以继续安装",
+                        "所有分区已解锁，可以继续安装",
                     );
                 }
 
@@ -2628,7 +2628,7 @@ impl App {
                     ui.add_space(10.0);
                     ui.colored_label(
                         egui::Color32::from_rgb(100, 200, 100),
-                        "✓ 所有分区已解锁，可以继续备份",
+                        "所有分区已解锁，可以继续备份",
                     );
                 }
 

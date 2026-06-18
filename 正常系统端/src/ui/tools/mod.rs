@@ -343,11 +343,11 @@ impl App {
 
         match actions::repair_boot(&target_partition) {
             Ok(_) => {
-                self.repair_boot_message = format!("✓ 引导修复成功: {}", target_partition);
+                self.repair_boot_message = format!("引导修复成功: {}", target_partition);
                 self.repair_boot_loading = false;
             }
             Err(e) => {
-                self.repair_boot_message = format!("✗ 引导修复失败: {}", e);
+                self.repair_boot_message = format!("引导修复失败: {}", e);
                 self.repair_boot_loading = false;
             }
         }

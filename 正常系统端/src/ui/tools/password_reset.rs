@@ -167,9 +167,9 @@ impl App {
                 if !self.password_reset_message.is_empty() {
                     ui.add_space(10.0);
                     ui.separator();
-                    let color = if self.password_reset_message.starts_with('✓') {
+                    let color = if self.password_reset_message.starts_with('✅') {
                         egui::Color32::from_rgb(0, 200, 0)
-                    } else if self.password_reset_message.starts_with('✗') {
+                    } else if self.password_reset_message.starts_with('❌') {
                         egui::Color32::from_rgb(255, 80, 80)
                     } else {
                         egui::Color32::GRAY
@@ -242,7 +242,7 @@ impl App {
                     }
                     Err(e) => {
                         self.password_reset_users.clear();
-                        self.password_reset_message = format!("✗ 读取账户列表失败：{}", e);
+                        self.password_reset_message = format!("❌ 读取账户列表失败：{}", e);
                     }
                 }
             }
@@ -268,7 +268,7 @@ impl App {
         let username = match self.password_reset_selected_user.clone() {
             Some(u) if !u.trim().is_empty() => u.trim().to_string(),
             _ => {
-                self.password_reset_message = "✗ 请先在列表中选择一个账户".to_string();
+                self.password_reset_message = "❌ 请先在列表中选择一个账户".to_string();
                 return;
             }
         };
@@ -282,13 +282,13 @@ impl App {
                     let sam = format!("{}\\Windows\\System32\\config\\SAM", p);
                     if !std::path::Path::new(&sam).exists() {
                         self.password_reset_message =
-                            format!("✗ 未在 {} 找到 Windows（缺少 {}）", p, sam);
+                            format!("❌ 未在 {} 找到 Windows（缺少 {}）", p, sam);
                         return;
                     }
                     Some(p)
                 }
                 None => {
-                    self.password_reset_message = "✗ 请先选择目标系统".to_string();
+                    self.password_reset_message = "❌ 请先选择目标系统".to_string();
                     return;
                 }
             }
@@ -321,12 +321,12 @@ impl App {
                 let reload = matches!(result, Ok(true));
                 self.password_reset_message = match result {
                     Ok(true) => {
-                        "✓ 已重置该账户密码（可空密码登录），并已启用账户".to_string()
+                        "✅ 已重置该账户密码（可空密码登录），并已启用账户".to_string()
                     }
                     Ok(false) => {
-                        "✗ 未找到匹配的账户（请核对用户名），SAM 未改动".to_string()
+                        "❌ 未找到匹配的账户（请核对用户名），SAM 未改动".to_string()
                     }
-                    Err(e) => format!("✗ 失败：{}", e),
+                    Err(e) => format!("❌ 失败：{}", e),
                 };
                 // 成功后刷新账户列表（更新“已禁用”标记），但保留成功提示
                 if reload {

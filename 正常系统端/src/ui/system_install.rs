@@ -22,6 +22,11 @@ impl App {
         ui.heading("系统安装");
         ui.separator();
 
+        // 整页套一层垂直滚动：窗口调小时也能滚动到底部的「开始安装」按钮等控件。
+        egui::ScrollArea::vertical()
+            .id_salt("system_install_page_scroll")
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
         let is_pe = self.is_pe_environment();
         
         // 显示小白模式提示（非PE环境下，且未关闭提示）
@@ -231,7 +236,7 @@ impl App {
                             // 显示 BitLocker 状态
                             let status_color = match partition.bitlocker_status {
                                 crate::core::bitlocker::VolumeStatus::EncryptedLocked => egui::Color32::RED,
-                                crate::core::bitlocker::VolumeStatus::EncryptedUnlocked => egui::Color32::GREEN,
+                                crate::core::bitlocker::VolumeStatus::EncryptedUnlocked => egui::Color32::from_rgb(102, 187, 106),
                                 crate::core::bitlocker::VolumeStatus::Encrypting | 
                                 crate::core::bitlocker::VolumeStatus::Decrypting => egui::Color32::YELLOW,
                                 _ => ui.visuals().text_color(),
@@ -404,7 +409,7 @@ impl App {
                     None => {
                         ui.colored_label(
                             egui::Color32::from_rgb(0, 160, 0),
-                            "✓ 无人值守文件语法校验通过",
+                            "无人值守文件语法校验通过",
                         );
                     }
                 }
@@ -489,7 +494,7 @@ impl App {
                             if let Some(pe) = config.pe_list.get(idx) {
                                 let (exists, _) = crate::core::pe::PeManager::check_pe_exists(&pe.filename);
                                 if exists {
-                                    ui.colored_label(egui::Color32::GREEN, "✓ 已就绪");
+                                    ui.colored_label(egui::Color32::from_rgb(102, 187, 106), "已就绪");
                                 } else {
                                     ui.colored_label(egui::Color32::from_rgb(255, 165, 0), "需下载");
                                 }
@@ -573,6 +578,7 @@ impl App {
                 }
             }
         }
+            }); // end ScrollArea
     }
 
     /// 检查是否需要通过PE安装

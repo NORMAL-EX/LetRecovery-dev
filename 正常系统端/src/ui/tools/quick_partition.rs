@@ -314,7 +314,7 @@ impl App {
 
                 if result.success {
                     self.quick_partition_state.message = format!(
-                        "✓ 分区成功！已创建分区: {}",
+                        "✅ 分区成功！已创建分区: {}",
                         result.created_partitions.join(", ")
                     );
                     // 刷新磁盘列表
@@ -323,7 +323,7 @@ impl App {
                     // 刷新主分区列表
                     self.partitions = crate::core::disk::DiskManager::get_partitions().unwrap_or_default();
                 } else {
-                    self.quick_partition_state.message = format!("✗ 分区失败: {}", result.message);
+                    self.quick_partition_state.message = format!("❌ 分区失败: {}", result.message);
                 }
             }
         }
@@ -982,9 +982,9 @@ impl App {
 
                             // 状态消息
                             if !self.quick_partition_state.message.is_empty() {
-                                let color = if self.quick_partition_state.message.starts_with('✓') {
+                                let color = if self.quick_partition_state.message.starts_with('✅') {
                                     egui::Color32::from_rgb(46, 204, 113)
-                                } else if self.quick_partition_state.message.starts_with('✗') {
+                                } else if self.quick_partition_state.message.starts_with('❌') {
                                     egui::Color32::from_rgb(231, 76, 60)
                                 } else {
                                     egui::Color32::GRAY
@@ -1247,7 +1247,7 @@ impl App {
                                 // 提示信息
                                 ui.colored_label(
                                     egui::Color32::from_rgb(46, 204, 113),
-                                    "✓ 此操作会立即执行，分区数据会保留"
+                                    "✅ 此操作会立即执行，分区数据会保留"
                                 );
                                 ui.colored_label(
                                     egui::Color32::from_rgb(241, 196, 15),
@@ -1469,14 +1469,14 @@ impl App {
                 self.resize_existing_result_rx = None;
                 
                 if result.success {
-                    self.quick_partition_state.message = format!("✓ {}", result.message);
+                    self.quick_partition_state.message = format!("✅ {}", result.message);
                     // 刷新磁盘列表
                     self.quick_partition_state.loading = true;
                     self.start_load_physical_disks();
                     // 刷新主分区列表
                     self.partitions = crate::core::disk::DiskManager::get_partitions().unwrap_or_default();
                 } else {
-                    self.quick_partition_state.message = format!("✗ {}", result.message);
+                    self.quick_partition_state.message = format!("❌ {}", result.message);
                 }
             }
         }
