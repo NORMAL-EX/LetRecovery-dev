@@ -1,5 +1,5 @@
 import { Link, useLocation } from 'react-router-dom'
-import { Github, Sun, Moon, Menu, X, Check } from 'lucide-react'
+import { Github, Sun, Moon, Menu, X, Check, BookOpen } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {
@@ -59,6 +59,23 @@ const Header: React.FC = () => {
                 {item.name}
               </Link>
             ))}
+
+            {/* 文档 Button */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="button-header"
+              render={
+                <a
+                  href="https://docs.letrecovery.net"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                />
+              }
+            >
+              <BookOpen className="size-4 mr-1.5" />
+              文档
+            </Button>
 
             {/* Github Button */}
             <Button
@@ -186,6 +203,15 @@ const Header: React.FC = () => {
                   {item.name}
                 </Link>
               ))}
+              <a
+                href="https://docs.letrecovery.net"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-lg font-medium text-muted-foreground transition-colors hover:text-foreground flex items-center py-2"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                文档
+              </a>
               <a
                 href="https://github.com/NORMAL-EX/LetRecovery"
                 target="_blank"
