@@ -62,12 +62,12 @@ jobs:
       - name: Download base package (template)
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          gh release download release \
-            --repo NORMAL-EX/letrecovery-package \
-            --pattern package.7z --dir .
+          # dev 仓库无私有底包/RELEASE_PAT 访问权：改用主仓库公开 release 的完整包作底包模板
+          gh release download --repo NORMAL-EX/LetRecovery --pattern '*.7z' --dir base
+          mv base/*.7z package.7z
           ls -la package.7z
 
       - name: Extract base package
@@ -210,7 +210,7 @@ jobs:
       - name: Create Release
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           TAG="${{ steps.tag.outputs.tag }}"
