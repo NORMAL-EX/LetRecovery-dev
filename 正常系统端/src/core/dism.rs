@@ -17,6 +17,7 @@ use crate::core::driver::DriverManager;
 use crate::core::system_utils;
 use lr_core::image_meta::{WimProgress, WIM_COMPRESS_LZX};
 use lr_core::wimlib::WimlibManager;
+use lr_core::WimEngineManager;
 
 /// 操作进度
 #[derive(Debug, Clone)]
@@ -75,8 +76,8 @@ impl Dism {
     ) -> Result<()> {
         println!("[Dism] 使用 wimlib 应用镜像: {} -> {}", image_file, apply_dir);
 
-        let wim_manager = WimlibManager::new()
-            .map_err(|e| anyhow::anyhow!("wimlib 初始化失败: {}", e))?;
+        let wim_manager = WimEngineManager::new_current()
+            .map_err(|e| anyhow::anyhow!("镜像引擎初始化失败: {}", e))?;
 
         // 创建进度转换通道
         let (wim_tx, wim_rx) = std::sync::mpsc::channel::<WimProgress>();
@@ -123,8 +124,8 @@ impl Dism {
     ) -> Result<()> {
         println!("[Dism] 使用 wimlib 捕获镜像: {} -> {}", capture_dir, image_file);
 
-        let wim_manager = WimlibManager::new()
-            .map_err(|e| anyhow::anyhow!("wimlib 初始化失败: {}", e))?;
+        let wim_manager = WimEngineManager::new_current()
+            .map_err(|e| anyhow::anyhow!("镜像引擎初始化失败: {}", e))?;
 
         let (wim_tx, wim_rx) = std::sync::mpsc::channel::<WimProgress>();
 

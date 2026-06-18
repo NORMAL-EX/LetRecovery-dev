@@ -251,6 +251,9 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
         }
     };
 
+    // 切换到正常系统端选定的镜像引擎（随重启传入），使 PE 端使用相同引擎
+    lr_core::set_active_engine(lr_core::WimEngine::from_u8(config.wim_engine));
+
     log::info!("目标分区: {}", config.target_partition);
     log::info!("镜像文件: {}", config.image_path);
 
@@ -621,6 +624,9 @@ fn execute_backup_workflow(tx: Sender<WorkerMessage>) {
             return;
         }
     };
+
+    // 切换到正常系统端选定的镜像引擎（随重启传入），使 PE 端使用相同引擎
+    lr_core::set_active_engine(lr_core::WimEngine::from_u8(config.wim_engine));
 
     log::info!("源分区: {}", config.source_partition);
     log::info!("保存路径: {}", config.save_path);

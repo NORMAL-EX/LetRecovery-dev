@@ -63,6 +63,9 @@ pub struct InstallConfig {
     pub win7_fix_acpi_bsod: bool,
     /// Win7 修复存储控制器蓝屏
     pub win7_fix_storage_bsod: bool,
+
+    /// WIM 镜像引擎：0=libwim（默认），1=wimgapi。随重启传给 PE 端，使其使用相同引擎。
+    pub wim_engine: u8,
 }
 
 impl InstallConfig {
@@ -115,6 +118,8 @@ pub struct BackupConfig {
     pub format: u8,
     /// SWM分卷大小（MB）
     pub swm_split_size: u32,
+    /// WIM 镜像引擎：0=libwim（默认），1=wimgapi。随重启传给 PE 端。
+    pub wim_engine: u8,
 }
 
 /// 配置文件管理器
@@ -329,6 +334,7 @@ VolumeIndex={}
 TargetPartition={}
 ImagePath={}
 IsGho={}
+WimEngine={}
 
 [Advanced]
 RemoveShortcutArrow={}
@@ -361,6 +367,7 @@ Win7FixStorageBsod={}
             config.target_partition,
             config.image_path,
             config.is_gho,
+            config.wim_engine,
             config.remove_shortcut_arrow,
             config.restore_classic_context_menu,
             config.bypass_nro,
@@ -393,6 +400,7 @@ SourcePartition={}
 Incremental={}
 Format={}
 SwmSplitSize={}
+WimEngine={}
 "#,
             config.save_path,
             config.name,
@@ -401,6 +409,7 @@ SwmSplitSize={}
             config.incremental,
             config.format,
             config.swm_split_size,
+            config.wim_engine,
         )
     }
 
@@ -428,6 +437,7 @@ SwmSplitSize={}
                     "TargetPartition" => config.target_partition = value.to_string(),
                     "ImagePath" => config.image_path = value.to_string(),
                     "IsGho" => config.is_gho = value.parse().unwrap_or(false),
+                    "WimEngine" => config.wim_engine = value.parse().unwrap_or(0),
                     "RemoveShortcutArrow" => config.remove_shortcut_arrow = value.parse().unwrap_or(false),
                     "RestoreClassicContextMenu" => config.restore_classic_context_menu = value.parse().unwrap_or(false),
                     "BypassNRO" => config.bypass_nro = value.parse().unwrap_or(false),
@@ -476,6 +486,7 @@ SwmSplitSize={}
                     "Incremental" => config.incremental = value.parse().unwrap_or(false),
                     "Format" => config.format = value.parse().unwrap_or(0),
                     "SwmSplitSize" => config.swm_split_size = value.parse().unwrap_or(4096),
+                    "WimEngine" => config.wim_engine = value.parse().unwrap_or(0),
                     _ => {}
                 }
             }

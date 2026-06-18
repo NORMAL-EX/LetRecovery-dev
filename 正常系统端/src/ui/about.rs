@@ -166,6 +166,55 @@ impl App {
                 ui.add_space(10.0);
                 ui.separator();
 
+                // 镜像引擎设置
+                ui.add_space(10.0);
+                ui.heading(tr!("镜像引擎"));
+                ui.add_space(10.0);
+
+                let current_engine = self.app_config.wim_engine;
+                let current_label = if current_engine == 1 {
+                    "wimgapi（系统原生 API）"
+                } else {
+                    "libwim（内置，默认）"
+                };
+                ui.horizontal(|ui| {
+                    ui.label(tr!("WIM 引擎:"));
+                    egui::ComboBox::from_id_salt("wim_engine_selector")
+                        .selected_text(current_label)
+                        .width(280.0)
+                        .show_ui(ui, |ui| {
+                            if ui
+                                .selectable_label(current_engine == 0, "libwim（内置，默认）")
+                                .clicked()
+                                && current_engine != 0
+                            {
+                                self.app_config.set_wim_engine(0);
+                            }
+                            if ui
+                                .selectable_label(current_engine == 1, "wimgapi（系统原生 API）")
+                                .clicked()
+                                && current_engine != 1
+                            {
+                                self.app_config.set_wim_engine(1);
+                            }
+                        });
+                });
+
+                ui.add_space(5.0);
+                ui.indent("wim_engine_desc", |ui| {
+                    ui.colored_label(
+                        egui::Color32::GRAY,
+                        tr!("镜像释放/备份使用的底层引擎。libwim 为内置默认；wimgapi 为 Windows 原生接口。"),
+                    );
+                    ui.colored_label(
+                        egui::Color32::GRAY,
+                        tr!("切换后正常系统端与 PE 端均使用该引擎；若 wimgapi 不可用会自动回退到 libwim。"),
+                    );
+                });
+
+                ui.add_space(10.0);
+                ui.separator();
+
                 ui.add_space(15.0);
 
                 // 版权信息

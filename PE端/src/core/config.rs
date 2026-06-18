@@ -97,6 +97,9 @@ pub struct InstallConfig {
     pub win7_fix_acpi_bsod: bool,
     /// Win7 修复存储控制器蓝屏
     pub win7_fix_storage_bsod: bool,
+
+    /// WIM 镜像引擎：0=libwim（默认），1=wimgapi。由正常系统端随重启传入。
+    pub wim_engine: u8,
 }
 
 impl InstallConfig {
@@ -158,6 +161,8 @@ pub struct BackupConfig {
     pub format: BackupFormat,
     /// SWM分卷大小（MB）
     pub swm_split_size: u32,
+    /// WIM 镜像引擎：0=libwim（默认），1=wimgapi。由正常系统端随重启传入。
+    pub wim_engine: u8,
 }
 
 /// 配置文件管理器
@@ -362,6 +367,7 @@ impl ConfigFileManager {
                     "TargetPartition" => config.target_partition = value.to_string(),
                     "ImagePath" => config.image_path = value.to_string(),
                     "IsGho" => config.is_gho = value.parse().unwrap_or(false),
+                    "WimEngine" => config.wim_engine = value.parse().unwrap_or(0),
                     "InstallCabPackages" => config.install_cab_packages = value.parse().unwrap_or(false),
                     "RemoveShortcutArrow" => {
                         config.remove_shortcut_arrow = value.parse().unwrap_or(false)
@@ -429,6 +435,7 @@ impl ConfigFileManager {
                         config.format = BackupFormat::from_u8(format_value);
                     }
                     "SwmSplitSize" => config.swm_split_size = value.parse().unwrap_or(4096),
+                    "WimEngine" => config.wim_engine = value.parse().unwrap_or(0),
                     _ => {}
                 }
             }

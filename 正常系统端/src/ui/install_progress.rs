@@ -748,6 +748,7 @@ impl App {
                 win7_inject_nvme_driver: advanced_options.win7_inject_nvme_driver,
                 win7_fix_acpi_bsod: advanced_options.win7_fix_acpi_bsod,
                 win7_fix_storage_bsod: advanced_options.win7_fix_storage_bsod,
+                wim_engine: lr_core::active_engine().as_u8(),
             };
             
             match ConfigFileManager::write_install_config(&target_partition, &data_partition, &install_config) {

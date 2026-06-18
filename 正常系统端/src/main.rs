@@ -38,6 +38,9 @@ fn main() -> eframe::Result<()> {
     // 初始化国际化系统
     utils::i18n::init(&app_config.language);
 
+    // 应用 WIM 镜像引擎选择（libwim / wimgapi），供后续所有镜像操作使用
+    app_config.apply_wim_engine();
+
     log::info!("LetRecovery 启动中...");
 
     // 检查命令行参数，处理PE环境下的自动安装/备份
