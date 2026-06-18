@@ -1,0 +1,143 @@
+name: 🐛 问题反馈 (Bug Report)
+description: 报告一个故障 / Bug。请尽量完整填写，缺少日志、版本或环境信息将难以定位。
+title: "[Bug] 一句话描述问题"
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！请**完整**填写下列内容。
+        ⚠️ **缺少日志 / 版本 / 截图的反馈可能无法定位，会被要求补充或直接关闭。**
+        🔒 **隐私提醒**：日志和截图里如含 BitLocker 恢复密钥、序列号、账号等敏感信息，请先打码再上传。
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已搜索过现有 issue / Discussions，确认没有重复
+          required: true
+        - label: 我用的是最新版本，或已在下方注明所用版本
+          required: true
+        - label: 我已阅读并按模板填写了日志、版本、环境、截图
+          required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 软件版本（三项都填）
+      description: |
+        1. `LetRecovery.exe` 右键属性 → 详细信息 → **文件版本**（形如 `2026.6.18.0`）
+        2. 日志开头那行 **「版本: …」**（形如 `2026.2.6`）
+        3. **来源**：从哪个 Release / 包拿的（如 `cli-install-test` 预发布 / 正式版 / 文件名）
+      placeholder: "文件版本 2026.6.18.0 ｜ 日志版本 2026.2.6 ｜ 来源 cli-install-test"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: stage
+    attributes:
+      label: 出问题的阶段
+      options:
+        - 正常系统端（进 PE 之前）
+        - PE 端（重启进 PE 之后）
+        - 装完进入新系统后
+        - 不确定
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: 问题描述
+      description: 清晰描述发生了什么、在哪一步出的问题。
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_actual
+    attributes:
+      label: 预期结果 / 实际结果
+      placeholder: |
+        预期：……
+        实际：……
+    validations:
+      required: true
+
+  - type: textarea
+    id: env
+    attributes:
+      label: 运行环境（逐项填写）
+      value: |
+        - 源系统（当前被重装的系统）: 例如 Windows 10 22H2 x64
+        - 目标系统（要安装的镜像）: 例如 Windows 11 24H2
+        - 固件: UEFI / Legacy BIOS
+        - Secure Boot: 开 / 关
+        - BitLocker: 目标盘是否加密 / 数据盘是否加密
+        - 磁盘结构: 单盘单分区 / 多分区 / 多块硬盘
+        - 使用的 PE: 例如 电脑病毒爱好者 优化版PE
+        - 实体机 / 虚拟机: （虚拟机请注明软件，如 VMware / Hyper-V）
+    validations:
+      required: true
+
+  - type: textarea
+    id: log_system
+    attributes:
+      label: 正常系统端日志
+      description: |
+        路径：`{程序目录}\log\LetRecovery.<日期>.log`（如 `LetRecovery.2026-06-18.log`）。
+        请**粘贴相关片段**或把整个文件**拖拽上传**。问题若发生在进 PE 之前，此项必填。
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: log_pe
+    attributes:
+      label: PE 端日志
+      description: |
+        路径：PE 端 exe **同目录**下的 `LetRecoveryPE.log`
+        （如 `X:\Program Files\LetRecoveryPE\LetRecoveryPE.log`）。
+        请**粘贴相关片段**或**拖拽上传**整个文件。问题若发生在 PE 阶段（解锁/校验/格式化/释放镜像等），此项必填。
+      render: text
+    validations:
+      required: false
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: 截图
+      description: 出错界面、报错弹窗、卡住的进度条等截图，可直接拖拽到此处上传（多张请都附上）。
+    validations:
+      required: true
+
+  - type: textarea
+    id: image_info
+    attributes:
+      label: 镜像信息（重装 / 释放镜像 / 校验类问题必填）
+      value: |
+        - 格式: WIM / ESD / GHO / SWM
+        - 来源: 官方原版 / 第三方修改版 / 自制备份
+        - 文件名 / 大小:
+        - 是否做过镜像校验（工具箱 → 镜像校验）及结果:
+    validations:
+      required: false
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: 其他补充
+      description: 任何有助于定位的信息（如最近改动、是否偶发、能否稳定复现等）。
+    validations:
+      required: false
