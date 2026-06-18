@@ -72,8 +72,7 @@ pub struct DismApi {
 impl DismApi {
     /// 动态加载 dismapi.dll 并解析所需导出。
     pub fn load() -> Result<Self> {
-        let lib = unsafe { Library::new("dismapi.dll") }
-            .context("无法加载 dismapi.dll（系统/PE 可能未包含 DISM API）")?;
+        let lib = Self::load_library()?;
         unsafe {
             let initialize: FnDismInitialize = *lib
                 .get::<FnDismInitialize>(b"DismInitialize\0")
@@ -111,6 +110,41 @@ impl DismApi {
                 delete,
             })
         }
+    }
+
+    /// 加载 dismapi.dll：优先程序目录随附的 `bin\Dism\dismapi.dll`（与 dism.exe 同一套），
+    /// 回退到系统 dismapi.dll。这样在精简 WinPE（可能没有完整 DISM API/维护栈）下也能用上
+    /// 随产品打包的那一套，与 `DismCmd` 优先用 `bin\Dism\dism.exe` 的约定保持一致。
+    fn load_library() -> Result<Library> {
+        use libloading::os::windows::{Library as WinLib, LOAD_WITH_ALTERED_SEARCH_PATH};
+
+        // 1) 随附的 bin\Dism\dismapi.dll —— 用 LOAD_WITH_ALTERED_SEARCH_PATH 让其依赖
+        //    (dismcore.dll / providers 等)从该 DLL 所在目录解析，而不是仅从系统目录。
+        let bundled = crate::utils::path::get_exe_dir()
+            .join("bin")
+            .join("Dism")
+            .join("dismapi.dll");
+        if bundled.exists() {
+            match unsafe { WinLib::load_with_flags(&bundled, LOAD_WITH_ALTERED_SEARCH_PATH) } {
+                Ok(l) => {
+                    log::info!("[DISM] 使用随附 DISM API: {}", bundled.display());
+                    return Ok(l.into());
+                }
+                Err(e) => {
+                    log::warn!(
+                        "[DISM] 加载随附 dismapi.dll 失败({}): {}，改用系统 DISM API",
+                        bundled.display(),
+                        e
+                    );
+                }
+            }
+        }
+
+        // 2) 回退：系统 dismapi.dll（System32 / PATH 标准搜索顺序）
+        let lib = unsafe { Library::new("dismapi.dll") }
+            .context("无法加载 dismapi.dll（系统/PE 可能未包含 DISM API）")?;
+        log::info!("[DISM] 使用系统 DISM API (dismapi.dll)");
+        Ok(lib)
     }
 
     /// 导出当前运行系统的第三方驱动（在线映像）。
