@@ -462,6 +462,13 @@ pub struct App {
     pub hash_verify_progress_rx: Option<Receiver<u8>>,
     pub hash_verify_result_rx: Option<Receiver<crate::ui::tools::hash_verify::HashVerifyResult>>,
 
+    // 运行 Diskpart 脚本对话框
+    pub show_diskpart_script_dialog: bool,
+    pub diskpart_script_input: String,
+    pub diskpart_script_output: String,
+    pub diskpart_script_running: bool,
+    pub diskpart_script_rx: Option<Receiver<Result<String, String>>>,
+
     // 离线密码重置对话框
     pub show_password_reset_dialog: bool,
     pub password_reset_partition: String,
@@ -869,6 +876,12 @@ impl Default for App {
             password_reset_users_loading: false,
             password_reset_users_rx: None,
             password_reset_selected_user: None,
+            // 运行 Diskpart 脚本对话框
+            show_diskpart_script_dialog: false,
+            diskpart_script_input: String::new(),
+            diskpart_script_output: String::new(),
+            diskpart_script_running: false,
+            diskpart_script_rx: None,
             // 应用配置（小白模式等）
             app_config: crate::core::app_config::AppConfig::load(),
             // PE下载待校验的MD5
