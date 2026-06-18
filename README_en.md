@@ -16,35 +16,37 @@ English | [简体中文](README.md)
 
 ---
 
+> 💡 **LetRecovery is free and open-source, forever.** Please get it only from the official channels listed below — beware of third-party paid resellers.
+
 ## ✨ Features
 
 ### 🖥️ System Installation
-- **WIM/ESD Image Deployment** - Support for official Windows image formats
-- **GHO Image Restoration** - Compatible with Ghost backup images
-- **ISO Image Mounting** - Automatic mounting and parsing of ISO files
-- **Multi-Volume Selection** - Choose different system editions from images
+- **Multi-format images** - WIM / ESD / SWM / GHO / ISO, auto mount & parse, multi-edition selection
+- **Desktop & WinPE** - One-click deploy from desktop; when reinstalling the current system drive it auto-writes boot and reboots into WinPE to finish
+- **BitLocker-encrypted system reinstall** - Automatically unlocks/decrypts the BitLocker-encrypted system drive before deployment
+- **Unattended install** - Built-in generated or custom unattend.xml
+- **Boot mode** - UEFI / Legacy auto-detected, manually selectable
 
 ### 💾 System Backup
-- **Full Backup** - Backup system partition to WIM image
-- **Incremental Backup** - Append backups to existing image files
-- **Custom Naming** - Support for custom backup names and descriptions
+- **Full / incremental backup** - Back up the system partition to WIM / ESD / SWM / GHO
+- **Custom name & description**
 
 ### 🌐 Online Download
-- **System Image Download** - Download Windows system images online
-- **Common Software Download** - Built-in common installation software downloads
-- **Aria2 Acceleration** - Multi-threaded high-speed download with Aria2
+- **System images / common software** - Fetched online, accelerated by multi-threaded Aria2
 
 ### 🔧 Advanced Options
-- **Format Partition** - Option to format target partition before installation
-- **Boot Repair** - Automatic UEFI/Legacy boot repair
-- **Driver Import** - Export and import system drivers
-- **Unattended Install** - Support for unattended installation configuration
-- **Registry Injection** - Automatic registry settings injection after installation
+- Format partition, boot repair (UEFI / Legacy)
+- Driver export (DISM API) / import, storage-controller driver injection
+- Registry injection, remove preinstalled UWP apps, OOBE bypass, disable Update / Defender and other tweaks
+- WiFi profile migration
 
 ### 🛠️ Toolbox
-- **Boot Repair Tool** - Standalone BCD boot repair
-- **Disk Management** - View and manage disk partitions
-- **Hardware Info** - View detailed hardware information
+- **BitLocker management** - unlock / decrypt / suspend·resume protection / view recovery key
+- **Password reset** - clear account password online (current system) or offline (other systems)
+- **Image verify / file hash verify** - check image integrity before deployment
+- **Quick partition / partition clone / batch format**
+- **Driver backup & restore, import storage drivers**
+- **Remove APPX apps, NVIDIA driver uninstall, time sync, view GHO password, SpaceSniffer disk analysis, one-click boot repair**
 
 ---
 
