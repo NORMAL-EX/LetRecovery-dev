@@ -1030,21 +1030,59 @@ impl App {
             return false;
         }
 
-        // 实验性 BitLocker 密钥透传开启时：正常端【不预解密任何盘】，改为把恢复密钥
-        // 注入 PE、由 PE 启动后用恢复密钥解锁锁定卷（见 PeManager::maybe_inject_bitlocker_keys
-        // 与 PE 端 unlock_bitlocker_passthrough）。这样带 BitLocker 的系统盘重装无需漫长预解密。
-        if crate::core::app_config::AppConfig::load().experimental_bitlocker_passthrough {
-            println!("[BITLOCKER] 已开启密钥透传，跳过正常端预解密（改由 PE 用恢复密钥解锁）");
+        let manager = crate::core::bitlocker::BitLockerManager::new();
+
+        // BitLocker 密钥透传现为默认行为（无开关）：正常端【不预解密】，改为把恢复密钥注入 PE、
+        // 由 PE 启动后用恢复密钥解锁锁定卷（见 PeManager::maybe_inject_bitlocker_keys 与 PE 端
+        // unlock_bitlocker_passthrough）。带 BitLocker 的系统盘重装无需漫长预解密。
+        //
+        // 前提：必须能拿到【目标系统盘】的恢复密钥——PE 要靠它解锁目标盘才能部署。
+        // 若目标盘加密但取不到恢复密钥（例如只有 TPM 保护器、无数字恢复密码），
+        // 透传进 PE 也解不开 → 回退到"彻底解密 BitLocker"方案（在正常端把卷全部解密）。
+        let target_letter = self
+            .selected_partition
+            .and_then(|i| self.partitions.get(i))
+            .and_then(|p| p.letter.chars().next())
+            .unwrap_or('C')
+            .to_ascii_uppercase();
+        let target_drive = format!("{}:", target_letter);
+        let target_status = manager.get_status(target_letter);
+        let target_encrypted = matches!(
+            target_status,
+            crate::core::bitlocker::VolumeStatus::EncryptedUnlocked
+                | crate::core::bitlocker::VolumeStatus::EncryptedLocked
+        );
+
+        if !target_encrypted {
+            // 目标盘未加密：无需任何 BitLocker 处理（数据盘若加密，由密钥注入一并处理）。
+            println!("[BITLOCKER] 目标盘 {} 未加密，无需预解密，正常继续", target_drive);
             self.decrypting_partitions.clear();
             return false;
         }
 
-        println!("[BITLOCKER] 开始检测并强制解密分区...");
+        match manager.get_recovery_key(&target_drive) {
+            Ok(_) => {
+                println!(
+                    "[BITLOCKER] 已成功获取目标盘 {} 恢复密钥 → 走密钥透传（不预解密，进 PE 解锁）",
+                    target_drive
+                );
+                self.decrypting_partitions.clear();
+                return false;
+            }
+            Err(e) => {
+                println!(
+                    "[BITLOCKER] 获取目标盘 {} 恢复密钥失败（{}）→ 回退彻底解密 BitLocker 方案",
+                    target_drive, e
+                );
+                // 落入下方预解密流程
+            }
+        }
+
+        println!("[BITLOCKER] 开始检测并强制解密分区（透传回退方案）...");
         self.decrypting_partitions.clear();
 
-        // 透传关闭（默认）：PE 无解锁能力，必须在正常端预解密所有【已解锁】的加密分区
+        // 回退：PE 无法用密钥解锁目标盘，必须在正常端预解密所有【已解锁】的加密分区
         // （含目标盘），否则进 PE 后这些卷处于锁定状态、无法访问/格式化。
-        let manager = crate::core::bitlocker::BitLockerManager::new();
         let mut decryption_started = false;
 
         for partition in &self.partitions {

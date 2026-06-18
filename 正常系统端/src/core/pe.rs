@@ -184,20 +184,24 @@ impl PeManager {
         Ok(())
     }
 
-    /// 【实验性】若配置开启 BitLocker 密钥透传，则抓取各 BitLocker 加密卷的恢复密钥，
-    /// 打包进刚拷好的 PE boot.wim（镜像 1，路径见 `lr_core::bl_passthrough::KEYS_WIM_PATH`）。
+    /// 抓取各 BitLocker 加密卷的恢复密钥，打包进刚拷好的 PE boot.wim
+    /// （镜像 1，路径见 `lr_core::bl_passthrough::KEYS_WIM_PATH`）。
     ///
-    /// 全程 best-effort：开关关闭、无加密卷、取不到恢复密钥、或注入失败都只记录日志，
+    /// BitLocker 密钥透传现为默认行为（无开关）：能拿到目标盘密钥时即走透传，由 PE 启动后
+    /// 用恢复密钥解锁再部署；拿不到目标盘密钥时正常端已回退"彻底解密"方案，那条路径下进到
+    /// 这里时各卷已解密，`get_encrypted_volumes` 返回空 → 本函数自然空操作。
+    ///
+    /// 全程 best-effort：无加密卷、取不到恢复密钥、或注入失败都只记录日志，
     /// 绝不影响 PE 启动流程本身。临时密钥文件用后即删（密钥仅随 boot.wim 进入 PE 的内存盘）。
     fn maybe_inject_bitlocker_keys(target_wim: &str) {
-        let cfg = crate::core::app_config::AppConfig::load();
-        if !cfg.experimental_bitlocker_passthrough {
-            return;
-        }
-        println!("[PE][实验] BitLocker 密钥透传已开启，抓取各加密卷恢复密钥…");
+        println!("[PE] BitLocker 密钥透传：抓取各加密卷恢复密钥…");
 
         let manager = crate::core::bitlocker::BitLockerManager::new();
         let volumes = manager.get_encrypted_volumes(); // 仅返回已加密卷
+        if volumes.is_empty() {
+            println!("[PE] 未发现 BitLocker 加密卷，跳过密钥注入");
+            return;
+        }
         let mut entries: Vec<(String, String)> = Vec::new();
         for v in &volumes {
             match manager.get_recovery_key(&v.letter) {
