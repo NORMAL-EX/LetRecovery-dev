@@ -211,46 +211,41 @@ impl App {
         if show_pe_selector {
             ui.add_space(10.0);
             ui.separator();
-            
-            ui.horizontal(|ui| {
-                ui.label("PE环境:");
-                
-                if pe_available {
-                    if let Some(ref config) = self.config {
-                        egui::ComboBox::from_id_salt("pe_select_backup")
-                            .selected_text(
-                                self.selected_pe_for_backup
-                                    .and_then(|i| config.pe_list.get(i))
-                                    .map(|p| p.display_name.as_str())
-                                    .unwrap_or("请选择PE"),
-                            )
-                            .show_ui(ui, |ui| {
-                                for (i, pe) in config.pe_list.iter().enumerate() {
-                                    ui.selectable_value(
-                                        &mut self.selected_pe_for_backup,
-                                        Some(i),
-                                        &pe.display_name,
-                                    );
-                                }
-                            });
-                        
-                        // 显示PE就绪状态
-                        if let Some(idx) = self.selected_pe_for_backup {
-                            if let Some(pe) = config.pe_list.get(idx) {
-                                let (exists, _) = crate::core::pe::PeManager::check_pe_exists(&pe.filename);
-                                if exists {
-                                    ui.colored_label(egui::Color32::from_rgb(102, 187, 106), "已就绪");
-                                } else {
-                                    ui.colored_label(egui::Color32::from_rgb(255, 165, 0), "需下载");
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    ui.colored_label(egui::Color32::RED, "未找到PE配置");
+
+            if pe_available {
+                let pe_count = self.config.as_ref().map(|c| c.pe_list.len()).unwrap_or(0);
+                // 只有一个 PE 环境时自动选中
+                if pe_count == 1 && self.selected_pe_for_backup.is_none() {
+                    self.selected_pe_for_backup = Some(0);
                 }
-            });
-            
+                // 仅在存在多个 PE 时才显示选择行；只有一个 PE 时隐藏。
+                if pe_count > 1 {
+                    if let Some(ref config) = self.config {
+                        ui.horizontal(|ui| {
+                            ui.label("PE环境:");
+                            egui::ComboBox::from_id_salt("pe_select_backup")
+                                .selected_text(
+                                    self.selected_pe_for_backup
+                                        .and_then(|i| config.pe_list.get(i))
+                                        .map(|p| p.display_name.as_str())
+                                        .unwrap_or("请选择PE"),
+                                )
+                                .show_ui(ui, |ui| {
+                                    for (i, pe) in config.pe_list.iter().enumerate() {
+                                        ui.selectable_value(
+                                            &mut self.selected_pe_for_backup,
+                                            Some(i),
+                                            &pe.display_name,
+                                        );
+                                    }
+                                });
+                        });
+                    }
+                }
+            } else {
+                ui.colored_label(egui::Color32::RED, "未找到PE配置");
+            }
+
             ui.colored_label(
                 egui::Color32::from_rgb(255, 165, 0),
                 "备份当前系统分区需要先重启到PE环境",
