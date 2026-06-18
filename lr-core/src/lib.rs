@@ -16,7 +16,10 @@ pub mod image_meta;
 pub mod reboot;
 pub mod registry;
 pub mod sam;
+pub mod wim_engine;
+pub mod wimgapi;
 pub mod wimlib;
 pub mod wimlib_dll;
 
+pub use wim_engine::{active_engine, set_active_engine, WimEngine, WimEngineManager};
 pub use wimlib_dll::ensure_dll_available;

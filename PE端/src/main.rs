@@ -368,6 +368,9 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
             }
         };
 
+        // 切换到正常系统端选定的镜像引擎（随重启传入）
+        lr_core::set_active_engine(lr_core::WimEngine::from_u8(config.wim_engine));
+
         println!("[PE INSTALL] 目标分区: {}", config.target_partition);
         println!("[PE INSTALL] 镜像文件: {}", config.image_path);
 
@@ -605,6 +608,9 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
                 return Ok(());
             }
         };
+
+        // 切换到正常系统端选定的镜像引擎（随重启传入）
+        lr_core::set_active_engine(lr_core::WimEngine::from_u8(config.wim_engine));
 
         println!("[PE BACKUP] 源分区: {}", config.source_partition);
         println!("[PE BACKUP] 保存路径: {}", config.save_path);

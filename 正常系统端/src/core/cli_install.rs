@@ -183,6 +183,7 @@ pub fn run_cli_install(config_path: &str, advanced_path: Option<&str>) -> Result
         win7_inject_nvme_driver: advanced.win7_inject_nvme_driver,
         win7_fix_acpi_bsod: advanced.win7_fix_acpi_bsod,
         win7_fix_storage_bsod: advanced.win7_fix_storage_bsod,
+        wim_engine: lr_core::active_engine().as_u8(),
     };
 
     // 7) 写安装配置（含目标盘标记；自定义无人值守 XML 会被复制进数据目录）

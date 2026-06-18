@@ -13,6 +13,7 @@ use std::sync::mpsc::Sender;
 use crate::core::dism_exe::{DismExe, DismExeProgress};
 use lr_core::image_meta::{WimProgress, WIM_COMPRESS_LZX, WIM_COMPRESS_LZMS};
 use lr_core::wimlib::WimlibManager;
+use lr_core::WimEngineManager;
 
 /// 操作进度
 #[derive(Debug, Clone)]
@@ -111,10 +112,10 @@ impl Dism {
         index: u32,
         progress_tx: Option<Sender<DismProgress>>,
     ) -> Result<()> {
-        log::info!("[Dism] 使用 wimlib 应用镜像: {} -> {}", image_file, apply_dir);
+        log::info!("[Dism] 应用镜像: {} -> {}", image_file, apply_dir);
 
-        let wim_manager = WimlibManager::new()
-            .map_err(|e| anyhow::anyhow!("wimlib 初始化失败: {}", e))?;
+        let wim_manager = WimEngineManager::new_current()
+            .map_err(|e| anyhow::anyhow!("镜像引擎初始化失败: {}", e))?;
 
         // 创建进度转换通道
         let (wim_tx, wim_rx) = std::sync::mpsc::channel::<WimProgress>();
@@ -159,10 +160,10 @@ impl Dism {
         description: &str,
         progress_tx: Option<Sender<DismProgress>>,
     ) -> Result<()> {
-        log::info!("[Dism] 使用 wimlib 捕获镜像: {} -> {}", capture_dir, image_file);
+        log::info!("[Dism] 捕获镜像: {} -> {}", capture_dir, image_file);
 
-        let wim_manager = WimlibManager::new()
-            .map_err(|e| anyhow::anyhow!("wimlib 初始化失败: {}", e))?;
+        let wim_manager = WimEngineManager::new_current()
+            .map_err(|e| anyhow::anyhow!("镜像引擎初始化失败: {}", e))?;
 
         let (wim_tx, wim_rx) = std::sync::mpsc::channel::<WimProgress>();
 
@@ -226,10 +227,10 @@ impl Dism {
         description: &str,
         progress_tx: Option<Sender<DismProgress>>,
     ) -> Result<()> {
-        log::info!("[Dism] 使用 wimlib 捕获ESD镜像: {} -> {}", capture_dir, image_file);
+        log::info!("[Dism] 捕获ESD镜像: {} -> {}", capture_dir, image_file);
 
-        let wim_manager = WimlibManager::new()
-            .map_err(|e| anyhow::anyhow!("wimlib 初始化失败: {}", e))?;
+        let wim_manager = WimEngineManager::new_current()
+            .map_err(|e| anyhow::anyhow!("镜像引擎初始化失败: {}", e))?;
 
         let (wim_tx, wim_rx) = std::sync::mpsc::channel::<WimProgress>();
 
@@ -304,8 +305,8 @@ impl Dism {
             });
         }
 
-        let wim_manager = WimlibManager::new()
-            .map_err(|e| anyhow::anyhow!("wimlib 初始化失败: {}", e))?;
+        let engine = WimEngineManager::new_current()
+            .map_err(|e| anyhow::anyhow!("镜像引擎初始化失败: {}", e))?;
 
         let (wim_tx, wim_rx) = std::sync::mpsc::channel::<WimProgress>();
 
@@ -322,7 +323,7 @@ impl Dism {
             }
         });
 
-        let result = wim_manager.capture_image(
+        let result = engine.capture_image(
             capture_dir,
             &temp_wim,
             name,
@@ -346,6 +347,9 @@ impl Dism {
             });
         }
 
+        // 分卷由 libwim 执行（与生成引擎无关）。
+        let wim_manager = WimlibManager::new()
+            .map_err(|e| anyhow::anyhow!("wimlib 初始化失败: {}", e))?;
         let split_result = wim_manager.split_wim(&temp_wim, image_file, split_size_mb as u64);
 
         // 清理临时WIM

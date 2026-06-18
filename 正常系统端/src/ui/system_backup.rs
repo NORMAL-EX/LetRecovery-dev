@@ -629,6 +629,7 @@ impl App {
                 incremental: is_incremental,
                 format: backup_format,
                 swm_split_size: swm_split_size,
+                wim_engine: lr_core::active_engine().as_u8(),
             };
             
             if let Err(e) = ConfigFileManager::write_backup_config(&source_letter, &data_partition, &backup_config) {
