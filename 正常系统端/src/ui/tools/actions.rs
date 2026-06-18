@@ -76,3 +76,54 @@ pub fn export_drivers_from_partition(source_partition: &str, export_dir: &str) -
     dism.export_drivers_from_system(source_partition, export_dir)
         .map_err(|e| e.to_string())
 }
+
+/// 运行 Diskpart 脚本：写入临时脚本文件后执行 `diskpart /s`，返回合并后的输出文本。
+///
+/// 失败时返回 Err（含 diskpart 的输出，便于排查）。脚本里的命令按行执行，与
+/// 在 diskpart 交互式里逐行输入等价。
+pub fn run_diskpart_script(script: &str) -> Result<String, String> {
+    use std::io::Write;
+
+    if script.trim().is_empty() {
+        return Err("脚本内容为空".to_string());
+    }
+
+    // 统一为 CRLF 行尾，确保 diskpart 正确逐行解析。
+    let normalized = script
+        .replace("\r\n", "\n")
+        .replace('\r', "\n")
+        .replace('\n', "\r\n");
+
+    let script_path =
+        std::env::temp_dir().join(format!("lr_diskpart_{}.txt", std::process::id()));
+    {
+        let mut f = std::fs::File::create(&script_path)
+            .map_err(|e| format!("创建临时脚本失败: {}", e))?;
+        f.write_all(normalized.as_bytes())
+            .map_err(|e| format!("写入临时脚本失败: {}", e))?;
+    }
+
+    let result = crate::utils::cmd::create_command("diskpart")
+        .args(["/s", &script_path.to_string_lossy()])
+        .output();
+
+    let _ = std::fs::remove_file(&script_path);
+
+    match result {
+        Ok(out) => {
+            let mut text = crate::utils::encoding::gbk_to_utf8(&out.stdout);
+            let err_text = crate::utils::encoding::gbk_to_utf8(&out.stderr);
+            if !err_text.trim().is_empty() {
+                text.push('\n');
+                text.push_str(&err_text);
+            }
+            let text = text.trim().to_string();
+            if out.status.success() {
+                Ok(text)
+            } else {
+                Err(format!("diskpart 返回错误。\n{}", text))
+            }
+        }
+        Err(e) => Err(format!("无法启动 diskpart: {}", e)),
+    }
+}
