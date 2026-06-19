@@ -181,13 +181,12 @@ impl IsoMounter {
                 std::thread::sleep(std::time::Duration::from_millis(500));
                 
                 if let Some(letter) = Self::find_new_cdrom_drive(before_mask) {
-                    // 3. 验证是否包含 Windows 安装文件
-                    let sources_path = format!("{}:\\sources", letter);
-                    if Path::new(&sources_path).exists() {
+                    // 3. 验证是否为 Windows 安装介质（Vista+ 的 \sources 或 XP/2003 的 \I386）
+                    if Self::is_windows_install_media(&format!("{}:", letter)) {
                         println!("[ISO] 挂载成功，盘符: {}:，第 {} 次检测", letter, i + 1);
                         return Ok(letter);
                     } else {
-                        println!("[ISO] 找到新 CDROM 盘符 {}: 但不包含 sources 目录", letter);
+                        println!("[ISO] 找到新 CDROM 盘符 {}: 但不含 \\sources 或 \\I386", letter);
                     }
                 }
                 
@@ -379,23 +378,48 @@ impl IsoMounter {
         Ok(())
     }
 
+    /// 判断盘符是否为 Windows 安装介质：
+    /// - Vista+/Win10：`\sources\install.wim|esd|swm`
+    /// - XP/2003：`\I386`（x86）或 `\AMD64`（x64）文本安装结构
+    pub fn is_windows_install_media(drive: &str) -> bool {
+        let d = drive.trim_end_matches('\\');
+        for f in ["install.wim", "install.esd", "install.swm"] {
+            if Path::new(&format!("{}\\sources\\{}", d, f)).exists() {
+                return true;
+            }
+        }
+        // XP/2003：有 i386/amd64 且含 setupldr.bin 即视为文本安装介质
+        for arch in ["I386", "AMD64"] {
+            if Path::new(&format!("{}\\{}\\setupldr.bin", d, arch)).exists() {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// 该盘符是否为 XP/2003 的 i386 文本安装介质（无 \sources，有 \I386\setupldr.bin）。
+    /// 返回 i386 目录路径。
+    pub fn xp_i386_dir(drive: &str) -> Option<String> {
+        let d = drive.trim_end_matches('\\');
+        for arch in ["I386", "AMD64"] {
+            let dir = format!("{}\\{}", d, arch);
+            if Path::new(&format!("{}\\setupldr.bin", dir)).exists() {
+                return Some(dir);
+            }
+        }
+        None
+    }
+
     /// 查找已挂载的 ISO 驱动器盘符（后备方案，遍历 D-Z）
     pub fn find_iso_drive() -> Option<String> {
         // 遍历 D 到 Z 所有盘符
         for letter in b'D'..=b'Z' {
             let letter = letter as char;
             let drive = format!("{}:", letter);
-            let sources_path = format!("{}\\sources", drive);
-            
-            // 检查是否是 Windows 安装介质
-            if Path::new(&sources_path).exists() {
-                let install_wim = format!("{}\\install.wim", sources_path);
-                let install_esd = format!("{}\\install.esd", sources_path);
-                
-                if Path::new(&install_wim).exists() || Path::new(&install_esd).exists() {
-                    println!("[ISO] find_iso_drive 找到: {}", drive);
-                    return Some(drive);
-                }
+            // Vista+ 或 XP/2003 安装介质都接受
+            if Self::is_windows_install_media(&drive) {
+                println!("[ISO] find_iso_drive 找到: {}", drive);
+                return Some(drive);
             }
         }
         None
