@@ -308,6 +308,21 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
         log::info!("[PE安装] GHO 镜像，跳过 wimlib 校验");
     }
 
+    // 装机前运行 diskpart 脚本（分区准备）——来自数据目录暂存的 diskpart\
+    if config.run_diskpart_scripts {
+        let _ = tx.send(WorkerMessage::SetStatus("正在运行 Diskpart 脚本...".to_string()));
+        let scripts_dir = std::path::Path::new(&data_dir).join("diskpart");
+        log::info!("[PE安装] 运行 Diskpart 脚本: {}", scripts_dir.display());
+        match lr_core::diskpart::run_scripts_in_dir(&scripts_dir) {
+            Ok(out) => log::info!("[PE安装] Diskpart 脚本执行完成:\n{}", out),
+            Err(e) => {
+                log::error!("[PE安装] Diskpart 脚本执行失败: {}", e);
+                let _ = tx.send(WorkerMessage::Failed(format!("Diskpart 脚本执行失败: {}", e)));
+                return;
+            }
+        }
+    }
+
     // Step 1: 格式化分区
     let _ = tx.send(WorkerMessage::SetInstallStep(InstallStep::FormatPartition));
     let _ = tx.send(WorkerMessage::SetStatus("正在格式化目标分区...".to_string()));
@@ -515,7 +530,17 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
     let boot_manager = BootManager::new();
     let use_uefi = DiskManager::detect_uefi_mode();
 
-    if let Err(e) = boot_manager.repair_boot_advanced(&target_partition, use_uefi) {
+    // XP/2003 写 ntldr 引导；其余走 bcdboot。
+    // XP 判定：配置已标记 或 释放后的系统缺少 \Windows\Boot（该目录仅 Vista+ 才有）。
+    let win_boot_dir = format!("{}\\Windows\\Boot", target_partition);
+    let is_xp = config.is_xp || !std::path::Path::new(&win_boot_dir).exists();
+    let boot_result = if is_xp {
+        log::info!("[PE安装] 识别为 XP/2003 系统，写入 XP 引导(ntldr/boot.ini)");
+        boot_manager.write_xp_boot(&target_partition)
+    } else {
+        boot_manager.repair_boot_advanced(&target_partition, use_uefi)
+    };
+    if let Err(e) = boot_result {
         let _ = tx.send(WorkerMessage::Failed(format!("修复引导失败: {}", e)));
         return;
     }

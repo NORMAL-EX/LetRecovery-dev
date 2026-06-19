@@ -1,6 +1,22 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
+/// 递归复制目录（用于把 diskpart 脚本暂存到数据分区）。
+fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if from.is_dir() {
+            copy_dir_recursive(&from, &to)?;
+        } else {
+            std::fs::copy(&from, &to)?;
+        }
+    }
+    Ok(())
+}
+
 /// 系统安装配置（用于PE环境内安装）
 #[derive(Debug, Clone, Default)]
 pub struct InstallConfig {
@@ -66,6 +82,12 @@ pub struct InstallConfig {
 
     /// WIM 镜像引擎：0=libwim（默认），1=wimgapi。随重启传给 PE 端，使其使用相同引擎。
     pub wim_engine: u8,
+
+    /// 目标镜像是否为 XP/2003（NT 5.x）。为真时 PE 端写 XP 引导（ntldr/boot.ini）而非 bcdboot。
+    pub is_xp: bool,
+
+    /// 是否在释放镜像前运行 diskpart 脚本（程序目录\diskpart\ 下所有脚本）。
+    pub run_diskpart_scripts: bool,
 }
 
 impl InstallConfig {
@@ -207,6 +229,21 @@ impl ConfigFileManager {
             println!("[CONFIG] 已复制自定义无人值守文件 -> {}", dst);
         }
 
+        // 暂存 diskpart 脚本到数据目录，供重启进 PE 后执行（程序目录\diskpart\ -> 数据目录\diskpart\）
+        if config.run_diskpart_scripts {
+            let src = crate::utils::path::get_exe_dir().join("diskpart");
+            let dst = format!("{}\\diskpart", data_dir);
+            if src.exists() {
+                if let Err(e) = copy_dir_recursive(&src, std::path::Path::new(&dst)) {
+                    println!("[CONFIG] 暂存 diskpart 脚本失败: {}", e);
+                } else {
+                    println!("[CONFIG] 已暂存 diskpart 脚本 -> {}", dst);
+                }
+            } else {
+                println!("[CONFIG] 程序目录无 diskpart 文件夹，跳过暂存: {}", src.display());
+            }
+        }
+
         // 写入配置文件
         let config_path = format!("{}\\{}", data_dir, Self::INSTALL_CONFIG);
         let content = Self::serialize_install_config(&config);
@@ -335,6 +372,8 @@ TargetPartition={}
 ImagePath={}
 IsGho={}
 WimEngine={}
+IsXp={}
+RunDiskpartScripts={}
 
 [Advanced]
 RemoveShortcutArrow={}
@@ -368,6 +407,8 @@ Win7FixStorageBsod={}
             config.image_path,
             config.is_gho,
             config.wim_engine,
+            config.is_xp,
+            config.run_diskpart_scripts,
             config.remove_shortcut_arrow,
             config.restore_classic_context_menu,
             config.bypass_nro,
@@ -438,6 +479,8 @@ WimEngine={}
                     "ImagePath" => config.image_path = value.to_string(),
                     "IsGho" => config.is_gho = value.parse().unwrap_or(false),
                     "WimEngine" => config.wim_engine = value.parse().unwrap_or(0),
+                    "IsXp" => config.is_xp = value.parse().unwrap_or(false),
+                    "RunDiskpartScripts" => config.run_diskpart_scripts = value.parse().unwrap_or(false),
                     "RemoveShortcutArrow" => config.remove_shortcut_arrow = value.parse().unwrap_or(false),
                     "RestoreClassicContextMenu" => config.restore_classic_context_menu = value.parse().unwrap_or(false),
                     "BypassNRO" => config.bypass_nro = value.parse().unwrap_or(false),

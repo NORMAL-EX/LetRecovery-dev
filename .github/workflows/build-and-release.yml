@@ -188,6 +188,21 @@ jobs:
           echo "--- package README + images ---"
           ls -la pkg/README.txt pkg/images/ 2>/dev/null || true
 
+      - name: Add dev extras (repair_boot.txt + diskpart + enable flag)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p pkg/bin pkg/diskpart
+          # 可编辑的修复引导脚本（必须随包；删除则回退默认逻辑）
+          cp -f assets/release/repair_boot.txt pkg/bin/repair_boot.txt
+          # diskpart 脚本目录（含说明；用户把分区脚本放这里）
+          if [ -d assets/release/diskpart ]; then cp -rf assets/release/diskpart/. pkg/diskpart/; fi
+          # dev release 默认启用「运行 Diskpart 脚本」功能
+          python -c "import json,io; d=json.load(open('pkg/config.json',encoding='utf-8')); d['enable_diskpart_scripts']=True; io.open('pkg/config.json','w',encoding='utf-8',newline='\n').write(json.dumps(d,ensure_ascii=False,indent=2)+'\n')"
+          echo '--- repair_boot.txt ---'; cat pkg/bin/repair_boot.txt
+          echo '--- config.json ---'; cat pkg/config.json
+          ls -la pkg/diskpart pkg/bin/repair_boot.txt
+
       - name: Repackage into LetRecovery.7z
         shell: bash
         run: |

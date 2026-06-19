@@ -40,6 +40,11 @@ pub struct AppConfig {
     /// WIM 镜像引擎：0=libwim（默认，内置），1=wimgapi（系统原生 API）
     #[serde(default)]
     pub wim_engine: u8,
+
+    /// 是否启用「运行 Diskpart 脚本」功能（系统安装页的复选框）。
+    /// 默认关闭，需在 config.json 显式置 true 才在界面显示。
+    #[serde(default)]
+    pub enable_diskpart_scripts: bool,
 }
 
 /// 日志默认启用
@@ -68,6 +73,7 @@ impl Default for AppConfig {
             language: String::from("zh-CN"),  // 默认简体中文
             pe_cache: crate::download::config::PeCache::default(),
             wim_engine: 0,  // 默认 libwim
+            enable_diskpart_scripts: false,
         }
     }
 }

@@ -275,6 +275,33 @@ assign letter=S
         // 先删除当前PE引导项
         let _ = self.delete_current_boot_entry();
 
+        // 用户可编辑的修复引导脚本（bin\repair_boot.txt）优先；失败则回退默认逻辑
+        let repair_script = get_bin_dir().join("repair_boot.txt");
+        if repair_script.exists() {
+            log::info!("检测到自定义修复引导脚本: {}", repair_script.display());
+            let esp = if use_uefi {
+                self.find_esp_on_same_disk(windows_partition)
+                    .or_else(|_| self.find_and_mount_esp())
+                    .ok()
+            } else {
+                None
+            };
+            match lr_core::boot::run_repair_script(
+                &repair_script,
+                &get_bin_dir(),
+                windows_partition,
+                use_uefi,
+                esp.as_deref(),
+            ) {
+                Ok(out) => {
+                    log::info!("自定义修复引导脚本执行完成:\n{}", out);
+                    log::info!("========== 引导修复完成（自定义脚本）==========");
+                    return Ok(());
+                }
+                Err(e) => log::warn!("自定义修复引导脚本失败，回退默认逻辑: {}", e),
+            }
+        }
+
         if use_uefi {
             log::info!("UEFI 模式：查找 ESP 分区");
 
@@ -424,6 +451,20 @@ assign letter=S
 
         log::info!("========== 引导修复完成 ==========");
         Ok(())
+    }
+
+    /// 为已释放的 XP/2003 系统写入引导（ntldr/boot.ini + MBR，仅 Legacy）。
+    pub fn write_xp_boot(&self, windows_partition: &str) -> Result<()> {
+        log::info!("========== 写入 XP 引导 ==========");
+        let _ = self.delete_current_boot_entry();
+        match lr_core::boot::write_xp_boot(&get_bin_dir(), windows_partition) {
+            Ok(out) => {
+                log::info!("XP 引导写入完成:\n{}", out);
+                log::info!("========== XP 引导完成 ==========");
+                Ok(())
+            }
+            Err(e) => anyhow::bail!("XP 引导写入失败: {}", e),
+        }
     }
 }
 

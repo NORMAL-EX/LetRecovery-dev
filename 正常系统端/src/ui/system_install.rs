@@ -323,6 +323,14 @@ impl App {
                 });
             
             ui.checkbox(&mut self.auto_reboot, "立即重启");
+
+            // 运行 Diskpart 脚本（仅在 config.json 启用该功能时显示）
+            if self.app_config.enable_diskpart_scripts {
+                ui.checkbox(&mut self.run_diskpart_scripts, "运行Diskpart脚本")
+                    .on_hover_text(
+                        "安装前运行 程序目录\\diskpart\\ 下的所有脚本(.cmd/.bat 走 cmd，.txt 走 diskpart)，\n在 PE 中、格式化/释放镜像之前执行，可用于自定义分区。",
+                    );
+            }
         });
 
         // 自定义无人值守文件 + 引导模式（启用无人值守时两者并列；否则引导模式单独一行）
@@ -1183,6 +1191,15 @@ impl App {
             } else {
                 String::new()
             },
+            // XP/2003 检测：选中镜像主版本号为 5（WIM/ESD 可识别；GHO 由 PE 端按 \Windows\Boot 兜底判断）
+            is_xp: self
+                .selected_volume
+                .and_then(|i| self.image_volumes.get(i))
+                .map(|v| v.major_version == Some(5))
+                .unwrap_or(false),
+            // 仅在 config.json 启用该功能时才让其生效
+            run_diskpart_scripts: self.app_config.enable_diskpart_scripts
+                && self.run_diskpart_scripts,
         };
 
         self.is_installing = true;

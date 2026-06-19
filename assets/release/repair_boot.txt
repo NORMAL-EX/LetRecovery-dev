@@ -1,0 +1,17 @@
+# 修复引导命令脚本（可自行修改）
+# 删除本文件后，程序将使用内置默认修复引导逻辑。
+#
+# 占位符:
+#   {WINDIR} = 目标系统的 Windows 目录(如 C:\Windows)
+#   {WIN}    = 目标系统盘(如 C:)
+#   {ESP}    = 已自动挂载的 EFI 分区盘符(仅 UEFI 模式)
+#   {BIN}    = 程序 bin 目录
+#
+# 按引导模式分节执行；每行一条命令(经 cmd /c 运行)，# 开头为注释。
+
+[UEFI]
+"{BIN}\bcdboot.exe" "{WINDIR}" /s {ESP} /f UEFI /l zh-cn
+
+[Legacy]
+"{BIN}\bootsect.exe" /nt60 {WIN} /mbr
+"{BIN}\bcdboot.exe" "{WINDIR}" /f BIOS /l zh-cn

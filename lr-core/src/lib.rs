@@ -8,7 +8,9 @@
 //! （见仓库 TESTING.md）。
 
 pub mod bl_passthrough;
+pub mod boot;
 pub mod command;
+pub mod diskpart;
 pub mod encoding;
 pub mod fveapi;
 pub mod hash;
