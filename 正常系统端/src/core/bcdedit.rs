@@ -298,6 +298,32 @@ assign letter=S
             anyhow::bail!("Windows 目录不存在: {}", windows_path);
         }
 
+        // 用户可编辑的修复引导脚本（bin\repair_boot.txt）优先；失败则回退默认逻辑
+        let repair_script = get_bin_dir().join("repair_boot.txt");
+        if repair_script.exists() {
+            println!("[BOOT] 检测到自定义修复引导脚本: {}", repair_script.display());
+            let esp = if use_uefi {
+                self.find_esp_on_same_disk(windows_partition)
+                    .or_else(|_| self.find_and_mount_esp())
+                    .ok()
+            } else {
+                None
+            };
+            match lr_core::boot::run_repair_script(
+                &repair_script,
+                &get_bin_dir(),
+                windows_partition,
+                use_uefi,
+                esp.as_deref(),
+            ) {
+                Ok(out) => {
+                    println!("[BOOT] 自定义修复引导脚本执行完成:\n{}", out);
+                    return Ok(());
+                }
+                Err(e) => println!("[BOOT] 自定义修复引导脚本失败，回退默认逻辑: {}", e),
+            }
+        }
+
         if use_uefi {
             // UEFI 模式：需要找到并挂载 ESP 分区
             println!("[BOOT] UEFI 模式：查找 ESP 分区");
@@ -466,6 +492,18 @@ assign letter=S
     /// 查找 EFI 分区
     pub fn find_efi_partition(&self) -> Result<String> {
         self.find_and_mount_esp()
+    }
+
+    /// 为已释放的 XP/2003 系统写入引导（ntldr/boot.ini + MBR，仅 Legacy）。
+    pub fn write_xp_boot(&self, windows_partition: &str) -> Result<()> {
+        println!("[BOOT] ========== 写入 XP 引导 ==========");
+        match lr_core::boot::write_xp_boot(&get_bin_dir(), windows_partition) {
+            Ok(out) => {
+                println!("[BOOT] XP 引导写入完成:\n{}", out);
+                Ok(())
+            }
+            Err(e) => anyhow::bail!("XP 引导写入失败: {}", e),
+        }
     }
 }
 

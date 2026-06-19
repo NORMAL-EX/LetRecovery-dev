@@ -20,7 +20,6 @@ pub mod quick_partition;
 pub mod image_verify;
 pub mod hash_verify;
 pub mod password_reset;
-pub mod diskpart_script;
 
 // 重新导出常用类型
 pub use types::{DriverBackupMode, AppxPackageInfo, InstalledSoftware, WindowsPartitionInfo, ImageVerifyResult};
@@ -274,14 +273,6 @@ impl App {
                     self.password_reset_users_loading = false;
                 }
 
-                if ui
-                    .add(egui::Button::new("运行Diskpart脚本").min_size(button_size))
-                    .clicked()
-                {
-                    self.show_diskpart_script_dialog = true;
-                    self.diskpart_script_output.clear();
-                }
-
                 ui.end_row();
             });
 
@@ -303,7 +294,6 @@ impl App {
         self.render_bitlocker_manage_dialog(ui);
         self.render_hash_verify_dialog(ui);
         self.render_password_reset_dialog(ui);
-        self.render_diskpart_script_dialog(ui);
 
         // 显示工具状态
         if !self.tool_message.is_empty() {

@@ -284,6 +284,17 @@ impl App {
             let driver_backup_path = temp_dir.join("LetRecovery_DriverBackup");
             let driver_backup_str = driver_backup_path.to_string_lossy().to_string();
 
+            // 装机前运行 diskpart 脚本（分区准备）——直接读程序目录\diskpart\（当前已在 PE）
+            if options.run_diskpart_scripts {
+                send_step(&progress_tx, 1, "运行 Diskpart 脚本", 0);
+                let scripts_dir = crate::utils::path::get_exe_dir().join("diskpart");
+                println!("[INSTALL] 运行 Diskpart 脚本: {}", scripts_dir.display());
+                match lr_core::diskpart::run_scripts_in_dir(&scripts_dir) {
+                    Ok(out) => println!("[INSTALL] Diskpart 脚本执行完成:\n{}", out),
+                    Err(e) => println!("[INSTALL] Diskpart 脚本执行失败: {}", e),
+                }
+            }
+
             // Step 1: 格式化分区
             send_step(&progress_tx, 1, "格式化分区", 0);
             std::thread::sleep(std::time::Duration::from_millis(50));
@@ -442,7 +453,16 @@ impl App {
                 send_step(&progress_tx, 5, "修复引导", 50);
                 
                 let boot_manager = crate::core::bcdedit::BootManager::new();
-                match boot_manager.repair_boot_advanced(&target_partition, use_uefi) {
+                // XP/2003 写 ntldr 引导；否则 bcdboot。XP 判定：配置标记 或 缺少 \Windows\Boot（仅 Vista+ 才有）
+                let win_boot_dir = format!("{}\\Windows\\Boot", target_partition);
+                let is_xp = options.is_xp || !std::path::Path::new(&win_boot_dir).exists();
+                let boot_result = if is_xp {
+                    println!("[INSTALL STEP 5] 识别为 XP/2003 系统，写入 XP 引导(ntldr/boot.ini)");
+                    boot_manager.write_xp_boot(&target_partition)
+                } else {
+                    boot_manager.repair_boot_advanced(&target_partition, use_uefi)
+                };
+                match boot_result {
                     Ok(_) => {
                         println!("[INSTALL STEP 5] 引导修复成功");
                         
@@ -749,6 +769,8 @@ impl App {
                 win7_fix_acpi_bsod: advanced_options.win7_fix_acpi_bsod,
                 win7_fix_storage_bsod: advanced_options.win7_fix_storage_bsod,
                 wim_engine: lr_core::active_engine().as_u8(),
+                is_xp: options.is_xp,
+                run_diskpart_scripts: options.run_diskpart_scripts,
             };
             
             match ConfigFileManager::write_install_config(&target_partition, &data_partition, &install_config) {

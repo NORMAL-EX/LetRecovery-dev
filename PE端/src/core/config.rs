@@ -100,6 +100,12 @@ pub struct InstallConfig {
 
     /// WIM 镜像引擎：0=libwim（默认），1=wimgapi。由正常系统端随重启传入。
     pub wim_engine: u8,
+
+    /// 目标镜像是否为 XP/2003：为真时写 XP 引导（ntldr/boot.ini）而非 bcdboot。
+    pub is_xp: bool,
+
+    /// 是否在释放镜像前运行 diskpart 脚本（数据分区暂存的 diskpart 目录）。
+    pub run_diskpart_scripts: bool,
 }
 
 impl InstallConfig {
@@ -368,6 +374,8 @@ impl ConfigFileManager {
                     "ImagePath" => config.image_path = value.to_string(),
                     "IsGho" => config.is_gho = value.parse().unwrap_or(false),
                     "WimEngine" => config.wim_engine = value.parse().unwrap_or(0),
+                    "IsXp" => config.is_xp = value.parse().unwrap_or(false),
+                    "RunDiskpartScripts" => config.run_diskpart_scripts = value.parse().unwrap_or(false),
                     "InstallCabPackages" => config.install_cab_packages = value.parse().unwrap_or(false),
                     "RemoveShortcutArrow" => {
                         config.remove_shortcut_arrow = value.parse().unwrap_or(false)
