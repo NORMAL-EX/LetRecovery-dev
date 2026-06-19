@@ -110,7 +110,15 @@ pub fn run_repair_script(
     }
 
     let mut log = String::new();
+    let mut any_fail = false;
     for line in lines {
+        // UEFI 模式下 ESP 没挂上（{ESP} 为空）：跳过用到它的命令并标记失败，
+        // 让上层回退到内置默认逻辑（默认逻辑有更完整的 ESP 挂载/创建处理）。
+        if line.contains("{ESP}") && esp.is_empty() {
+            log.push_str(&format!("[跳过：ESP 未挂载] {}\n", line));
+            any_fail = true;
+            continue;
+        }
         let cmd_line = line
             .replace("{WINDIR}", &windir)
             .replace("{WIN}", win)
@@ -123,10 +131,16 @@ pub fn run_repair_script(
                 log.push_str(&gbk_to_utf8(&o.stderr));
                 if !o.status.success() {
                     log.push_str(&format!("[命令返回非 0] {}\n", cmd_line));
+                    any_fail = true;
                 }
             }
-            Err(e) => return Err(format!("执行失败: {} ({})", cmd_line, e)),
+            Err(e) => return Err(format!("执行失败: {} ({})\n{}", cmd_line, e, log)),
         }
+    }
+    // 只要有命令失败（非 0 退出或 ESP 缺失被跳过），就视为修复失败并返回 Err，
+    // 由调用方回退到内置默认修复逻辑——避免“命令报错却显示修复成功、实际没修”。
+    if any_fail {
+        return Err(format!("部分修复引导命令未成功，回退默认逻辑:\n{}", log));
     }
     Ok(log)
 }
