@@ -1177,6 +1177,16 @@ impl App {
             crate::app::InstallMode::ViaPE
         };
 
+        // XP/2003 检测（与下方 is_xp 一致）：选中镜像主版本号为 5。
+        let selected_is_xp = self
+            .selected_volume
+            .and_then(|i| self.image_volumes.get(i))
+            .map(|v| v.major_version == Some(5))
+            .unwrap_or(false);
+        // 即使用户没打开过高级面板，也在发起安装时按「检测到 XP」应用一次默认勾选
+        // （注入USB3/NVMe）。已应用过则尊重用户手动取消，不覆盖。
+        self.advanced_options.apply_xp_defaults_if_needed(selected_is_xp);
+
         self.install_options = crate::app::InstallOptions {
             format_partition: self.format_partition,
             repair_boot: self.repair_boot,
