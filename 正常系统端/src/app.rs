@@ -221,6 +221,8 @@ pub struct App {
     pub last_is_win7: Option<bool>,
     // UEFI模式检测追踪（用于自动勾选Win7 UEFI补丁）
     pub last_is_uefi_mode: Option<bool>,
+    // XP检测追踪（用于首次检测到 XP 时自动勾选 注入USB3/NVMe）
+    pub last_is_xp: Option<bool>,
     // 安装选项
     pub format_partition: bool,
     pub repair_boot: bool,
@@ -689,6 +691,7 @@ impl Default for App {
             selected_volume: None,
             last_is_win7: None,
             last_is_uefi_mode: None,
+            last_is_xp: None,
             format_partition: true,
             repair_boot: true,
             unattended_install: true,
@@ -1768,14 +1771,34 @@ impl eframe::App for App {
                 self.last_is_win7 = Some(is_win7);
                 self.last_is_uefi_mode = Some(is_uefi_mode);
             }
-            
+
+            // 检测当前选择的镜像是否为 XP/2003（NT 5.x，major_version==5）
+            let is_xp = self.selected_volume
+                .and_then(|idx| self.image_volumes.get(idx))
+                .map(|img| img.major_version == Some(5))
+                .unwrap_or(false);
+            let xp_changed = self.last_is_xp != Some(is_xp);
+            if xp_changed {
+                if is_xp {
+                    // 首次检测到 XP：默认勾选 注入USB3 / 注入NVMe（用户随后可手动取消）
+                    log::info!("[AUTO] 检测到 XP/2003 镜像，默认勾选 注入USB3/NVMe 驱动");
+                    self.advanced_options.apply_xp_defaults_if_needed(true);
+                } else {
+                    // 非 XP：重置 XP 选项与「已应用默认」标记
+                    self.advanced_options.xp_inject_usb3_driver = false;
+                    self.advanced_options.xp_inject_nvme_driver = false;
+                    self.advanced_options.xp_defaults_applied = false;
+                }
+                self.last_is_xp = Some(is_xp);
+            }
+
             egui::Window::new("高级选项")
                 .open(&mut self.show_advanced_options)
                 .min_width(500.0)
                 .min_height(400.0)
                 .show(ctx, |ui| {
                     self.advanced_options
-                        .show_ui(ui, self.hardware_info.as_ref(), unattend_disabled, is_win7, is_uefi_mode);
+                        .show_ui(ui, self.hardware_info.as_ref(), unattend_disabled, is_win7, is_xp, is_uefi_mode);
                 });
         }
 

@@ -535,8 +535,24 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
     let win_boot_dir = format!("{}\\Windows\\Boot", target_partition);
     let is_xp = config.is_xp || !std::path::Path::new(&win_boot_dir).exists();
     let boot_result = if is_xp {
-        log::info!("[PE安装] 识别为 XP/2003 系统，写入 XP 引导(ntldr/boot.ini)");
-        boot_manager.write_xp_boot(&target_partition)
+        if use_uefi {
+            log::info!("[PE安装] 识别为 XP/2003 + UEFI，写入 XP UEFI/GPT 引导");
+            // UEFI 化映像：用映像自带 bootxp64.efi/BCC 写 UEFI 引导；
+            // 失败（如映像非 UEFI 化、缺引导文件）则回退 Legacy(ntldr)。
+            match boot_manager.write_xp_uefi_gpt_boot(&target_partition) {
+                Ok(()) => Ok(()),
+                Err(e) => {
+                    log::warn!("[PE安装] XP UEFI 引导失败({})，回退 Legacy(ntldr)", e);
+                    let _ = tx.send(WorkerMessage::SetStatus(
+                        "XP UEFI 引导不可用，回退 Legacy 引导...".to_string(),
+                    ));
+                    boot_manager.write_xp_boot(&target_partition)
+                }
+            }
+        } else {
+            log::info!("[PE安装] 识别为 XP/2003(Legacy)，写入 XP 引导(ntldr/boot.ini)");
+            boot_manager.write_xp_boot(&target_partition)
+        }
     } else {
         boot_manager.repair_boot_advanced(&target_partition, use_uefi)
     };

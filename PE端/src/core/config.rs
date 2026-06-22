@@ -101,8 +101,14 @@ pub struct InstallConfig {
     /// WIM 镜像引擎：0=libwim（默认），1=wimgapi。由正常系统端随重启传入。
     pub wim_engine: u8,
 
-    /// 目标镜像是否为 XP/2003：为真时写 XP 引导（ntldr/boot.ini）而非 bcdboot。
+    /// 目标镜像是否为 XP/2003：为真时写 XP 引导（ntldr/boot.ini 或 UEFI/GPT）而非 bcdboot。
     pub is_xp: bool,
+
+    // XP 专用选项（仅 is_xp 为真时生效）
+    /// XP 注入 USB3(xHCI) 驱动（默认勾选）
+    pub xp_inject_usb3_driver: bool,
+    /// XP 注入 NVMe 驱动（默认勾选）
+    pub xp_inject_nvme_driver: bool,
 
     /// 是否在释放镜像前运行 diskpart 脚本（数据分区暂存的 diskpart 目录）。
     pub run_diskpart_scripts: bool,
@@ -409,6 +415,8 @@ impl ConfigFileManager {
                     "Win7InjectNvmeDriver" => config.win7_inject_nvme_driver = value.parse().unwrap_or(false),
                     "Win7FixAcpiBsod" => config.win7_fix_acpi_bsod = value.parse().unwrap_or(false),
                     "Win7FixStorageBsod" => config.win7_fix_storage_bsod = value.parse().unwrap_or(false),
+                    "XpInjectUsb3Driver" => config.xp_inject_usb3_driver = value.parse().unwrap_or(false),
+                    "XpInjectNvmeDriver" => config.xp_inject_nvme_driver = value.parse().unwrap_or(false),
                     _ => {}
                 }
             }

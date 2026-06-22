@@ -22,6 +22,7 @@ pub mod wim_engine;
 pub mod wimgapi;
 pub mod wimlib;
 pub mod wimlib_dll;
+pub mod xp;
 pub mod xp_i386;
 
 pub use wim_engine::{active_engine, set_active_engine, WimEngine, WimEngineManager};

@@ -68,6 +68,15 @@ pub struct AdvancedOptions {
     
     // Win7 UEFI 修补选项（仅在Win7 + UEFI模式下显示）
     pub win7_uefi_patch: bool,
+
+    // XP 专用选项（仅检测到 XP/2003 镜像时显示）
+    /// XP 注入 USB3(xHCI) 驱动（检测到 XP 时默认勾选）
+    pub xp_inject_usb3_driver: bool,
+    /// XP 注入 NVMe 驱动（检测到 XP 时默认勾选）
+    pub xp_inject_nvme_driver: bool,
+    /// XP 选项默认值是否已按「检测到 XP」初始化过（避免每帧重复覆盖用户的手动取消）
+    #[serde(skip)]
+    pub xp_defaults_applied: bool,
 }
 
 impl AdvancedOptions {
@@ -92,7 +101,27 @@ impl AdvancedOptions {
             .map(|b| b.join("bin").join("drivers").join("nvme"));
         (usb3, nvme)
     }
-    
+
+    /// 获取 XP 驱动目录（bin\drivers\xp\{usb3|nvme|ahci}）
+    fn get_xp_driver_dirs() -> (Option<PathBuf>, Option<PathBuf>, Option<PathBuf>) {
+        let base = Self::get_program_dir();
+        let root = base.as_ref().map(|b| b.join("bin").join("drivers").join("xp"));
+        let usb3 = root.as_ref().map(|b| b.join("usb3"));
+        let nvme = root.as_ref().map(|b| b.join("nvme"));
+        let ahci = root.as_ref().map(|b| b.join("ahci"));
+        (usb3, nvme, ahci)
+    }
+
+    /// 检测到 XP 镜像时，首次把「注入 USB3 / 注入 NVMe」默认勾选（仅一次，之后尊重用户手动取消）。
+    /// 由 UI（show_ui）与选卷变更（system_install）共同调用，保证即使不打开高级面板也已默认开启。
+    pub fn apply_xp_defaults_if_needed(&mut self, is_xp: bool) {
+        if is_xp && !self.xp_defaults_applied {
+            self.xp_inject_usb3_driver = true;
+            self.xp_inject_nvme_driver = true;
+            self.xp_defaults_applied = true;
+        }
+    }
+
     /// 获取 UefiSeven 目录（bin\uefiseven）
     fn get_uefiseven_dir() -> Option<PathBuf> {
         Self::get_program_dir().map(|b| b.join("bin").join("uefiseven"))
@@ -456,8 +485,8 @@ log=0
         xml.map(|x| (ssid, x))
     }
 
-    pub fn apply_to_system(&self, target_partition: &str) -> anyhow::Result<()> {
-        println!("[ADVANCED] 开始应用高级选项到: {}", target_partition);
+    pub fn apply_to_system(&self, target_partition: &str, is_xp: bool) -> anyhow::Result<()> {
+        println!("[ADVANCED] 开始应用高级选项到: {} (is_xp={})", target_partition, is_xp);
         
         let windows_path = format!("{}\\Windows", target_partition);
         let software_hive = format!("{}\\System32\\config\\SOFTWARE", windows_path);
@@ -1182,6 +1211,34 @@ log=0
             println!("[ADVANCED] 已启用: msahci, storahci, pciide, intelide, atapi, iaStorV, iaStorAV, iaStor, stornvme, amd_sata, amd_xata, amdsata, LSI_SAS, LSI_SAS2, LSI_SCSI, megasas, vhdmp");
         }
 
+        // ============ Windows XP 专用：离线注入存储/USB3 驱动 ============
+        // 直接写已加载的 SYSTEM 配置单元(pc-sys)，不走 DISM。AHCI 始终注入；NVMe/USB3 按勾选。
+        if is_xp {
+            let xp_dir = Self::get_program_dir()
+                .map(|b| b.join("bin").join("drivers").join("xp"));
+            match xp_dir {
+                Some(dir) if dir.is_dir() => {
+                    println!(
+                        "[ADVANCED] XP: 离线注入驱动 (AHCI 始终, NVMe={}, USB3={}) 源: {}",
+                        self.xp_inject_nvme_driver,
+                        self.xp_inject_usb3_driver,
+                        dir.display()
+                    );
+                    match lr_core::xp::inject_xp_drivers(
+                        target_partition,
+                        &dir,
+                        "pc-sys",
+                        self.xp_inject_nvme_driver,
+                        self.xp_inject_usb3_driver,
+                    ) {
+                        Ok(out) => println!("[ADVANCED] XP 驱动注入完成:\n{}", out),
+                        Err(e) => println!("[ADVANCED] XP 驱动注入失败: {} (继续执行)", e),
+                    }
+                }
+                _ => println!("[ADVANCED] 未找到 bin\\drivers\\xp 目录，跳过 XP 驱动注入"),
+            }
+        }
+
         // 卸载注册表
         println!("[ADVANCED] 卸载离线注册表...");
         let _ = OfflineRegistry::unload_hive("pc-soft");
@@ -1434,8 +1491,9 @@ Write-Host "UWP应用清理完成"
     /// # 参数
     /// - `unattend_disabled`: 无人值守选项是否被禁用（由于目标分区已存在配置文件）
     /// - `is_win7`: 当前选择的镜像是否为 Windows 7
+    /// - `is_xp`: 当前选择的镜像是否为 Windows XP/2003
     /// - `is_uefi_mode`: 当前安装模式是否为 UEFI
-    pub fn show_ui(&mut self, ui: &mut egui::Ui, hardware_info: Option<&HardwareInfo>, unattend_disabled: bool, is_win7: bool, is_uefi_mode: bool) {
+    pub fn show_ui(&mut self, ui: &mut egui::Ui, hardware_info: Option<&HardwareInfo>, unattend_disabled: bool, is_win7: bool, is_xp: bool, is_uefi_mode: bool) {
         egui::ScrollArea::vertical().show(ui, |ui| {
             // ============ Win7 专用选项（仅当选择Win7镜像时显示）============
             if is_win7 {
@@ -1572,7 +1630,108 @@ Write-Host "UWP应用清理完成"
                 
                 ui.add_space(15.0);
             }
-            
+
+            // ============ Windows XP 专用选项（仅当选择 XP/2003 镜像时显示）============
+            if is_xp {
+                // 进入面板时按「检测到 XP」应用一次默认勾选（用户可手动取消）
+                self.apply_xp_defaults_if_needed(true);
+
+                ui.heading("Windows XP 专用选项");
+                ui.separator();
+
+                ui.colored_label(
+                    egui::Color32::from_rgb(255, 165, 0),
+                    "以下选项仅适用于 Windows XP/2003 x64 安装（需使用 UEFI 化的 XP 映像）",
+                );
+                ui.add_space(5.0);
+
+                let (usb3_dir, nvme_dir, ahci_dir) = Self::get_xp_driver_dirs();
+
+                // USB3 驱动注入（默认勾选）
+                ui.vertical(|ui| {
+                    ui.checkbox(&mut self.xp_inject_usb3_driver, "注入USB3驱动");
+                    if self.xp_inject_usb3_driver {
+                        if let Some(dir) = &usb3_dir {
+                            if !dir.exists() {
+                                ui.colored_label(
+                                    egui::Color32::from_rgb(255, 165, 0),
+                                    "未找到 bin\\drivers\\xp\\usb3，将跳过 USB3 驱动注入",
+                                );
+                            }
+                        }
+                    }
+                });
+                if self.xp_inject_usb3_driver {
+                    ui.label(
+                        egui::RichText::new("XP原生不支持USB3.0(xHCI)，注入后现代主板USB口键鼠可用")
+                            .small()
+                            .color(egui::Color32::GRAY),
+                    );
+                }
+
+                // NVMe 驱动注入（默认勾选）
+                ui.vertical(|ui| {
+                    ui.checkbox(&mut self.xp_inject_nvme_driver, "注入NVMe驱动");
+                    if self.xp_inject_nvme_driver {
+                        if let Some(dir) = &nvme_dir {
+                            if !dir.exists() {
+                                ui.colored_label(
+                                    egui::Color32::from_rgb(255, 165, 0),
+                                    "未找到 bin\\drivers\\xp\\nvme，将跳过 NVMe 驱动注入",
+                                );
+                            }
+                        }
+                    }
+                });
+                if self.xp_inject_nvme_driver {
+                    ui.label(
+                        egui::RichText::new("XP原生不支持NVMe SSD，注入后(含改核storport+ntoskrn8)可从NVMe启动")
+                            .small()
+                            .color(egui::Color32::GRAY),
+                    );
+                }
+
+                // SATA(AHCI) 驱动：始终注入，不提供开关（只读展示）
+                let mut ahci_always_on = true;
+                ui.add_enabled(
+                    false,
+                    egui::Checkbox::new(&mut ahci_always_on, "注入SATA(AHCI)驱动（始终注入）"),
+                );
+                {
+                    let ahci_missing = ahci_dir.as_ref().map(|d| !d.exists()).unwrap_or(true);
+                    if ahci_missing {
+                        ui.colored_label(
+                            egui::Color32::from_rgb(255, 165, 0),
+                            "未找到 bin\\drivers\\xp\\ahci，AHCI 注入将被跳过",
+                        );
+                    } else {
+                        ui.label(
+                            egui::RichText::new("通用AHCI(genahci)默认始终注入，保证SATA硬盘可识别")
+                                .small()
+                                .color(egui::Color32::GRAY),
+                        );
+                    }
+                }
+
+                if is_uefi_mode {
+                    ui.add_space(8.0);
+                    ui.colored_label(
+                        egui::Color32::from_rgb(100, 181, 246),
+                        "UEFI/GPT 启动：使用映像自带 bootxp64.efi + winload.efi 引导",
+                    );
+                    ui.label(
+                        egui::RichText::new(
+                            "XP 不像 Win7 用 UefiSeven；UEFI 启动依赖映像内预置的 winload.efi/改核与 bootxp64.efi/BCC。\n\
+                             安装时会自动把这些引导文件释放到 ESP 并修正 BCC 分区指向。"
+                        )
+                        .small()
+                        .color(egui::Color32::GRAY),
+                    );
+                }
+
+                ui.add_space(15.0);
+            }
+
             ui.heading("系统优化选项");
             ui.separator();
 

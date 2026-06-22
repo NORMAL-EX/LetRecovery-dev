@@ -184,7 +184,11 @@ pub fn run_cli_install(config_path: &str, advanced_path: Option<&str>) -> Result
         win7_fix_acpi_bsod: advanced.win7_fix_acpi_bsod,
         win7_fix_storage_bsod: advanced.win7_fix_storage_bsod,
         wim_engine: lr_core::active_engine().as_u8(),
+        // CLI 不强制标记 XP；PE 端会按「释放后系统缺少 \Windows\Boot」兜底识别 XP，
+        // 并据此写 XP 引导 + 注入下列驱动（GUI 路径则显式设置 is_xp）。
         is_xp: false,
+        xp_inject_usb3_driver: advanced.xp_inject_usb3_driver,
+        xp_inject_nvme_driver: advanced.xp_inject_nvme_driver,
         run_diskpart_scripts: false,
     };
 

@@ -500,7 +500,27 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
         let boot_manager = BootManager::new();
         let use_uefi = DiskManager::detect_uefi_mode();
 
-        if let Err(e) = boot_manager.repair_boot_advanced(&target_partition, use_uefi) {
+        // XP/2003：写 XP 引导（UEFI 化映像走 UEFI/GPT，否则 ntldr）；其余走 bcdboot。
+        let win_boot_dir = format!("{}\\Windows\\Boot", target_partition);
+        let is_xp = config.is_xp || !std::path::Path::new(&win_boot_dir).exists();
+        let boot_result = if is_xp {
+            if use_uefi {
+                println!("[PE INSTALL] 识别为 XP/2003 + UEFI，写入 XP UEFI/GPT 引导");
+                match boot_manager.write_xp_uefi_gpt_boot(&target_partition) {
+                    Ok(()) => Ok(()),
+                    Err(e) => {
+                        eprintln!("[PE INSTALL] XP UEFI 引导失败({})，回退 Legacy(ntldr)", e);
+                        boot_manager.write_xp_boot(&target_partition)
+                    }
+                }
+            } else {
+                println!("[PE INSTALL] 识别为 XP/2003(Legacy)，写入 XP 引导(ntldr/boot.ini)");
+                boot_manager.write_xp_boot(&target_partition)
+            }
+        } else {
+            boot_manager.repair_boot_advanced(&target_partition, use_uefi)
+        };
+        if let Err(e) = boot_result {
             eprintln!("[PE INSTALL] 修复引导失败: {}", e);
             show_error_message(&format!("修复引导失败: {}", e));
             return Ok(());

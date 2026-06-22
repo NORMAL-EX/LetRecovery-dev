@@ -436,6 +436,11 @@ impl App {
             }
             std::thread::sleep(std::time::Duration::from_millis(100));
 
+            // XP/2003 判定（Step 5 引导 与 Step 6 驱动注入 共用）：
+            // 配置标记 或 释放后系统缺少 \Windows\Boot（该目录仅 Vista+ 才有）。
+            let is_xp = options.is_xp
+                || !std::path::Path::new(&format!("{}\\Windows\\Boot", target_partition)).exists();
+
             // Step 5: 修复引导
             send_step(&progress_tx, 5, "修复引导", 0);
             std::thread::sleep(std::time::Duration::from_millis(50));
@@ -453,12 +458,21 @@ impl App {
                 send_step(&progress_tx, 5, "修复引导", 50);
                 
                 let boot_manager = crate::core::bcdedit::BootManager::new();
-                // XP/2003 写 ntldr 引导；否则 bcdboot。XP 判定：配置标记 或 缺少 \Windows\Boot（仅 Vista+ 才有）
-                let win_boot_dir = format!("{}\\Windows\\Boot", target_partition);
-                let is_xp = options.is_xp || !std::path::Path::new(&win_boot_dir).exists();
+                // XP/2003 写 XP 引导；否则 bcdboot。is_xp 已在上方统一计算。
                 let boot_result = if is_xp {
-                    println!("[INSTALL STEP 5] 识别为 XP/2003 系统，写入 XP 引导(ntldr/boot.ini)");
-                    boot_manager.write_xp_boot(&target_partition)
+                    if use_uefi {
+                        println!("[INSTALL STEP 5] 识别为 XP/2003 + UEFI，写入 XP UEFI/GPT 引导");
+                        match boot_manager.write_xp_uefi_gpt_boot(&target_partition) {
+                            Ok(()) => Ok(()),
+                            Err(e) => {
+                                println!("[INSTALL STEP 5] XP UEFI 引导失败({})，回退 Legacy(ntldr)", e);
+                                boot_manager.write_xp_boot(&target_partition)
+                            }
+                        }
+                    } else {
+                        println!("[INSTALL STEP 5] 识别为 XP/2003(Legacy)，写入 XP 引导(ntldr/boot.ini)");
+                        boot_manager.write_xp_boot(&target_partition)
+                    }
                 } else {
                     boot_manager.repair_boot_advanced(&target_partition, use_uefi)
                 };
@@ -492,7 +506,7 @@ impl App {
             println!("[INSTALL STEP 6] 应用高级选项");
             send_step(&progress_tx, 6, "应用高级选项", 20);
             
-            match advanced_options.apply_to_system(&target_partition) {
+            match advanced_options.apply_to_system(&target_partition, is_xp) {
                 Ok(_) => println!("[INSTALL STEP 6] 高级选项应用成功"),
                 Err(e) => println!("[INSTALL STEP 6] 高级选项应用失败: {}", e),
             }
@@ -770,6 +784,8 @@ impl App {
                 win7_fix_storage_bsod: advanced_options.win7_fix_storage_bsod,
                 wim_engine: lr_core::active_engine().as_u8(),
                 is_xp: options.is_xp,
+                xp_inject_usb3_driver: advanced_options.xp_inject_usb3_driver,
+                xp_inject_nvme_driver: advanced_options.xp_inject_nvme_driver,
                 run_diskpart_scripts: options.run_diskpart_scripts,
             };
             

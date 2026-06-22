@@ -83,8 +83,14 @@ pub struct InstallConfig {
     /// WIM 镜像引擎：0=libwim（默认），1=wimgapi。随重启传给 PE 端，使其使用相同引擎。
     pub wim_engine: u8,
 
-    /// 目标镜像是否为 XP/2003（NT 5.x）。为真时 PE 端写 XP 引导（ntldr/boot.ini）而非 bcdboot。
+    /// 目标镜像是否为 XP/2003（NT 5.x）。为真时 PE 端写 XP 引导（ntldr/boot.ini 或 UEFI/GPT）而非 bcdboot。
     pub is_xp: bool,
+
+    // XP 专用选项（仅 is_xp 为真时生效；AHCI 始终注入，无开关）
+    /// XP 注入 USB3(xHCI) 驱动（检测到 XP 时默认勾选）
+    pub xp_inject_usb3_driver: bool,
+    /// XP 注入 NVMe 驱动（检测到 XP 时默认勾选）
+    pub xp_inject_nvme_driver: bool,
 
     /// 是否在释放镜像前运行 diskpart 脚本（程序目录\diskpart\ 下所有脚本）。
     pub run_diskpart_scripts: bool,
@@ -396,6 +402,10 @@ Win7InjectUsb3Driver={}
 Win7InjectNvmeDriver={}
 Win7FixAcpiBsod={}
 Win7FixStorageBsod={}
+
+[Xp]
+XpInjectUsb3Driver={}
+XpInjectNvmeDriver={}
 "#,
             config.unattended,
             config.restore_drivers,
@@ -427,6 +437,8 @@ Win7FixStorageBsod={}
             config.win7_inject_nvme_driver,
             config.win7_fix_acpi_bsod,
             config.win7_fix_storage_bsod,
+            config.xp_inject_usb3_driver,
+            config.xp_inject_nvme_driver,
         )
     }
 
@@ -499,6 +511,8 @@ WimEngine={}
                     "Win7InjectNvmeDriver" => config.win7_inject_nvme_driver = value.parse().unwrap_or(false),
                     "Win7FixAcpiBsod" => config.win7_fix_acpi_bsod = value.parse().unwrap_or(false),
                     "Win7FixStorageBsod" => config.win7_fix_storage_bsod = value.parse().unwrap_or(false),
+                    "XpInjectUsb3Driver" => config.xp_inject_usb3_driver = value.parse().unwrap_or(false),
+                    "XpInjectNvmeDriver" => config.xp_inject_nvme_driver = value.parse().unwrap_or(false),
                     _ => {}
                 }
             }
