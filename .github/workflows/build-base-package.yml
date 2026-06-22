@@ -1,0 +1,81 @@
+name: Build Base Package
+
+# 生成「dev 底包」：取主仓库 NORMAL-EX/LetRecovery 的公开 package（*.7z），
+# 合并 dev 仓库 xp-drivers release 里的 XP 驱动（解到 bin/drivers/xp），
+# 重新打包成 package.7z 发布到 dev 仓库的 `base` release。
+# build-and-release.yml 以该 `base` 的 package.7z 作底包。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-base-package
+  cancel-in-progress: false
+
+jobs:
+  build-base-package:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download upstream package (from main repo)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # 主仓库公开 release 的完整包作底包模板
+          gh release download --repo NORMAL-EX/LetRecovery --pattern '*.7z' --dir up
+          mv up/*.7z package.7z
+          ls -la package.7z
+
+      - name: Download XP drivers asset (from dev repo)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release download xp-drivers --repo "${{ github.repository }}" --pattern 'xp-drivers.7z' --dir drv
+          ls -la drv/xp-drivers.7z
+
+      - name: Merge XP drivers into package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p pkg
+          7z x package.7z -opkg -y >/dev/null
+          test -f "pkg/LetRecovery.exe" || { echo "底包缺少 LetRecovery.exe"; exit 1; }
+          # xp-drivers.7z 顶层为 xp/，解到 pkg/bin/drivers/ 得到 pkg/bin/drivers/xp/...
+          mkdir -p pkg/bin/drivers
+          7z x drv/xp-drivers.7z -opkg/bin/drivers -y >/dev/null
+          test -f "pkg/bin/drivers/xp/nvme/stornvme.sys" || { echo "驱动合并失败：缺 stornvme.sys"; exit 1; }
+          echo "--- pkg/bin/drivers/xp ---"
+          ls -R pkg/bin/drivers/xp
+
+      - name: Repackage into package.7z
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f package.7z
+          ( cd pkg && 7z a -t7z -mx=9 -m0=lzma2 -ms=on ../package.7z ./* >/dev/null )
+          ls -la package.7z
+
+      - name: Publish base package to dev release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          SHA="$(git rev-parse HEAD)"
+          gh release delete base --repo "${{ github.repository }}" --yes --cleanup-tag || true
+          gh release create base package.7z \
+            --repo "${{ github.repository }}" \
+            --target "$SHA" \
+            --title "base 底包（主仓库包 + XP 驱动）" \
+            --notes "由 build-base-package 自动生成：上游 package.7z 合并 bin/drivers/xp。供 build-and-release 当底包。commit ${SHA}" \
+            --prerelease
+          echo "Published base package.7z"
