@@ -23,6 +23,9 @@ pub struct ExpandCLoadResult {
     pub free_mb: u64,
     /// 计算得到的最大可扩容到的最终大小（MB）
     pub max_size_mb: u64,
+    /// 不需要移动分区即可达到的最终大小（MB）= 当前大小 + C 盘后方相邻未分配空间。
+    /// 目标 ≤ 此值走 Case 1(纯 extend)；超过则需移动后方分区(Case 2，搬数据)。
+    pub no_move_max_mb: u64,
     /// 是否可以扩容
     pub can_expand: bool,
     /// 不可扩容（或提示）的原因
@@ -37,6 +40,7 @@ impl Default for ExpandCLoadResult {
             used_mb: 0,
             free_mb: 0,
             max_size_mb: 0,
+            no_move_max_mb: 0,
             can_expand: false,
             reason: String::new(),
         }
@@ -60,6 +64,8 @@ pub struct ExpandCDialogState {
     pub free_mb: u64,
     /// 计算得到的最大可扩容到的最终大小（MB）
     pub max_size_mb: u64,
+    /// 不需要移动分区即可达到的最终大小（MB）。目标超过此值需移动后方分区(搬数据)。
+    pub no_move_max_mb: u64,
     /// 是否可以扩容
     pub can_expand: bool,
     /// 不可扩容（或提示）的原因
@@ -82,6 +88,7 @@ impl Default for ExpandCDialogState {
             used_mb: 0,
             free_mb: 0,
             max_size_mb: 0,
+            no_move_max_mb: 0,
             can_expand: false,
             reason: String::new(),
             target_size_text: String::new(),
@@ -133,6 +140,7 @@ impl App {
                 self.expand_c_state.used_mb = result.used_mb;
                 self.expand_c_state.free_mb = result.free_mb;
                 self.expand_c_state.max_size_mb = result.max_size_mb;
+                self.expand_c_state.no_move_max_mb = result.no_move_max_mb;
                 self.expand_c_state.can_expand = result.can_expand;
                 self.expand_c_state.reason = result.reason.clone();
 
@@ -307,6 +315,24 @@ impl App {
                         egui::Color32::from_rgb(241, 196, 15),
                         "若本机没有 WinPE，将先自动下载 WinPE；随后会安装 PE 引导并重启进入 WinPE 完成扩容。",
                     );
+
+                    // 当目标超过“相邻未分配空间”可达上限时，需要移动后方分区(搬数据)，给出醒目警告。
+                    let no_move_max = self.expand_c_state.no_move_max_mb;
+                    if self.expand_c_state.target_size_mb > no_move_max && no_move_max > 0 {
+                        ui.add_space(6.0);
+                        ui.colored_label(
+                            egui::Color32::from_rgb(231, 76, 60),
+                            format!(
+                                "⚠ 超过 {:.1} GB 的部分需要移动 C 盘后方分区的数据来腾挪空间：\n\
+                                 · 该过程会搬移后方分区(如 D:)的数据，耗时较长；\n\
+                                 · 进行中切勿断电/强制关机，否则可能损坏后方分区；\n\
+                                 · 此为实验性功能，建议先在测试机/虚拟机验证。\n\
+                                 若只想要稳妥的纯扩展，请把目标控制在 {:.1} GB 以内。",
+                                no_move_max as f64 / 1024.0,
+                                no_move_max as f64 / 1024.0,
+                            ),
+                        );
+                    }
 
                     // 状态消息
                     if !self.expand_c_state.message.is_empty() {
@@ -579,22 +605,29 @@ fn compute_expand_c_info() -> ExpandCLoadResult {
     };
     let unallocated_after_mb = unallocated_after_bytes / bytes_per_mb;
 
-    // 2) 仅统计紧邻 C 盘之后的“下一个分区可缩小空间”，作为提示信息——
-    //    注意：当前 PE 扩容引擎只支持“并入相邻未分配空间”（diskpart extend），
-    //    尚不支持移动后方分区来腾挪空间。因此该值**不计入**可扩上限 max_size_mb，
-    //    只用于在界面提示用户“后面分区还有 X GB，需分区移动功能（开发中）才能并入”。
+    // 2) 紧邻 C 盘之后的“下一个分区可缩小让出的空间”。PE 端 Case 2 会把该分区整体右移、
+    //    在 C 之后腾出未分配空间再 extend，因此该部分**计入**可扩上限——但需要搬移数据。
+    //    只有紧贴 C 之后(中间无未分配空间)的、有盘符的基础数据分区才可移动。
     let mut next_shrinkable_mb: u64 = 0;
     if let Some(next) = following.first() {
-        if let Some(letter) = next.drive_letter {
-            if let Ok(mb) = query_shrink_max(letter) {
-                next_shrinkable_mb = mb;
-                println!("[EXPAND] 下一个分区 {}: 可缩小 {} MB（需分区移动，暂不并入上限）", letter, mb);
+        // 紧贴：下一个分区起点≈C 盘结束（允许极小对齐间隙）。否则中间是未分配空间，归 Case 1。
+        let adjacent = next.offset_bytes.saturating_sub(c_end) < (2 * 1024 * 1024);
+        let movable = adjacent && !next.is_esp && !next.is_msr && !next.is_recovery;
+        if movable {
+            if let Some(letter) = next.drive_letter {
+                if let Ok(mb) = query_shrink_max(letter) {
+                    next_shrinkable_mb = mb;
+                    println!("[EXPAND] 后方分区 {}: 可让出 {} MB（需移动数据，Case 2）", letter, mb);
+                }
             }
         }
     }
 
-    // 可扩上限 = 当前大小 + 相邻未分配空间（这是 PE 端 diskpart extend 能无损并入的部分）。
-    let max_size_mb = result.current_size_mb + unallocated_after_mb;
+    // 不移动数据即可达到的上限 = 当前 + 相邻未分配空间（Case 1，纯 extend）。
+    let no_move_max_mb = result.current_size_mb + unallocated_after_mb;
+    // 总可扩上限 = Case 1 + 后方分区可让出空间（Case 2，搬数据）。
+    let max_size_mb = no_move_max_mb + next_shrinkable_mb;
+    result.no_move_max_mb = no_move_max_mb;
     result.max_size_mb = max_size_mb;
 
     // 至少要能扩 1GB 才认为可以扩容
@@ -602,21 +635,14 @@ fn compute_expand_c_info() -> ExpandCLoadResult {
         result.can_expand = true;
         if next_shrinkable_mb > 1024 {
             result.reason = format!(
-                "C 盘后方相邻未分配空间约 {:.1} GB 可直接并入；后面分区另有约 {:.1} GB，需“分区移动”功能（开发中）才能并入。",
+                "可无损并入：相邻未分配约 {:.1} GB（直接扩）+ 后方分区可让出约 {:.1} GB（需移动该分区的数据）。",
                 unallocated_after_mb as f64 / 1024.0,
                 next_shrinkable_mb as f64 / 1024.0,
             );
         }
     } else {
         result.can_expand = false;
-        if next_shrinkable_mb > 1024 {
-            result.reason = format!(
-                "C 盘后方没有相邻的未分配空间可直接并入。后面分区虽有约 {:.1} GB 可让出，但需“分区移动”功能（开发中）才能并入。可先用「一键分区」手动在 C 盘后方腾出未分配空间。",
-                next_shrinkable_mb as f64 / 1024.0,
-            );
-        } else {
-            result.reason = "C 盘后方没有相邻的未分配空间可用于扩容。可先用「一键分区」在 C 盘后方腾出未分配空间。".to_string();
-        }
+        result.reason = "C 盘后方没有可用于扩容的空间。可先用「一键分区」在 C 盘后方腾出未分配空间。".to_string();
     }
 
     result

@@ -644,7 +644,6 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
 fn execute_expand_workflow(tx: Sender<WorkerMessage>) {
     use crate::core::bcdedit::BootManager;
     use crate::core::config::ConfigFileManager;
-    use crate::core::disk::DiskManager;
 
     log::info!("========== 开始PE扩容流程 ==========");
 
@@ -676,7 +675,8 @@ fn execute_expand_workflow(tx: Sender<WorkerMessage>) {
     let _ = tx.send(WorkerMessage::SetProgress(30));
     log::info!("[EXPAND] 目标分区: {}:，目标大小: {} MB", letter, config.target_size_mb);
 
-    match DiskManager::expand_partition_lossless(letter, config.target_size_mb) {
+    // 优先 Case 1（并入相邻未分配空间）；不足时 Case 2（移动后方基础数据分区）。
+    match crate::core::expand_move::expand_c_drive(letter, config.target_size_mb, &data_partition) {
         Ok(msg) => {
             log::info!("[EXPAND] {}", msg);
             let _ = tx.send(WorkerMessage::SetStatus(msg));
