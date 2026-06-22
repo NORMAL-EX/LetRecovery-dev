@@ -521,6 +521,9 @@ pub struct App {
     // 无人值守检测相关
     /// 当前选中分区是否存在无人值守配置文件
     pub partition_has_unattend: bool,
+    /// 源镜像/安装介质是否自带无人值守应答（XP 的 winnt.sif / 介质根的 autounattend.xml 等）。
+    /// 为真时默认取消勾选「无人值守」（仅改默认，不禁用，用户仍可手动勾上）。
+    pub source_has_unattend: bool,
     /// 无人值守检测是否正在进行
     pub unattend_check_loading: bool,
     /// 无人值守检测结果接收器
@@ -905,6 +908,7 @@ impl Default for App {
             embedded_assets: crate::ui::EmbeddedAssets::new(),
             // 无人值守检测相关
             partition_has_unattend: false,
+            source_has_unattend: false,
             custom_unattend_path: String::new(),
             custom_unattend_error: None,
             unattend_check_loading: false,

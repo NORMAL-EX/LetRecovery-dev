@@ -686,6 +686,8 @@ impl App {
             // GHO 文件不需要加载卷信息
             self.image_volumes.clear();
             self.selected_volume = Some(0);
+            // 重新评估源镜像自带应答（GHO 同目录基本不会有，主要用于切换镜像时复位）
+            self.refresh_source_unattend();
         }
     }
 
@@ -757,6 +759,8 @@ impl App {
                                 self.iso_mount_error = None;
                                 self.image_volumes.clear();
                                 self.selected_volume = Some(0);
+                                // i386 源自带 winnt.sif 时默认取消勾选无人值守
+                                self.refresh_source_unattend();
                             }
                             IsoMountResult::Error(error) => {
                                 println!("[ISO MOUNT] 挂载失败: {}", error);
@@ -780,7 +784,9 @@ impl App {
                             ImageInfoResult::Success(volumes) => {
                                 println!("[IMAGE INFO] 加载完成，找到 {} 个卷", volumes.len());
                                 self.image_volumes = volumes;
-                                
+                                // 介质根/镜像目录自带应答文件时默认取消勾选无人值守
+                                self.refresh_source_unattend();
+
                                 // 检查是否需要小白模式自动安装
                                 if self.easy_mode_pending_auto_start {
                                     log::info!("[EASY MODE] 镜像加载完成，准备自动安装");
@@ -1525,22 +1531,88 @@ impl App {
                     
                     if current_partition.as_ref() == Some(&result.partition_letter) {
                         self.partition_has_unattend = result.has_unattend;
-                        
-                        if result.has_unattend {
-                            // 存在无人值守配置，自动取消勾选
-                            self.unattended_install = false;
-                            println!("[UNATTEND CHECK] 已自动取消勾选无人值守选项");
-                        } else {
-                            // 不存在无人值守配置，默认勾选
-                            self.unattended_install = true;
-                            println!("[UNATTEND CHECK] 已自动勾选无人值守选项");
-                        }
+                        // 目标分区或源镜像任一自带无人值守 → 默认取消勾选。
+                        self.apply_unattend_default();
                     }
                 }
             }
         }
     }
     
+    /// 根据「目标分区」与「源镜像」是否自带无人值守，决定勾选框默认值。
+    /// 任一存在即默认取消勾选；都不存在则默认勾选。仅改默认，不禁用——
+    /// 分区冲突的禁用由 is_unattend_option_disabled 单独处理。
+    fn apply_unattend_default(&mut self) {
+        if self.partition_has_unattend || self.source_has_unattend {
+            self.unattended_install = false;
+            println!(
+                "[UNATTEND CHECK] 检测到自带无人值守(分区={}, 源镜像={})，默认取消勾选",
+                self.partition_has_unattend, self.source_has_unattend
+            );
+        } else {
+            self.unattended_install = true;
+            println!("[UNATTEND CHECK] 未检测到自带无人值守，默认勾选");
+        }
+    }
+
+    /// 检测源镜像/安装介质是否自带无人值守应答（廉价的文件系统探测，不挂载 WIM）：
+    /// - XP/2003 i386 源：`<i386>\winnt.sif` 或介质根 `winnt.sif`（CD 无人值守约定位置）；
+    /// - 已挂载的 Windows 安装介质(ISO)：介质根 `autounattend.xml` / `unattend.xml`；
+    /// - 本地镜像文件：同目录下的 `autounattend.xml` / `unattend.xml`。
+    /// 检测结果写入 self.source_has_unattend 并据此刷新默认勾选。
+    fn refresh_source_unattend(&mut self) {
+        self.source_has_unattend = Self::detect_source_unattend(&self.local_image_path);
+        self.apply_unattend_default();
+    }
+
+    /// 见 refresh_source_unattend。纯函数，便于后台/同步调用。
+    fn detect_source_unattend(image_path: &str) -> bool {
+        use std::path::Path;
+        if image_path.trim().is_empty() {
+            return false;
+        }
+        let p = Path::new(image_path);
+
+        // XP/2003 i386 源：local_image_path 指向 i386 目录。
+        if lr_core::xp_i386::is_valid_i386(p) {
+            let in_i386 = p.join("winnt.sif").exists();
+            let at_media_root = p
+                .parent()
+                .map(|root| root.join("winnt.sif").exists())
+                .unwrap_or(false);
+            if in_i386 || at_media_root {
+                println!("[UNATTEND CHECK] 源 i386 自带 winnt.sif");
+                return true;
+            }
+            return false;
+        }
+
+        // Windows 安装介质/本地镜像：检查介质根或镜像所在目录下的应答文件。
+        // 介质根：image_path 形如 X:\sources\install.wim → 取盘符根 X:\；
+        // 本地文件：取镜像所在目录。
+        let base = if image_path.to_lowercase().contains("\\sources\\") {
+            // 取盘符根（X:\）
+            image_path
+                .split_once('\\')
+                .map(|(drive, _)| format!("{}\\", drive))
+                .unwrap_or_else(|| image_path.to_string())
+        } else {
+            p.parent()
+                .map(|d| d.to_string_lossy().to_string())
+                .unwrap_or_default()
+        };
+        if base.is_empty() {
+            return false;
+        }
+        for name in ["autounattend.xml", "Autounattend.xml", "AutoUnattend.xml", "unattend.xml", "Unattend.xml"] {
+            if Path::new(&format!("{}\\{}", base.trim_end_matches('\\'), name)).exists() {
+                println!("[UNATTEND CHECK] 源介质根/镜像目录自带 {}", name);
+                return true;
+            }
+        }
+        false
+    }
+
     /// 判断无人值守选项是否被禁用（考虑格式化状态）
     pub fn is_unattend_option_disabled(&self) -> bool {
         self.partition_has_unattend && !self.format_partition
