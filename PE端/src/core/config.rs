@@ -184,10 +184,12 @@ impl ConfigFileManager {
     /// 标记文件名
     const INSTALL_MARKER: &'static str = "LetRecovery_Install.marker";
     const BACKUP_MARKER: &'static str = "LetRecovery_Backup.marker";
+    const EXPAND_MARKER: &'static str = "LetRecovery_Expand.marker";
 
     /// 配置文件名
     const INSTALL_CONFIG: &'static str = "LetRecovery_Install.ini";
     const BACKUP_CONFIG: &'static str = "LetRecovery_Backup.ini";
+    const EXPAND_CONFIG: &'static str = "LetRecovery_Expand.ini";
 
     /// PE文件目录名
     const PE_DIR: &'static str = "LetRecovery_PE";
@@ -219,6 +221,18 @@ impl ConfigFileManager {
         None
     }
 
+    /// 查找包含扩容标记文件的分区
+    pub fn find_expand_marker_partition() -> Option<String> {
+        for letter in ['C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K'] {
+            let marker_path = format!("{}:\\{}", letter, Self::EXPAND_MARKER);
+            if Path::new(&marker_path).exists() {
+                log::info!("找到扩容标记分区: {}:", letter);
+                return Some(format!("{}:", letter));
+            }
+        }
+        None
+    }
+
     /// 查找包含配置文件的数据分区
     pub fn find_data_partition() -> Option<String> {
         for letter in ['C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K'] {
@@ -231,6 +245,12 @@ impl ConfigFileManager {
                 format!("{}:\\{}\\{}", letter, Self::DATA_DIR, Self::BACKUP_CONFIG);
             if Path::new(&backup_config_path).exists() {
                 log::info!("找到备份配置分区: {}:", letter);
+                return Some(format!("{}:", letter));
+            }
+            let expand_config_path =
+                format!("{}:\\{}\\{}", letter, Self::DATA_DIR, Self::EXPAND_CONFIG);
+            if Path::new(&expand_config_path).exists() {
+                log::info!("找到扩容配置分区: {}:", letter);
                 return Some(format!("{}:", letter));
             }
         }
@@ -265,7 +285,54 @@ impl ConfigFileManager {
             }
         }
 
+        // 再检查扩容标记
+        if Self::find_expand_marker_partition().is_some() {
+            if let Some(data_part) = Self::find_data_partition() {
+                let expand_config_path =
+                    format!("{}\\{}\\{}", data_part, Self::DATA_DIR, Self::EXPAND_CONFIG);
+                if Path::new(&expand_config_path).exists() {
+                    return Some(OperationType::Expand);
+                }
+            }
+        }
+
         None
+    }
+
+    /// 读取扩容配置
+    pub fn read_expand_config(data_partition: &str) -> Result<ExpandConfig> {
+        let config_path = format!(
+            "{}\\{}\\{}",
+            data_partition,
+            Self::DATA_DIR,
+            Self::EXPAND_CONFIG
+        );
+        log::info!("读取扩容配置: {}", config_path);
+        let content =
+            std::fs::read_to_string(&config_path).context("读取扩容配置文件失败")?;
+        Self::deserialize_expand_config(&content)
+    }
+
+    /// 反序列化扩容配置
+    fn deserialize_expand_config(content: &str) -> Result<ExpandConfig> {
+        let mut config = ExpandConfig::default();
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('[') || line.starts_with('#') {
+                continue;
+            }
+            if let Some((key, value)) = line.split_once('=') {
+                let key = key.trim();
+                let value = value.trim();
+                match key {
+                    "TargetPartition" => config.target_partition = value.to_string(),
+                    "TargetSizeMb" => config.target_size_mb = value.parse().unwrap_or(0),
+                    "WimEngine" => config.wim_engine = value.parse().unwrap_or(0),
+                    _ => {}
+                }
+            }
+        }
+        Ok(config)
     }
 
     /// 读取安装配置
@@ -321,6 +388,13 @@ impl ConfigFileManager {
             log::debug!("删除备份标记失败 (可能不存在): {}", e);
         } else {
             log::info!("已删除备份标记: {}", backup_marker);
+        }
+
+        let expand_marker = format!("{}\\{}", partition, Self::EXPAND_MARKER);
+        if let Err(e) = std::fs::remove_file(&expand_marker) {
+            log::debug!("删除扩容标记失败 (可能不存在): {}", e);
+        } else {
+            log::info!("已删除扩容标记: {}", expand_marker);
         }
     }
 
@@ -466,4 +540,16 @@ impl ConfigFileManager {
 pub enum OperationType {
     Install,
     Backup,
+    Expand,
+}
+
+/// 无损扩容配置（进 PE 后无损扩大目标分区，通常为系统盘 C:）。
+#[derive(Debug, Clone, Default)]
+pub struct ExpandConfig {
+    /// 要扩大的目标分区（如 "C:"）。
+    pub target_partition: String,
+    /// 期望的最终总大小（MB）；0 表示尽可能扩到最大。
+    pub target_size_mb: u64,
+    /// WIM 引擎选择（与其它流程一致）：0=libwim，1=wimgapi。
+    pub wim_engine: u8,
 }

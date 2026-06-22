@@ -17,6 +17,7 @@ pub mod gho_password;
 pub mod nvidia_uninstall;
 pub mod partition_copy;
 pub mod quick_partition;
+pub mod expand_c;
 pub mod image_verify;
 pub mod hash_verify;
 pub mod password_reset;
@@ -27,6 +28,7 @@ pub use batch_format::FormatablePartition;
 pub use bitlocker::BitLockerPartition;
 pub use partition_copy::{CopyablePartition, CopyProgress};
 pub use quick_partition::QuickPartitionDialogState;
+pub use expand_c::ExpandCDialogState;
 
 use egui;
 
@@ -273,6 +275,21 @@ impl App {
                     self.password_reset_users_loading = false;
                 }
 
+                // 无损扩大C盘：在正常 Windows 环境中规划，重启进 PE 执行（PE 环境内不可用）
+                if !is_pe {
+                    if ui
+                        .add(egui::Button::new("无损扩大C盘").min_size(button_size))
+                        .clicked()
+                    {
+                        self.init_expand_c_dialog();
+                    }
+                } else {
+                    ui.add_enabled(
+                        false,
+                        egui::Button::new("无损扩大C盘").min_size(button_size),
+                    );
+                }
+
                 ui.end_row();
             });
 
@@ -289,6 +306,7 @@ impl App {
         self.render_nvidia_uninstall_dialog(ui);
         self.render_partition_copy_dialog(ui);
         self.render_quick_partition_dialog(ui);
+        self.render_expand_c_dialog(ui);
         self.render_image_verify_dialog(ui);
         self.render_repair_boot_dialog(ui);
         self.render_bitlocker_manage_dialog(ui);

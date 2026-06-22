@@ -141,6 +141,9 @@ fn main() -> eframe::Result<()> {
             Some(OperationType::Backup) => {
                 log::info!("检测到备份配置，启动GUI备份界面...");
             }
+            Some(OperationType::Expand) => {
+                log::info!("检测到扩容配置，启动GUI扩容界面...");
+            }
             None => {
                 log::warn!("未检测到配置文件，启动默认界面...");
                 show_error_message("未检测到安装或备份配置文件。\n\n请确保已正确准备配置文件后重试。");

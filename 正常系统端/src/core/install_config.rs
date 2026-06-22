@@ -150,6 +150,17 @@ pub struct BackupConfig {
     pub wim_engine: u8,
 }
 
+/// 无损扩容配置：进 PE 后无损扩大目标分区（通常为当前系统盘 C:）。
+#[derive(Debug, Clone, Default)]
+pub struct ExpandConfig {
+    /// 要扩大的目标分区（如 "C:"）。
+    pub target_partition: String,
+    /// 期望的最终总大小（MB）；0 表示尽可能扩到最大。
+    pub target_size_mb: u64,
+    /// WIM 引擎选择（随重启传给 PE，保持与其它流程一致）：0=libwim，1=wimgapi。
+    pub wim_engine: u8,
+}
+
 /// 配置文件管理器
 pub struct ConfigFileManager;
 
@@ -158,9 +169,12 @@ impl ConfigFileManager {
     const INSTALL_MARKER: &'static str = "LetRecovery_Install.marker";
     const BACKUP_MARKER: &'static str = "LetRecovery_Backup.marker";
     
+    const EXPAND_MARKER: &'static str = "LetRecovery_Expand.marker";
+
     /// 配置文件名
     const INSTALL_CONFIG: &'static str = "LetRecovery_Install.ini";
     const BACKUP_CONFIG: &'static str = "LetRecovery_Backup.ini";
+    const EXPAND_CONFIG: &'static str = "LetRecovery_Expand.ini";
     
     /// PE文件目录名
     const PE_DIR: &'static str = "LetRecovery_PE";
@@ -259,6 +273,32 @@ impl ConfigFileManager {
         println!("[CONFIG] 安装配置已写入: {}", config_path);
         println!("[CONFIG] 安装标记已写入: {}", marker_path);
 
+        Ok(())
+    }
+
+    /// 写入无损扩容配置：在目标分区写 marker，在数据分区的数据目录写 ini。
+    /// 扩容不格式化目标分区，故 data_partition 可直接用目标分区本身（如 "C:"）。
+    pub fn write_expand_config(
+        target_partition: &str,
+        data_partition: &str,
+        config: &ExpandConfig,
+    ) -> Result<()> {
+        let data_dir = format!("{}\\{}", data_partition, Self::DATA_DIR);
+        std::fs::create_dir_all(&data_dir).context("创建数据目录失败")?;
+
+        let marker_path = format!("{}\\{}", target_partition, Self::EXPAND_MARKER);
+        std::fs::write(&marker_path, "LetRecovery Expand Marker")
+            .context("写入扩容标记文件失败")?;
+
+        let config_path = format!("{}\\{}", data_dir, Self::EXPAND_CONFIG);
+        let content = format!(
+            "[Expand]\r\nTargetPartition={}\r\nTargetSizeMb={}\r\nWimEngine={}\r\n",
+            config.target_partition, config.target_size_mb, config.wim_engine
+        );
+        std::fs::write(&config_path, &content).context("写入扩容配置文件失败")?;
+
+        println!("[CONFIG] 扩容配置已写入: {}", config_path);
+        println!("[CONFIG] 扩容标记已写入: {}", marker_path);
         Ok(())
     }
 

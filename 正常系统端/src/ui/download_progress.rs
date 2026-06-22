@@ -92,6 +92,9 @@ impl App {
                     Some(crate::app::PeDownloadThenAction::Backup) => {
                         self.current_panel = crate::app::Panel::SystemBackup;
                     }
+                    Some(crate::app::PeDownloadThenAction::Expand) => {
+                        self.current_panel = crate::app::Panel::Tools;
+                    }
                     None => {
                         self.current_panel = crate::app::Panel::OnlineDownload;
                     }
@@ -289,6 +292,11 @@ impl App {
                                             self.start_backup_internal();
                                             self.current_panel = crate::app::Panel::BackupProgress;
                                         }
+                                        Some(crate::app::PeDownloadThenAction::Expand) => {
+                                            // 继续无损扩大C盘交接，并返回工具箱页面
+                                            self.current_panel = crate::app::Panel::Tools;
+                                            self.start_expand_pe_handoff();
+                                        }
                                         None => {
                                             self.current_panel = crate::app::Panel::OnlineDownload;
                                         }
@@ -328,6 +336,9 @@ impl App {
                                         Some(crate::app::PeDownloadThenAction::Backup) => {
                                             self.current_panel = crate::app::Panel::SystemBackup;
                                         }
+                                        Some(crate::app::PeDownloadThenAction::Expand) => {
+                                            self.current_panel = crate::app::Panel::Tools;
+                                        }
                                         None => {
                                             self.current_panel = crate::app::Panel::OnlineDownload;
                                         }
@@ -358,6 +369,9 @@ impl App {
                                         Some(crate::app::PeDownloadThenAction::Backup) => {
                                             self.current_panel = crate::app::Panel::SystemBackup;
                                         }
+                                        Some(crate::app::PeDownloadThenAction::Expand) => {
+                                            self.current_panel = crate::app::Panel::Tools;
+                                        }
                                         None => {
                                             self.current_panel = crate::app::Panel::OnlineDownload;
                                         }
@@ -378,6 +392,9 @@ impl App {
                                 }
                                 Some(crate::app::PeDownloadThenAction::Backup) => {
                                     self.current_panel = crate::app::Panel::SystemBackup;
+                                }
+                                Some(crate::app::PeDownloadThenAction::Expand) => {
+                                    self.current_panel = crate::app::Panel::Tools;
                                 }
                                 None => {
                                     self.current_panel = crate::app::Panel::OnlineDownload;
@@ -734,6 +751,9 @@ impl App {
                 }
                 Some(crate::app::PeDownloadThenAction::Backup) => {
                     self.current_panel = crate::app::Panel::SystemBackup;
+                }
+                Some(crate::app::PeDownloadThenAction::Expand) => {
+                    self.current_panel = crate::app::Panel::Tools;
                 }
                 None => {
                     self.current_panel = crate::app::Panel::OnlineDownload;

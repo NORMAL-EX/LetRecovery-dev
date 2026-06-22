@@ -74,6 +74,7 @@ impl App {
         let progress_state = Arc::new(Mutex::new(match operation_type {
             Some(OperationType::Install) => ProgressState::new_install(),
             Some(OperationType::Backup) => ProgressState::new_backup(),
+            Some(OperationType::Expand) => ProgressState::new_expand(),
             None => ProgressState::new_install(),
         }));
 
@@ -158,6 +159,9 @@ impl App {
                 }
                 Some(OperationType::Backup) => {
                     execute_backup_workflow(tx);
+                }
+                Some(OperationType::Expand) => {
+                    execute_expand_workflow(tx);
                 }
                 None => {
                     let _ = tx.send(WorkerMessage::Failed("未检测到安装或备份配置".to_string()));
@@ -631,6 +635,82 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
     log::info!("========== PE安装流程完成 ==========");
 
     // PE环境下安装完成后强制重启
+    log::info!("即将重启...");
+    std::thread::sleep(std::time::Duration::from_secs(3));
+    reboot_pe();
+}
+
+/// 执行无损扩容工作流（无损扩大系统盘，目前仅并入相邻未分配空间）。
+fn execute_expand_workflow(tx: Sender<WorkerMessage>) {
+    use crate::core::bcdedit::BootManager;
+    use crate::core::config::ConfigFileManager;
+    use crate::core::disk::DiskManager;
+
+    log::info!("========== 开始PE扩容流程 ==========");
+
+    // 找配置分区 + 读扩容配置
+    let data_partition = match ConfigFileManager::find_data_partition() {
+        Some(p) => p,
+        None => {
+            let _ = tx.send(WorkerMessage::Failed("未找到扩容配置文件".to_string()));
+            return;
+        }
+    };
+    let config = match ConfigFileManager::read_expand_config(&data_partition) {
+        Ok(c) => c,
+        Err(e) => {
+            let _ = tx.send(WorkerMessage::Failed(format!("读取扩容配置失败: {}", e)));
+            return;
+        }
+    };
+
+    // 用扩容标记定位目标分区（盘符在 PE 下可能与正常系统不同，不能直接用配置里的盘符）。
+    let target_partition = ConfigFileManager::find_expand_marker_partition()
+        .unwrap_or_else(|| config.target_partition.clone());
+    let letter = target_partition.trim_end_matches(':').chars().next().unwrap_or('C');
+
+    let _ = tx.send(WorkerMessage::SetStatus(format!(
+        "正在无损扩大分区 {}: （目标 {} MB，0=最大）...",
+        letter, config.target_size_mb
+    )));
+    let _ = tx.send(WorkerMessage::SetProgress(30));
+    log::info!("[EXPAND] 目标分区: {}:，目标大小: {} MB", letter, config.target_size_mb);
+
+    match DiskManager::expand_partition_lossless(letter, config.target_size_mb) {
+        Ok(msg) => {
+            log::info!("[EXPAND] {}", msg);
+            let _ = tx.send(WorkerMessage::SetStatus(msg));
+            let _ = tx.send(WorkerMessage::SetProgress(90));
+        }
+        Err(e) => {
+            log::error!("[EXPAND] 扩容失败: {}", e);
+            let _ = tx.send(WorkerMessage::Failed(format!("扩容失败: {}", e)));
+            // 失败也要清理标记/引导，避免下次重启又进 PE 反复尝试。
+            ConfigFileManager::cleanup_partition_markers(&target_partition);
+            ConfigFileManager::cleanup_data_dir(&data_partition);
+            let bm = BootManager::new();
+            let _ = bm.delete_current_boot_entry();
+            ConfigFileManager::cleanup_pe_dir(&data_partition);
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            reboot_pe();
+            return;
+        }
+    }
+
+    // 清理：标记 + 配置 + PE 引导项 + PE 文件，避免下次重启再次进入扩容。
+    let _ = tx.send(WorkerMessage::SetStatus("正在清理临时文件...".to_string()));
+    ConfigFileManager::cleanup_partition_markers(&target_partition);
+    ConfigFileManager::cleanup_data_dir(&data_partition);
+    let bm = BootManager::new();
+    if let Err(e) = bm.delete_current_boot_entry() {
+        log::warn!("[EXPAND] 删除 PE 引导项失败（不影响结果）: {}", e);
+    }
+    ConfigFileManager::cleanup_pe_dir(&data_partition);
+
+    let _ = tx.send(WorkerMessage::SetProgress(100));
+    let _ = tx.send(WorkerMessage::Completed);
+    log::info!("========== PE扩容流程完成 ==========");
+
     log::info!("即将重启...");
     std::thread::sleep(std::time::Duration::from_secs(3));
     reboot_pe();

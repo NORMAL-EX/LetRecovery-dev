@@ -456,7 +456,12 @@ pub struct App {
     pub quick_partition_disks_rx: Option<Receiver<Vec<crate::core::quick_partition::PhysicalDisk>>>,
     pub quick_partition_result_rx: Option<Receiver<crate::core::quick_partition::QuickPartitionResult>>,
     pub resize_existing_result_rx: Option<Receiver<crate::core::quick_partition::ResizePartitionResult>>,
-    
+
+    // 无损扩大C盘对话框
+    pub show_expand_c_dialog: bool,
+    pub expand_c_state: crate::ui::tools::ExpandCDialogState,
+    pub expand_c_load_rx: Option<Receiver<crate::ui::tools::expand_c::ExpandCLoadResult>>,
+
     // 镜像校验对话框
     pub show_image_verify_dialog: bool,
     pub image_verify_file_path: String,
@@ -658,6 +663,7 @@ pub enum SoftIconState {
 pub enum PeDownloadThenAction {
     Install,  // 继续安装
     Backup,   // 继续备份
+    Expand,   // 继续无损扩大C盘
 }
 
 /// BitLocker解锁模式
@@ -860,6 +866,10 @@ impl Default for App {
             quick_partition_disks_rx: None,
             quick_partition_result_rx: None,
             resize_existing_result_rx: None,
+            // 无损扩大C盘对话框
+            show_expand_c_dialog: false,
+            expand_c_state: crate::ui::tools::ExpandCDialogState::default(),
+            expand_c_load_rx: None,
             // 镜像校验对话框
             show_image_verify_dialog: false,
             image_verify_file_path: String::new(),
@@ -1826,6 +1836,8 @@ impl eframe::App for App {
             || self.partition_copy_copying
             || self.quick_partition_state.loading
             || self.quick_partition_state.executing
+            || self.expand_c_state.loading
+            || self.expand_c_state.executing
             || self.unattend_check_loading
             || self.install_bitlocker_loading
             || self.backup_bitlocker_loading;
