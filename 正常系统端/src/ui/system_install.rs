@@ -1555,14 +1555,58 @@ impl App {
         }
     }
 
-    /// 检测源镜像/安装介质是否自带无人值守应答（廉价的文件系统探测，不挂载 WIM）：
-    /// - XP/2003 i386 源：`<i386>\winnt.sif` 或介质根 `winnt.sif`（CD 无人值守约定位置）；
-    /// - 已挂载的 Windows 安装介质(ISO)：介质根 `autounattend.xml` / `unattend.xml`；
-    /// - 本地镜像文件：同目录下的 `autounattend.xml` / `unattend.xml`。
-    /// 检测结果写入 self.source_has_unattend 并据此刷新默认勾选。
+    /// 检测源镜像/安装介质是否自带无人值守应答，结果写入 self.source_has_unattend 并刷新默认勾选。
+    /// 两层探测，均不挂载：
+    /// 1) 文件系统层（detect_source_unattend）：i386\winnt.sif、介质根/镜像目录的 autounattend.xml 等；
+    /// 2) WIM 内置层（wim_has_embedded_unattend）：用 wimlib 读元数据查 WIM/ESD 内
+    ///    \Windows\Panther\unattend.xml 等（魔改/已 sysprep 镜像常见）。
     fn refresh_source_unattend(&mut self) {
-        self.source_has_unattend = Self::detect_source_unattend(&self.local_image_path);
+        let mut detected = Self::detect_source_unattend(&self.local_image_path);
+        if !detected {
+            let lower = self.local_image_path.to_lowercase();
+            if lower.ends_with(".wim") || lower.ends_with(".esd") || lower.ends_with(".swm") {
+                // 内置应答一般对所有版本一致，取首个可安装卷的索引探测即可。
+                let index = self
+                    .image_volumes
+                    .iter()
+                    .find(|v| Self::is_installable_image(v))
+                    .or_else(|| self.image_volumes.first())
+                    .map(|v| v.index)
+                    .unwrap_or(1);
+                detected = Self::wim_has_embedded_unattend(&self.local_image_path, index);
+            }
+        }
+        self.source_has_unattend = detected;
         self.apply_unattend_default();
+    }
+
+    /// 用 wimlib 廉价探测 WIM/ESD 卷内是否内置无人值守应答（只读元数据，不挂载）。
+    /// 失败/不可用时按"无"处理（不阻断流程）。
+    fn wim_has_embedded_unattend(image_file: &str, index: u32) -> bool {
+        const PATHS: [&str; 4] = [
+            "\\Windows\\Panther\\unattend.xml",
+            "\\Windows\\Panther\\Autounattend.xml",
+            "\\Windows\\System32\\Sysprep\\unattend.xml",
+            "\\unattend.xml",
+        ];
+        match lr_core::WimEngineManager::new_current() {
+            Ok(mgr) => match mgr.image_contains_any_path(image_file, index, &PATHS) {
+                Ok(found) => {
+                    if found {
+                        println!("[UNATTEND CHECK] WIM 卷内置无人值守应答 (index={})", index);
+                    }
+                    found
+                }
+                Err(e) => {
+                    println!("[UNATTEND CHECK] WIM 内置应答探测失败(忽略): {}", e);
+                    false
+                }
+            },
+            Err(e) => {
+                println!("[UNATTEND CHECK] WIM 引擎初始化失败(忽略): {}", e);
+                false
+            }
+        }
     }
 
     /// 见 refresh_source_unattend。纯函数，便于后台/同步调用。

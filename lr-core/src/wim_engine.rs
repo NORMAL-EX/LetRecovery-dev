@@ -114,6 +114,17 @@ impl WimEngineManager {
         self.active
     }
 
+    /// 只读：判断镜像某卷是否包含任意给定路径（始终走 libwim，仅读元数据、不挂载）。
+    /// 用于廉价探测内置应答文件等。与 apply/capture 的引擎选择无关。
+    pub fn image_contains_any_path(
+        &self,
+        image_file: &str,
+        index: u32,
+        paths: &[&str],
+    ) -> Result<bool, String> {
+        self.libwim.image_contains_any_path(image_file, index, paths)
+    }
+
     /// 应用/释放镜像；wimgapi 失败时回退 libwim。
     pub fn apply_image(
         &self,
