@@ -552,8 +552,24 @@ fn execute_pe_install(
     // 修复引导
     let boot_manager = core::bcdedit::BootManager::new();
     let use_uefi = detect_uefi_mode();
-    boot_manager.repair_boot_advanced(target_partition, use_uefi)?;
-    
+    // XP/2003 判定：配置标记 或 释放后缺少 \Windows\Boot（仅 Vista+ 才有）
+    let is_xp = config.is_xp
+        || !std::path::Path::new(&format!("{}\\Windows\\Boot", target_partition)).exists();
+    if is_xp {
+        if use_uefi {
+            println!("[PE INSTALL] XP/2003 + UEFI，写入 XP UEFI/GPT 引导");
+            if let Err(e) = boot_manager.write_xp_uefi_gpt_boot(target_partition) {
+                println!("[PE INSTALL] XP UEFI 引导失败({})，回退 Legacy(ntldr)", e);
+                boot_manager.write_xp_boot(target_partition)?;
+            }
+        } else {
+            println!("[PE INSTALL] XP/2003(Legacy)，写入 XP 引导(ntldr/boot.ini)");
+            boot_manager.write_xp_boot(target_partition)?;
+        }
+    } else {
+        boot_manager.repair_boot_advanced(target_partition, use_uefi)?;
+    }
+
     println!("[PE INSTALL] Step 5: 应用高级选项");
     // 应用高级选项
     let mut advanced_options = ui::advanced_options::AdvancedOptions::default();
@@ -569,8 +585,10 @@ fn execute_pe_install(
     advanced_options.import_storage_controller_drivers = config.import_storage_controller_drivers;
     advanced_options.custom_username = !config.custom_username.is_empty();
     advanced_options.username = config.custom_username.clone();
-    
-    let _ = advanced_options.apply_to_system(target_partition);
+    advanced_options.xp_inject_usb3_driver = config.xp_inject_usb3_driver;
+    advanced_options.xp_inject_nvme_driver = config.xp_inject_nvme_driver;
+
+    let _ = advanced_options.apply_to_system(target_partition, is_xp);
     
     // 生成无人值守配置
     if config.unattended {

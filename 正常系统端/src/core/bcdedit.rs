@@ -505,6 +505,30 @@ assign letter=S
             Err(e) => anyhow::bail!("XP 引导写入失败: {}", e),
         }
     }
+
+    /// 为已释放的「UEFI 化」XP/2003 系统写入 UEFI/GPT 引导（用映像自带 bootxp64.efi + BCC）。
+    ///
+    /// 查找同盘 ESP 并挂载，再复刻社区方案写 UEFI 引导。映像若不含 UEFI 引导文件，返回 Err
+    /// 让调用方回退 Legacy。
+    pub fn write_xp_uefi_gpt_boot(&self, windows_partition: &str) -> Result<()> {
+        println!("[BOOT] ========== 写入 XP UEFI/GPT 引导 ==========");
+        let esp = self
+            .find_esp_on_same_disk(windows_partition)
+            .or_else(|_| self.find_and_mount_esp())
+            .map_err(|e| anyhow::anyhow!("未找到 ESP，无法写 UEFI 引导: {}", e))?;
+        println!("[BOOT] 使用 ESP: {}", esp);
+        match lr_core::xp::write_xp_uefi_gpt_boot(
+            windows_partition,
+            &esp,
+            Path::new(&self.bcdedit_path),
+        ) {
+            Ok(out) => {
+                println!("[BOOT] XP UEFI 引导写入完成:\n{}", out);
+                Ok(())
+            }
+            Err(e) => anyhow::bail!("XP UEFI 引导写入失败: {}", e),
+        }
+    }
 }
 
 impl Default for BootManager {
