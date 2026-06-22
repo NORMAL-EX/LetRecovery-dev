@@ -7,7 +7,10 @@ use crate::core::dism::ImageInfo;
 
 /// ISO 挂载结果
 pub enum IsoMountResult {
+    /// 找到 Vista+ 安装镜像（install.wim/esd/swm 的完整路径）
     Success(String),
+    /// 识别为 XP/2003 的 i386 文本安装介质，携带挂载盘上的 i386 源目录（如 `F:\I386`）
+    XpI386(String),
     Error(String),
 }
 
@@ -99,6 +102,14 @@ impl App {
         // 显示ISO挂载错误
         if let Some(ref error) = self.iso_mount_error {
             ui.colored_label(egui::Color32::RED, format!("ISO 挂载失败: {}", error));
+        }
+
+        // 识别为 XP/2003 i386 文本安装介质的提示（原版 XP ISO 无 install.wim，走文本安装）
+        if self.xp_i386_source.is_some() {
+            ui.colored_label(
+                egui::Color32::from_rgb(0, 160, 0),
+                "已识别为 Windows XP/2003 i386 文本安装介质（仅支持 Legacy/MBR；重启后进入蓝底文本安装阶段）",
+            );
         }
 
         // 镜像分卷选择（过滤掉 WindowsPE 等非系统镜像）
@@ -606,6 +617,9 @@ impl App {
     }
 
     pub fn load_image_volumes(&mut self) {
+        // 切换镜像时先清掉上一次的 XP i386 识别状态（重新识别）
+        self.xp_i386_source = None;
+
         if self.local_image_path.to_lowercase().ends_with(".iso") {
             self.start_iso_mount();
             return;
@@ -679,6 +693,10 @@ impl App {
                     if let Some(image_path) = crate::core::iso::IsoMounter::find_install_image_in_drive(&drive) {
                         println!("[ISO MOUNT THREAD] 找到镜像: {}", image_path);
                         let _ = tx.send(IsoMountResult::Success(image_path));
+                    } else if let Some(i386_dir) = crate::core::iso::IsoMounter::xp_i386_dir(&drive) {
+                        // 无 \sources\install.wim/esd，但有 \I386(\AMD64) 文本安装结构 → XP/2003 介质
+                        println!("[ISO MOUNT THREAD] 识别为 XP/2003 i386 文本安装介质: {}", i386_dir);
+                        let _ = tx.send(IsoMountResult::XpI386(i386_dir));
                     } else {
                         println!("[ISO MOUNT THREAD] 未找到安装镜像");
                         let _ = tx.send(IsoMountResult::Error("ISO 中未找到 install.wim/esd".to_string()));
@@ -706,8 +724,19 @@ impl App {
                                 println!("[ISO MOUNT] 挂载完成，镜像路径: {}", image_path);
                                 self.local_image_path = image_path.clone();
                                 self.iso_mount_error = None;
+                                self.xp_i386_source = None;
                                 // 开始后台加载镜像信息
                                 self.start_image_info_loading(&image_path);
+                            }
+                            IsoMountResult::XpI386(i386_dir) => {
+                                // XP/2003 i386 文本安装介质：无 WIM 可枚举，参照 GHO 的处理方式——
+                                // 不加载分卷信息，合成单一可安装项（selected_volume=Some(0)）。
+                                println!("[ISO MOUNT] 识别为 XP/2003 i386 介质，i386 源: {}", i386_dir);
+                                self.local_image_path = i386_dir.clone();
+                                self.xp_i386_source = Some(i386_dir);
+                                self.iso_mount_error = None;
+                                self.image_volumes.clear();
+                                self.selected_volume = Some(0);
                             }
                             IsoMountResult::Error(error) => {
                                 println!("[ISO MOUNT] 挂载失败: {}", error);
@@ -1127,6 +1156,28 @@ impl App {
         }
         let partition = partition.unwrap();
 
+        // XP/2003 i386 文本安装介质的前置校验：
+        // (1) 仅 Legacy/BIOS + MBR——XP 不支持 GPT/UEFI 启动；
+        // (2) 不支持在运行中的系统上原地安装到当前系统盘（需进 PE）。
+        if self.xp_i386_source.is_some() {
+            let actual_mode =
+                Self::get_actual_boot_mode(self.selected_boot_mode, partition.partition_style);
+            if partition.partition_style == PartitionStyle::GPT || actual_mode == "UEFI" {
+                self.show_error(
+                    "原版 Windows XP/2003（i386 介质）仅支持 Legacy/BIOS + MBR 启动，无法安装到 GPT/UEFI 目标。\n\
+                     请将目标磁盘转换为 MBR 并以 Legacy 引导，或改用「UEFI 化的 XP x64 WIM 镜像」。",
+                );
+                return;
+            }
+            if !self.is_pe_environment() && partition.is_system_partition {
+                self.show_error(
+                    "从 XP i386 介质安装不支持在运行中的系统上原地安装到当前系统盘。\n\
+                     请先重启进入 PE 环境，再选择目标分区进行安装。",
+                );
+                return;
+            }
+        }
+
         // 1. 检查是否有需要解锁的 BitLocker 分区 (优先级最高)
         let locked_partitions = self.check_bitlocker_for_install();
         if !locked_partitions.is_empty() {
@@ -1177,12 +1228,15 @@ impl App {
             crate::app::InstallMode::ViaPE
         };
 
-        // XP/2003 检测（与下方 is_xp 一致）：选中镜像主版本号为 5。
-        let selected_is_xp = self
-            .selected_volume
-            .and_then(|i| self.image_volumes.get(i))
-            .map(|v| v.major_version == Some(5))
-            .unwrap_or(false);
+        // XP/2003 i386 文本安装介质（无 WIM 可枚举版本）。
+        let is_xp_i386 = self.xp_i386_source.is_some();
+        // XP/2003 检测（与下方 is_xp 一致）：选中镜像主版本号为 5，或 i386 文本安装介质。
+        let selected_is_xp = is_xp_i386
+            || self
+                .selected_volume
+                .and_then(|i| self.image_volumes.get(i))
+                .map(|v| v.major_version == Some(5))
+                .unwrap_or(false);
         // 即使用户没打开过高级面板，也在发起安装时按「检测到 XP」应用一次默认勾选
         // （注入USB3/NVMe）。已应用过则尊重用户手动取消，不覆盖。
         self.advanced_options.apply_xp_defaults_if_needed(selected_is_xp);
@@ -1201,12 +1255,10 @@ impl App {
             } else {
                 String::new()
             },
-            // XP/2003 检测：选中镜像主版本号为 5（WIM/ESD 可识别；GHO 由 PE 端按 \Windows\Boot 兜底判断）
-            is_xp: self
-                .selected_volume
-                .and_then(|i| self.image_volumes.get(i))
-                .map(|v| v.major_version == Some(5))
-                .unwrap_or(false),
+            // XP/2003 检测：选中镜像主版本号为 5（WIM/ESD 可识别；GHO 由 PE 端按 \Windows\Boot 兜底判断），
+            // 或 i386 文本安装介质（selected_is_xp 已并入 is_xp_i386）。
+            is_xp: selected_is_xp,
+            is_xp_i386,
             // 仅在 config.json 启用该功能时才让其生效
             run_diskpart_scripts: self.app_config.enable_diskpart_scripts
                 && self.run_diskpart_scripts,

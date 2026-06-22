@@ -179,6 +179,10 @@ pub struct InstallOptions {
     pub custom_unattend_path: String,
     /// 目标镜像是否为 XP/2003（NT 5.x）
     pub is_xp: bool,
+    /// 目标镜像为 XP/2003 的 i386 文本安装介质（无 install.wim，仅 \I386 文本安装结构）。
+    /// 为真时走 `lr_core::xp_i386::install_from_i386`（复制 i386 + 写 NTLDR/bootsect），
+    /// 跳过常规 WIM 释放/引导修复/高级选项。仅 Legacy/MBR。
+    pub is_xp_i386: bool,
     /// 是否在释放镜像前运行 diskpart 脚本
     pub run_diskpart_scripts: bool,
 }
@@ -215,6 +219,9 @@ pub struct App {
     pub local_image_path: String,
     pub image_volumes: Vec<ImageInfo>,
     pub selected_volume: Option<usize>,
+    /// 选择的镜像被识别为 Windows XP/2003 的 i386 文本安装介质时，
+    /// 这里存挂载 ISO 上的 i386 源目录（如 `F:\I386`）。非 None 即走 XP 文本安装路径。
+    pub xp_i386_source: Option<String>,
 
 
     // Win7检测日志去重（仅在结果变化时输出）
@@ -689,6 +696,7 @@ impl Default for App {
             local_image_path: String::new(),
             image_volumes: Vec::new(),
             selected_volume: None,
+            xp_i386_source: None,
             last_is_win7: None,
             last_is_uefi_mode: None,
             last_is_xp: None,

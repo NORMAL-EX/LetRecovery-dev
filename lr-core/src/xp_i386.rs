@@ -92,6 +92,24 @@ pub fn install_from_i386(
         .map_err(|e| format!("写 winnt.sif 失败: {}", e))?;
     log.push_str("已写入 winnt.sif 应答文件\n");
 
+    // 4.5) 标记目标分区为「活动分区」。Legacy/MBR BIOS 必须从活动分区加载 NTLDR；
+    //      本引擎只支持 Legacy/MBR（GPT/UEFI 目标由调用方拦截），故此处直接置活动。失败仅告警。
+    let letter = win.trim_end_matches(':');
+    match set_volume_active(letter) {
+        Ok(o) => {
+            log.push_str(&format!("已标记 {} 为活动分区\n", win));
+            let o = o.trim();
+            if !o.is_empty() {
+                log.push_str(o);
+                log.push('\n');
+            }
+        }
+        Err(e) => log.push_str(&format!(
+            "警告: 标记活动分区失败（{}）——Legacy 启动可能需手动把目标分区设为活动\n",
+            e
+        )),
+    }
+
     // 5) bootsect /nt52 写 XP 引导码（使引导扇区/MBR 加载 NTLDR）
     let bootsect = bin_dir.join("bootsect.exe");
     if bootsect.exists() {
@@ -111,6 +129,30 @@ pub fn install_from_i386(
 
     log.push_str("i386 硬盘文本安装准备完成，重启进入 XP 文本安装阶段。\n");
     Ok(log)
+}
+
+/// 用 diskpart 把指定盘符（如 `"C"`）的卷标记为「活动分区」。仅 MBR 有意义。
+fn set_volume_active(letter: &str) -> Result<String, String> {
+    use std::io::Write;
+    let script = format!("select volume {}\r\nactive\r\nexit\r\n", letter);
+    let tmp = std::env::temp_dir().join("lr_xp_set_active.txt");
+    {
+        let mut f =
+            std::fs::File::create(&tmp).map_err(|e| format!("创建 diskpart 脚本失败: {}", e))?;
+        f.write_all(script.as_bytes())
+            .map_err(|e| format!("写 diskpart 脚本失败: {}", e))?;
+    }
+    let tmp_str = tmp.to_string_lossy().into_owned();
+    let out = new_command("diskpart")
+        .args(["/s", tmp_str.as_str()])
+        .output()
+        .map_err(|e| format!("diskpart 执行失败: {}", e))?;
+    let _ = std::fs::remove_file(&tmp);
+    let so = gbk_to_utf8(&out.stdout);
+    if !out.status.success() {
+        return Err(format!("diskpart 返回非 0: {}", so.trim()));
+    }
+    Ok(so)
 }
 
 /// 把 txtsetup.sif 的 `[SetupData]` 节里 `SetupSourcePath` 设为 `"\$WIN_NT$.~LS\"`。

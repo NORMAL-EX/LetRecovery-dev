@@ -312,6 +312,40 @@ impl App {
             }
             std::thread::sleep(std::time::Duration::from_millis(100));
 
+            // XP/2003 i386 文本安装介质：不释放 WIM，改为从 i386 源准备「硬盘文本安装」
+            // （复制 i386 → 目标盘 $WIN_NT$.~LS、写 NTLDR(setupldr)/NTDETECT/txtsetup.sif/winnt.sif、
+            // bootsect /nt52 写 XP 引导）。引擎自行写引导，且此刻系统文件尚未释放（重启进文本安装
+            // 阶段才复制），因此跳过 导出/导入驱动、引导修复、应用高级选项 等后续步骤。仅 Legacy/MBR。
+            if options.is_xp_i386 {
+                send_step(&progress_tx, 2, "导出驱动", 100); // 跳过（XP 文本安装阶段不适用）
+                send_step(&progress_tx, 3, "释放系统镜像", 0);
+                let i386_src = std::path::PathBuf::from(&image_path);
+                let bin_dir = crate::utils::path::get_bin_dir();
+                println!(
+                    "[INSTALL i386] 从 {} 准备 XP/2003 文本安装到 {}",
+                    i386_src.display(),
+                    target_partition
+                );
+                match lr_core::xp_i386::install_from_i386(&i386_src, &target_partition, &bin_dir) {
+                    Ok(log) => {
+                        println!("[INSTALL i386] 文本安装准备完成:\n{}", log);
+                        send_step(&progress_tx, 3, "释放系统镜像", 100);
+                        send_step(&progress_tx, 4, "导入驱动", 100);
+                        send_step(&progress_tx, 5, "修复引导", 100);
+                        send_step(&progress_tx, 6, "应用高级选项", 100);
+                        send_step(&progress_tx, 7, "完成安装", 100);
+                        println!("[INSTALL i386] 完成。重启后进入 XP/2003 蓝底文本安装阶段。");
+                    }
+                    Err(e) => {
+                        println!("[INSTALL i386] 失败: {}", e);
+                        // install_error 当前未被写入（ERROR: 状态不显示），这里把失败原因放进
+                        // 步骤名，让 UI「当前步骤」可见，并停在未完成态（用户可点「取消安装」）。
+                        send_step(&progress_tx, 3, &format!("XP 文本安装准备失败：{}", e), 0);
+                    }
+                }
+                return;
+            }
+
             // Step 2: 导出驱动
             send_step(&progress_tx, 2, "导出驱动", 0);
             std::thread::sleep(std::time::Duration::from_millis(50));
