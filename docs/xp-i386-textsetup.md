@@ -1,8 +1,9 @@
 # 原版 Windows XP / 2003（i386 介质）硬盘文本安装
 
 针对**原版 XP/2003 安装盘**（根目录是 `\I386`、没有 `\sources\install.wim` 的那种）。
-这种介质无法像 Win7+ 那样「释放 WIM」，LetRecovery 参考 WinNTSetup 等成熟工具的
-「无光驱硬盘装 XP」做法，实现于 `lr-core/src/xp_i386.rs`（`install_from_i386`）。
+这种介质无法像 Win7+ 那样「释放 WIM」，LetRecovery **照搬成熟工具 DSI-安装备份（PECMD
+`dsi.WCS`）的 NT5 硬盘安装做法**——即微软 `winnt32 /makelocalsource` 原生的
+`$WIN_NT$.~LS` + `$WIN_NT$.~BT` 约定，实现于 `lr-core/src/xp_i386.rs`（`install_from_i386`）。
 
 ## 识别
 
@@ -17,25 +18,34 @@
 1. **可写探测（带重试）**：先确认 `WIN\` 此刻真的可建目录。刚格式化完盘符可能短暂
    卸载/重挂，过去会在下一步 `create_dir` 抛裸 `os error 3（系统找不到指定的路径）`；
    现在带 ~5s 重试，过不了就给出可读原因（盘符未挂载 / 非 NTFS / GPT 等）。
-2. **本地源**：`xcopy i386` → `WIN\$WIN_NT$.~LS\I386`。
-3. **根引导文件**：`setupldr.bin` → `WIN\NTLDR`（开机直接进文本安装）；
-   `ntdetect.com` → `WIN\NTDETECT.COM`；源里若有 `biosinfo.inf` / `bootfont.bin` 一并落根。
-4. **txtsetup.sif**：拷到 `WIN\txtsetup.sif`，把 `[SetupData] SetupSourcePath` 改成
-   `"\$WIN_NT$.~LS\"`，让文本安装从本地源取文件。
-5. **winnt.sif 应答**（见下）→ `WIN\winnt.sif`。
-6. **置活动分区**（diskpart `active`）+ **`bootsect /nt52 WIN /mbr /force`** 写 XP 引导码。
+2. **本地源**：`xcopy <arch>`（I386/AMD64）→ `WIN\$WIN_NT$.~LS\<arch>`；建空 `$WIN_NT$.~LS\$OEM$`。
+3. **`$WIN_NT$.~BT`（BootPath）**：拷 `<arch>\SYSTEM32` 整目录 → `$WIN_NT$.~BT\SYSTEM32`；
+   按内嵌清单 `xp_nt5_bootfiles.txt`（照搬 DSI `nt5\NT5.txt`，~150 文件）把 `<arch>\<名>`
+   **原样**（压缩名 `.SY_/.DL_/.EX_` 不解压，setupdd 自理）复制进 `$WIN_NT$.~BT\`。源里缺的条目跳过。
+4. **根引导文件**：`setupldr.bin` → `WIN\NTLDR`（开机直接进文本安装）；`ntdetect.com` →
+   `WIN\NTDETECT.COM`；源里若有 `biosinfo.inf` / `bootfont.bin` 一并落根。
+5. **txtsetup.sif**：做文本期驱动集成后，写 `$WIN_NT$.~BT\TXTSETUP.SIF`（setupldr 实际读这份）
+   与根 `WIN\TXTSETUP.SIF` 各一份。**不改 `SetupSourcePath`**（靠 `MsDosInitiated=1` +
+   `$WIN_NT$.~BT` 约定，setupdd 自会用 `$WIN_NT$.~LS` 作源）。
+6. **winnt.sif 应答**（见下）→ `$WIN_NT$.~BT\WINNT.SIF`。
+7. **置活动分区**（diskpart `active`）+ **`bootsect /nt52 WIN /mbr /force`** 写 XP 引导码。
 
-重启 → 蓝底文本安装 → 复制文件 → 再次重启 → 图形安装。
+重启 → setupldr 据 `$WIN_NT$.~BT` 进入蓝底文本安装 → 复制文件 → 再次重启 → 图形安装。
 
 ## 无人值守（winnt.sif）
+
+**强制键（照搬 DSI `NT5部署无人值守`）**：无论内置生成还是用户自定义 `.sif`，落盘前都强制写入
+硬盘安装必需的 5 个键——`MsDosInitiated=1`、`Floppyless=1`、`AutoPartition=0`、
+`UnattendedInstall=Yes`、`OemPreinstall=Yes`。其中 **`MsDosInitiated=1` 是关键**：声明「从已有
+系统/硬盘启动、非光盘引导」，缺它文本安装会去找光盘而失败（DSI 模板里是 `"0"`，部署时被强制改 `1`）。
 
 | 是否放 `bin\xp\productkey.txt` | UnattendMode | 行为 |
 |---|---|---|
 | 否（默认） | `DefaultHide` | 跳过 EULA/区域/欢迎、忽略驱动签名、管理员空密码+首次自动登录；图形阶段**只在「产品密钥」页停一下**，其余全自动 |
 | 是 | `FullUnattended` | 全程不停顿，真·全自动 |
 
-统一项：`Floppyless=1`、`OemSkipEula=Yes`、`DriverSigningPolicy=Ignore`（不拦未签名/注入的
-存储驱动）、`TargetPath=\WINDOWS`、`Repartition=No`、`FileSystem=*`（沿用已格式化的盘，不重新分区/格式化）。
+统一项：`UnattendSwitch=Yes`、`OemSkipEula=Yes`、`DriverSigningPolicy=Ignore`（不拦未签名/注入的
+存储驱动）、`TargetPath=\WINDOWS`、`FileSystem=LeaveAlone`（沿用已格式化的盘，不动文件系统）。
 
 > 工具**不内置产品密钥**。要全自动就自己在 `bin\xp\productkey.txt` 放一行与所装版本/渠道匹配的密钥。
 > 出于安全，文本阶段仍由用户确认「装到哪个分区」（`AutoPartition=0`），不自动选盘以免抹错盘。
@@ -73,8 +83,11 @@ README。`.inf` 信息不全的目录会被静默跳过。
 
 ## 改动文件
 
-- `lr-core/src/xp_i386.rs`：`install_from_i386`——可写探测+重试、完整根引导文件、健壮
-  `winnt.sif`、可选产品密钥、可选自定义 winnt.sif、源子目录 arch-aware、调用文本期驱动集成。
+- `lr-core/src/xp_i386.rs`：`install_from_i386` 照搬 DSI 的 `$WIN_NT$.~LS`+`$WIN_NT$.~BT` 法——
+  可写探测+重试、建 `$OEM$`、按清单建 `$WIN_NT$.~BT`、强制 `MsDosInitiated=1` 等 5 键、
+  `WINNT.SIF`/`TXTSETUP.SIF` 落 `$WIN_NT$.~BT`、源子目录 arch-aware、可选产品密钥/自定义应答。
+- `lr-core/src/xp_nt5_bootfiles.txt`：**新增**——`$WIN_NT$.~BT` 引导文件清单（编译期 `include_str!`
+  嵌入，照搬 DSI `nt5\NT5.txt`）。
 - `lr-core/src/xp_textmode_drv.rs`：**新增**——解析驱动 `.inf` + 合并 txtsetup.sif 的文本期
   存储驱动集成（含单元测试）。
 - `正常系统端/src/ui/install_progress.rs`：`format_partition` 修无效 `/Y`（改管道确认）；

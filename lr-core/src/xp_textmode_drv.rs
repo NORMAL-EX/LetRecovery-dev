@@ -100,9 +100,11 @@ pub fn parse_driver_inf(inf: &Path) -> Option<TxtmodeDriver> {
     })
 }
 
-/// 把驱动拷进源（`source_sub`，如 `C:\$WIN_NT$.~LS\I386`）并合并进 `txtsetup`。
+/// 把驱动拷进各目标目录（`copy_dirs`，如源 `$WIN_NT$.~LS\I386` 与引导 `$WIN_NT$.~BT`）
+/// 并合并进 `txtsetup`。文本期 miniport 既要在源里（GUI 阶段取文件）也要在 `$WIN_NT$.~BT`
+/// 里（文本启动阶段加载认盘），故 `.sys` 拷进所有 `copy_dirs`。
 /// 返回（合并后的 txtsetup.sif 内容, 日志）。
-pub fn integrate(txtsetup: &str, drivers: &[TxtmodeDriver], source_sub: &Path) -> (String, String) {
+pub fn integrate(txtsetup: &str, drivers: &[TxtmodeDriver], copy_dirs: &[&Path]) -> (String, String) {
     let mut log = String::new();
     if drivers.is_empty() {
         log.push_str("[TXTDRV] 未发现可集成的文本期存储驱动（跳过）\n");
@@ -115,19 +117,27 @@ pub fn integrate(txtsetup: &str, drivers: &[TxtmodeDriver], source_sub: &Path) -
     let mut hwid_db: Vec<String> = Vec::new();
 
     for d in drivers {
-        // 1) 拷所有 .sys 进源（覆盖同名——让魔改 storport.sys 替换原版）。
+        // 1) 拷所有 .sys 进每个目标目录（覆盖同名——让魔改 storport.sys 替换原版）。
         for sys in &d.sys_files {
             let name = match sys.file_name().and_then(|s| s.to_str()) {
                 Some(n) => n.to_string(),
                 None => continue,
             };
-            let dst = source_sub.join(&name);
-            match std::fs::copy(sys, &dst) {
-                Ok(_) => log.push_str(&format!("[TXTDRV] 拷入源: {}\n", name)),
-                Err(e) => {
-                    log.push_str(&format!("[TXTDRV] 警告: 拷入 {} 失败: {}\n", name, e));
-                    continue;
+            let mut copied_any = false;
+            for dir in copy_dirs {
+                let dst = dir.join(&name);
+                match std::fs::copy(sys, &dst) {
+                    Ok(_) => copied_any = true,
+                    Err(e) => log.push_str(&format!(
+                        "[TXTDRV] 警告: 拷 {} → {} 失败: {}\n",
+                        name,
+                        dir.display(),
+                        e
+                    )),
                 }
+            }
+            if copied_any {
+                log.push_str(&format!("[TXTDRV] 拷入 {} 个目标: {}\n", copy_dirs.len(), name));
             }
             // [SourceDisksFiles] 仅在原 txtsetup 没有该键时加（避免与原版 storport.sys 等重复键）。
             if !section_has_key(txtsetup, "[SourceDisksFiles]", &name) {
@@ -462,7 +472,7 @@ ServiceBinary  = %12%\\stornvme.sys
             hwids: vec!["PCI\\CC_010601".into()],
             sys_files: vec![], // 无文件可拷（测纯合并；拷贝在真实路径做）
         };
-        let (out, _log) = integrate(ts, &[drv], Path::new("/nonexistent-source"));
+        let (out, _log) = integrate(ts, &[drv], &[Path::new("/nonexistent-source")]);
         assert!(out.contains("[SCSI.Load]\r\ngenahci = genahci.sys,4"));
         assert!(out.contains("genahci = \"genahci (LetRecovery textmode)\""));
         assert!(out.contains("PCI\\CC_010601 = \"genahci\""));
