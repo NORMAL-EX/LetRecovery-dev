@@ -579,3 +579,26 @@ pub fn validate_unattend_xml(xml: &str) -> Result<(), String> {
 
     Ok(())
 }
+
+/// XP/2003 的 winnt.sif 应答轻校验。
+///
+/// winnt.sif 是 INI 风格(不是 XML),只做基本健全性检查:非空、且至少含一个
+/// XP 应答常见节(`[Unattended]` / `[Data]` / `[GuiUnattended]` / `[UserData]`)。
+/// 返回 Ok(()) 表示看起来是有效的 winnt.sif；Err(msg) 给出可展示的原因。
+pub fn validate_winnt_sif(content: &str) -> Result<(), String> {
+    let s = content.trim_start_matches('\u{feff}');
+    if s.trim().is_empty() {
+        return Err("文件内容为空".to_string());
+    }
+    let lower = s.to_ascii_lowercase();
+    let has_section = ["[unattended]", "[data]", "[guiunattended]", "[userdata]"]
+        .iter()
+        .any(|sec| lower.contains(sec));
+    if !has_section {
+        return Err(
+            "不像有效的 winnt.sif(缺少 [Unattended]/[Data]/[GuiUnattended] 等节)。XP/2003 应答文件为 INI 格式的 winnt.sif,不是 XML。"
+                .to_string(),
+        );
+    }
+    Ok(())
+}

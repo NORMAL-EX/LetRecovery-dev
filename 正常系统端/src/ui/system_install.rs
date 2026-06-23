@@ -350,17 +350,30 @@ impl App {
             ui.horizontal(|ui| {
                 ui.label("自定义无人值守:");
                 if ui.button("选择文件…").clicked() {
-                    if let Some(path) = rfd::FileDialog::new()
-                        .add_filter("无人值守文件", &["xml"])
-                        .pick_file()
-                    {
+                    // XP/2003 i386 介质的应答文件是 winnt.sif(INI),不是 Vista+ 的 unattend.xml。
+                    // 据所选介质切换筛选器与校验方式,否则 *.xml 筛选会把 .sif 全过滤掉(列表空)。
+                    let is_xp = self.xp_i386_source.is_some();
+                    let mut dlg = rfd::FileDialog::new();
+                    if is_xp {
+                        dlg = dlg
+                            .add_filter("XP 应答文件 winnt.sif", &["sif"])
+                            .add_filter("所有文件", &["*"]);
+                    } else {
+                        dlg = dlg
+                            .add_filter("无人值守文件", &["xml"])
+                            .add_filter("所有文件", &["*"]);
+                    }
+                    if let Some(path) = dlg.pick_file() {
                         let p = path.to_string_lossy().to_string();
                         match std::fs::read_to_string(&path) {
                             Ok(content) => {
                                 self.custom_unattend_path = p;
-                                self.custom_unattend_error =
+                                self.custom_unattend_error = if is_xp {
+                                    crate::core::install_config::validate_winnt_sif(&content).err()
+                                } else {
                                     crate::core::install_config::validate_unattend_xml(&content)
-                                        .err();
+                                        .err()
+                                };
                             }
                             Err(e) => {
                                 self.custom_unattend_path = p;

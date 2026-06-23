@@ -37,10 +37,13 @@ pub fn is_valid_i386(dir: &Path) -> bool {
 /// - `i386_src`：i386 目录（如挂载 ISO 的 `G:\I386`，或已复制到数据分区的副本）。
 /// - `win_partition`：目标系统盘（如 `"C:"`），需已格式化且为目标磁盘的主分区。
 /// - `bin_dir`：程序 bin 目录（取 `bootsect.exe`；可选 `bin\xp\productkey.txt` 提供产品密钥实现全自动）。
+/// - `custom_sif`：用户自定义的 winnt.sif 应答文件路径；`Some` 且存在时直接用它（原样写入，
+///   规整为 CRLF），否则用内置生成的应答（按是否有产品密钥决定 DefaultHide/FullUnattended）。
 pub fn install_from_i386(
     i386_src: &Path,
     win_partition: &str,
     bin_dir: &Path,
+    custom_sif: Option<&Path>,
 ) -> Result<String, String> {
     let win = win_partition.trim_end_matches('\\'); // "C:"
     let mut log = String::new();
@@ -115,19 +118,33 @@ pub fn install_from_i386(
         .map_err(|e| format!("写 txtsetup.sif 失败: {e}"))?;
     log.push_str("已写入 txtsetup.sif（SetupSourcePath=\\$WIN_NT$.~LS\\）\n");
 
-    // 4) winnt.sif 应答（尽量全无人值守；有产品密钥则全自动）
-    let product_key = read_product_key(bin_dir);
-    match &product_key {
-        Some(_) => log.push_str("检测到产品密钥（bin\\xp\\productkey.txt）→ 全自动无人值守\n"),
-        None => log.push_str(
-            "未提供产品密钥（可放 bin\\xp\\productkey.txt 实现全自动）→ 仅「密钥」页停顿，其余无人值守\n",
-        ),
-    }
-    std::fs::write(
-        format!("{win}\\winnt.sif"),
-        winnt_sif(product_key.as_deref()).as_bytes(),
-    )
-    .map_err(|e| format!("写 winnt.sif 失败: {e}"))?;
+    // 4) winnt.sif 应答：优先用用户自定义的 .sif；否则用内置生成（有产品密钥则全自动）。
+    let sif_content = match custom_sif {
+        Some(p) if p.exists() => {
+            let raw = std::fs::read(p)
+                .map_err(|e| format!("读自定义 winnt.sif 失败 {}: {e}", p.display()))?;
+            let s = match String::from_utf8(raw.clone()) {
+                Ok(s) => s,
+                Err(_) => gbk_to_utf8(&raw),
+            };
+            log.push_str(&format!("使用自定义无人值守应答: {}\n", p.display()));
+            normalize_crlf(&s)
+        }
+        _ => {
+            let product_key = read_product_key(bin_dir);
+            match &product_key {
+                Some(_) => {
+                    log.push_str("检测到产品密钥（bin\\xp\\productkey.txt）→ 全自动无人值守\n")
+                }
+                None => log.push_str(
+                    "未提供产品密钥（可放 bin\\xp\\productkey.txt 实现全自动）→ 仅「密钥」页停顿，其余无人值守\n",
+                ),
+            }
+            winnt_sif(product_key.as_deref())
+        }
+    };
+    std::fs::write(format!("{win}\\winnt.sif"), sif_content.as_bytes())
+        .map_err(|e| format!("写 winnt.sif 失败: {e}"))?;
     log.push_str("已写入 winnt.sif 应答文件\n");
 
     // 4.5) 标记目标分区为「活动分区」。Legacy/MBR BIOS 必须从活动分区加载 NTLDR；
@@ -236,6 +253,16 @@ fn read_product_key(bin_dir: &Path) -> Option<String> {
         }
     }
     None
+}
+
+/// 把任意换行规整为 CRLF（winnt.sif 应为 DOS 换行；用户自定义文件可能是 LF）。
+fn normalize_crlf(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 16);
+    for line in s.split('\n') {
+        out.push_str(line.strip_suffix('\r').unwrap_or(line));
+        out.push_str("\r\n");
+    }
+    out
 }
 
 /// 用 diskpart 把指定盘符（如 `"C"`）的卷标记为「活动分区」。仅 MBR 有意义。
@@ -380,6 +407,13 @@ mod tests {
         assert!(out.contains("SetupSourcePath = \"\\$WIN_NT$.~LS\\\""));
         // 原 BootPath 行保留
         assert!(out.contains("BootPath = \"\\$WIN_NT$.~BT\""));
+    }
+
+    #[test]
+    fn normalize_crlf_converts_lf_and_keeps_crlf() {
+        assert_eq!(normalize_crlf("a\nb"), "a\r\nb\r\n");
+        assert_eq!(normalize_crlf("a\r\nb\r\n"), "a\r\nb\r\n\r\n");
+        assert_eq!(normalize_crlf("[Data]\nAutoPartition=0"), "[Data]\r\nAutoPartition=0\r\n");
     }
 
     #[test]

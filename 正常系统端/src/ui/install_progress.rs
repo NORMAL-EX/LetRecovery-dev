@@ -321,12 +321,23 @@ impl App {
                 send_step(&progress_tx, 3, "释放系统镜像", 0);
                 let i386_src = std::path::PathBuf::from(&image_path);
                 let bin_dir = crate::utils::path::get_bin_dir();
+                // 用户自定义无人值守(XP 为 winnt.sif)：非空则传给引擎，原样覆盖内置生成的应答。
+                let custom_sif = if options.custom_unattend_path.is_empty() {
+                    None
+                } else {
+                    Some(std::path::PathBuf::from(&options.custom_unattend_path))
+                };
                 println!(
                     "[INSTALL i386] 从 {} 准备 XP/2003 文本安装到 {}",
                     i386_src.display(),
                     target_partition
                 );
-                match lr_core::xp_i386::install_from_i386(&i386_src, &target_partition, &bin_dir) {
+                match lr_core::xp_i386::install_from_i386(
+                    &i386_src,
+                    &target_partition,
+                    &bin_dir,
+                    custom_sif.as_deref(),
+                ) {
                     Ok(log) => {
                         println!("[INSTALL i386] 文本安装准备完成:\n{}", log);
                         send_step(&progress_tx, 3, "释放系统镜像", 100);
