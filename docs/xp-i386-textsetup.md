@@ -40,18 +40,46 @@
 > 工具**不内置产品密钥**。要全自动就自己在 `bin\xp\productkey.txt` 放一行与所装版本/渠道匹配的密钥。
 > 出于安全，文本阶段仍由用户确认「装到哪个分区」（`AutoPartition=0`），不自动选盘以免抹错盘。
 
+## 文本期存储驱动集成（arch-aware）
+
+让文本安装（蓝底）阶段就能认 AHCI/NVMe，实现于 `lr-core/src/xp_textmode_drv.rs`，由
+`install_from_i386` 在写 txtsetup.sif 时调用。做法（nLite/WinNTSetup 那一套）：
+
+1. 据源目录名判架构：`\I386`→x86、`\AMD64`→amd64，本地源也拷到 `$WIN_NT$.~LS\<同名>`。
+2. 按架构扫描驱动目录：
+   - x86（32 位 XP）：`bin\drivers\xp\x86\`
+   - amd64（64 位 XP/2003）：`bin\drivers\xp\amd64\` + 随包的 `bin\drivers\xp\ahci`、`nvme`
+     （魔改 genahci/stornvme，**x64**）
+3. 逐个解析 `.inf`：取服务名、miniport 的 `.sys`、硬件 ID（`PCI\...`）；目录里所有 `.sys`
+   （含 storport/ntoskrn8 依赖）拷进源。
+4. 合并进 txtsetup.sif：`[SourceDisksFiles]`（缺键才加，避免与原版 storport.sys 重复）、
+   `[SCSI.Load]`、`[SCSI]`、`[HardwareIdsDatabase]`。文本引擎据此加载驱动认盘并登记进系统。
+
+用户可自行往 `bin\drivers\xp\<arch>\` 丢驱动（每个驱动一个子目录，含 .inf+.sys），见各目录
+README。`.inf` 信息不全的目录会被静默跳过。
+
+> 架构必须匹配：随包的 genahci/stornvme 是 **x64**，只对 64 位 XP/2003（\AMD64）文本安装生效；
+> **32 位 XP（i386）需要 32 位驱动**（自行放 `x86\`）。32 位 XP 的现代 NVMe 驱动基本没有，
+> 多数 SATA 机器把 BIOS 的 SATA 模式切 IDE/Compatibility 即可免驱动安装。
+
 ## 边界 / 已知限制
 
 - **仅 Legacy/BIOS + MBR**。XP 不支持 GPT/UEFI——调用方在发起安装时已拦截 GPT/UEFI 目标。
 - 不支持在「正在运行的系统盘」上原地安装，需先进 PE。
-- 暂未做**文本阶段大容量存储驱动集成**（把 NVMe/AHCI 驱动并入 txtsetup.sif）。若目标机的
-  系统盘挂在原版 XP 不自带驱动的控制器上（如 NVMe），文本阶段可能找不到硬盘——这类机器
-  请改用「已 UEFI 化的 XP x64 WIM 镜像」路径（见 `docs/xp-gpt-uefi.md`）。
+- 未替换 `ntoskrnl.exe`（魔改 `ntoskrn8.sys` 仅随驱动拷入，与 WIM 路 `inject_xp_drivers`
+  行为一致）。文本期驱动集成的 txtsetup.sif 字段采用 MS 自带 boot 存储驱动（atapi 等）的模板，
+  实机若仍认不到盘，请回报日志（含 `[TXTDRV]` 行）以便迭代。
+- 现代 NVMe 机器更推荐「已 UEFI 化的 XP x64 WIM 镜像」路径（见 `docs/xp-gpt-uefi.md`）。
 
 ## 改动文件
 
-- `lr-core/src/xp_i386.rs`：重写 `install_from_i386`（可写探测+重试、完整根引导文件、
-  健壮 `winnt.sif`、可选产品密钥）；新增单元测试。
-- `正常系统端/src/ui/install_progress.rs`：修复 `format_partition` 的无效 `/Y` 开关
-  （改管道确认，真正完成格式化）。
-- `bin/xp/README.txt`：可选产品密钥说明；`.github/workflows/build-and-release.yml`：打包 `bin/xp/`。
+- `lr-core/src/xp_i386.rs`：`install_from_i386`——可写探测+重试、完整根引导文件、健壮
+  `winnt.sif`、可选产品密钥、可选自定义 winnt.sif、源子目录 arch-aware、调用文本期驱动集成。
+- `lr-core/src/xp_textmode_drv.rs`：**新增**——解析驱动 `.inf` + 合并 txtsetup.sif 的文本期
+  存储驱动集成（含单元测试）。
+- `正常系统端/src/ui/install_progress.rs`：`format_partition` 修无效 `/Y`（改管道确认）；
+  i386 分支把自定义无人值守路径传入引擎。
+- `正常系统端/src/ui/system_install.rs` + `core/install_config.rs`：自定义无人值守对 XP 用
+  `*.sif` 筛选 + `validate_winnt_sif` 校验。
+- `bin/xp/README.txt`（可选产品密钥）、`bin/drivers/xp/{x86,amd64}/README.txt`（用户驱动目录）；
+  `.github/workflows/build-and-release.yml`：打包 `bin/xp/` 与整个 `bin/drivers/xp/`。

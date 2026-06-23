@@ -24,6 +24,7 @@ pub mod wimlib;
 pub mod wimlib_dll;
 pub mod xp;
 pub mod xp_i386;
+pub mod xp_textmode_drv;
 
 pub use wim_engine::{active_engine, set_active_engine, WimEngine, WimEngineManager};
 pub use wimlib_dll::ensure_dll_available;

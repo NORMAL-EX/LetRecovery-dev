@@ -76,13 +76,20 @@ pub fn install_from_i386(
     })?;
     log.push_str(&format!("目标分区 {win} 可写，开始准备文本安装\n"));
 
-    // 1) 复制 i386 → win\$WIN_NT$.~LS\I386（文本安装本地源）
-    let ls_i386 = format!("{win}\\$WIN_NT$.~LS\\I386");
-    log.push_str(&format!("复制 i386 到 {ls_i386} ...\n"));
-    create_dir_all_retry(&ls_i386).map_err(|e| format!("创建 {ls_i386} 失败: {e}"))?;
+    // 1) 复制 源(I386/AMD64) → win\$WIN_NT$.~LS\<同名子目录>（文本安装本地源）。
+    //    子目录名取源目录名(I386 或 AMD64)，与 txtsetup.sif 的 [SourceDisksNames] 路径一致；
+    //    对原版 32 位 i386 介质即 I386(行为不变)，64 位 2003/XP x64 介质则为 AMD64。
+    let src_sub_name = i386_src
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("I386")
+        .to_uppercase();
+    let ls_src = format!("{win}\\$WIN_NT$.~LS\\{src_sub_name}");
+    log.push_str(&format!("复制 {src_sub_name} 源到 {ls_src} ...\n"));
+    create_dir_all_retry(&ls_src).map_err(|e| format!("创建 {ls_src} 失败: {e}"))?;
     let src = i386_src.to_string_lossy().to_string();
     let out = new_command("xcopy")
-        .args([src.as_str(), ls_i386.as_str(), "/E", "/I", "/H", "/R", "/Y", "/Q"])
+        .args([src.as_str(), ls_src.as_str(), "/E", "/I", "/H", "/R", "/Y", "/Q"])
         .output()
         .map_err(|e| format!("xcopy 执行失败: {e}"))?;
     log.push_str(&gbk_to_utf8(&out.stdout));
@@ -114,9 +121,33 @@ pub fn install_from_i386(
         Err(_) => gbk_to_utf8(&raw),
     };
     let patched = patch_txtsetup(&txt);
-    std::fs::write(format!("{win}\\txtsetup.sif"), patched.as_bytes())
+
+    // 3.5) 文本期存储驱动集成（按架构）：把 bin\drivers\xp\<arch> 下的驱动拷进源 +
+    //      合并进 txtsetup.sif，让文本阶段就能认 AHCI/NVMe。i386 源用 x86 驱动；
+    //      AMD64 源用 amd64 驱动（含随包的魔改 genahci/stornvme）。用户可自行往对应目录丢驱动。
+    let xp_drv = bin_dir.join("drivers").join("xp");
+    let roots = if src_sub_name == "AMD64" {
+        vec![
+            xp_drv.join("amd64"),
+            xp_drv.join("ahci"),
+            xp_drv.join("nvme"),
+        ]
+    } else {
+        vec![xp_drv.join("x86")]
+    };
+    let drivers = crate::xp_textmode_drv::scan_driver_roots(&roots);
+    log.push_str(&format!(
+        "文本期存储驱动：架构={}，发现 {} 个可集成驱动\n",
+        if src_sub_name == "AMD64" { "amd64" } else { "x86" },
+        drivers.len()
+    ));
+    let (final_txtsetup, drvlog) =
+        crate::xp_textmode_drv::integrate(&patched, &drivers, std::path::Path::new(&ls_src));
+    log.push_str(&drvlog);
+
+    std::fs::write(format!("{win}\\txtsetup.sif"), final_txtsetup.as_bytes())
         .map_err(|e| format!("写 txtsetup.sif 失败: {e}"))?;
-    log.push_str("已写入 txtsetup.sif（SetupSourcePath=\\$WIN_NT$.~LS\\）\n");
+    log.push_str("已写入 txtsetup.sif（SetupSourcePath=\\$WIN_NT$.~LS\\ + 文本期驱动集成）\n");
 
     // 4) winnt.sif 应答：优先用用户自定义的 .sif；否则用内置生成（有产品密钥则全自动）。
     let sif_content = match custom_sif {

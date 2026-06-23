@@ -207,6 +207,12 @@ jobs:
             fi
           done
           if [ -f bin/drivers/README.md ]; then cp -f bin/drivers/README.md pkg/bin/drivers/README.md; fi
+          # XP 存储驱动（含新增 arch-aware 用户目录 x86/amd64；底包已含 ahci/nvme/usb3）：
+          # 以仓库为准覆盖进包，确保文本期驱动集成能读到这些目录。
+          if [ -d bin/drivers/xp ]; then
+            mkdir -p pkg/bin/drivers/xp
+            cp -rf bin/drivers/xp/. pkg/bin/drivers/xp/
+          fi
           echo '--- pkg/bin/drivers ---'; ls -R pkg/bin/drivers 2>/dev/null || true
           # XP/2003 i386 文本安装：可选产品密钥目录（放 bin\xp\productkey.txt 即全自动无人值守）
           if [ -d bin/xp ]; then
