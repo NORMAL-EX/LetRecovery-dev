@@ -208,6 +208,12 @@ jobs:
           done
           if [ -f bin/drivers/README.md ]; then cp -f bin/drivers/README.md pkg/bin/drivers/README.md; fi
           echo '--- pkg/bin/drivers ---'; ls -R pkg/bin/drivers 2>/dev/null || true
+          # XP/2003 i386 文本安装：可选产品密钥目录（放 bin\xp\productkey.txt 即全自动无人值守）
+          if [ -d bin/xp ]; then
+            mkdir -p pkg/bin/xp
+            cp -rf bin/xp/. pkg/bin/xp/
+          fi
+          echo '--- pkg/bin/xp ---'; ls -R pkg/bin/xp 2>/dev/null || true
           # dev release 默认启用「运行 Diskpart 脚本」功能
           python -c "import json,io; d=json.load(open('pkg/config.json',encoding='utf-8')); d['enable_diskpart_scripts']=True; io.open('pkg/config.json','w',encoding='utf-8',newline='\n').write(json.dumps(d,ensure_ascii=False,indent=2)+'\n')"
           echo '--- repair_boot.txt ---'; cat pkg/bin/repair_boot.txt

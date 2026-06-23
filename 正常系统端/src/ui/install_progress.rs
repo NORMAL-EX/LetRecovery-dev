@@ -961,9 +961,12 @@ fn format_partition(partition: &str) -> anyhow::Result<()> {
     use crate::utils::cmd::create_command;
     
     println!("[FORMAT] 格式化分区: {}", partition);
-    
+
+    // 注意：format 没有 /Y 开关（之前的 /Y 是无效开关，会让格式化报错并被静默吞掉，
+    // 目标盘其实没被格式化，进而引发后续找不到路径等连锁问题）。改用管道喂入确认：
+    // 第一行 y 回答「Proceed with Format (Y/N)?」，第二行空行回答结尾的「卷标」提问。
     let output = create_command("cmd")
-        .args(["/c", &format!("format {} /FS:NTFS /Q /Y", partition)])
+        .args(["/c", &format!("(echo y&echo.)|format {} /FS:NTFS /Q", partition)])
         .output()?;
     
     let stdout = crate::utils::encoding::gbk_to_utf8(&output.stdout);
