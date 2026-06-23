@@ -553,6 +553,39 @@ impl Ghost {
 
         result
     }
+
+    /// 从盘符创建 GHO 镜像（备份）：解析盘符 → 磁盘/分区号后调用 create_image。
+    /// 与 PE 端 `Ghost::create_image_from_letter` 等价，供桌面 Direct 备份按格式分发使用。
+    pub fn create_image_from_letter(
+        &self,
+        source_letter: &str,
+        gho_file: &str,
+        progress_tx: Option<Sender<DismProgress>>,
+    ) -> Result<()> {
+        let letter = source_letter.trim_end_matches(['\\', '/']).to_uppercase();
+        let letter = if letter.ends_with(':') {
+            letter
+        } else {
+            format!("{}:", letter)
+        };
+
+        let partitions = crate::core::disk::DiskManager::get_partitions()
+            .map_err(|e| anyhow::anyhow!("获取分区列表失败: {}", e))?;
+        let partition = partitions
+            .iter()
+            .find(|p| p.letter.eq_ignore_ascii_case(&letter))
+            .ok_or_else(|| anyhow::anyhow!("找不到分区 {}", letter))?;
+
+        let disk_number = partition
+            .disk_number
+            .ok_or_else(|| anyhow::anyhow!("无法获取 {} 的磁盘号，请刷新分区列表", letter))?;
+        let partition_number = partition
+            .partition_number
+            .ok_or_else(|| anyhow::anyhow!("无法获取 {} 的分区号，请刷新分区列表", letter))?;
+
+        // Ghost 磁盘号从 1 开始（create_image 内部直接把它当作 ghost src 的磁盘号）
+        self.create_image(disk_number + 1, partition_number, gho_file, 9, progress_tx)
+    }
 }
 
 impl Default for Ghost {

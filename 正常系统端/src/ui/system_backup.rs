@@ -520,19 +520,50 @@ impl App {
         let (progress_tx, progress_rx) = mpsc::channel::<DismProgress>();
         self.backup_progress_rx = Some(progress_rx);
 
+        let source_letter = source_partition.letter.clone();
         let capture_dir = format!("{}\\", source_partition.letter);
         let image_file = self.backup_save_path.clone();
         let name = self.backup_name.clone();
         let description = self.backup_description.clone();
         let is_incremental = self.backup_incremental;
+        let format = self.backup_format;
+        let swm_split_size = self.backup_swm_split_size;
 
         std::thread::spawn(move || {
-            let dism = Dism::new();
-            
-            let result = if is_incremental && Path::new(&image_file).exists() {
-                dism.append_image(&image_file, &capture_dir, &name, &description, Some(progress_tx.clone()))
-            } else {
-                dism.capture_image(&image_file, &capture_dir, &name, &description, Some(progress_tx.clone()))
+            // 按用户选择的备份格式分发（与 PE 端 app.rs 备份 worker 一致）。
+            // 此前这里无视格式恒走 LZX WIM —— ESD/SWM/GHO 都会产出错误文件。
+            let result = match format {
+                BackupFormat::Gho => {
+                    let ghost = crate::core::ghost::Ghost::new();
+                    if !ghost.is_available() {
+                        let _ = progress_tx.send(DismProgress {
+                            percentage: 0,
+                            status: "备份失败: Ghost 工具不可用".to_string(),
+                        });
+                        return;
+                    }
+                    ghost.create_image_from_letter(&source_letter, &image_file, Some(progress_tx.clone()))
+                }
+                BackupFormat::Esd => {
+                    let dism = Dism::new();
+                    if is_incremental && Path::new(&image_file).exists() {
+                        dism.append_image_esd(&image_file, &capture_dir, &name, &description, Some(progress_tx.clone()))
+                    } else {
+                        dism.capture_image_esd(&image_file, &capture_dir, &name, &description, Some(progress_tx.clone()))
+                    }
+                }
+                BackupFormat::Swm => {
+                    let dism = Dism::new();
+                    dism.capture_image_swm(&image_file, &capture_dir, &name, &description, swm_split_size, Some(progress_tx.clone()))
+                }
+                BackupFormat::Wim => {
+                    let dism = Dism::new();
+                    if is_incremental && Path::new(&image_file).exists() {
+                        dism.append_image(&image_file, &capture_dir, &name, &description, Some(progress_tx.clone()))
+                    } else {
+                        dism.capture_image(&image_file, &capture_dir, &name, &description, Some(progress_tx.clone()))
+                    }
+                }
             };
 
             match result {

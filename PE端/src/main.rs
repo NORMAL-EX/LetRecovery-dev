@@ -639,28 +639,40 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
         let source_partition = ConfigFileManager::find_backup_marker_partition()
             .unwrap_or_else(|| config.source_partition.clone());
 
-        // 执行备份
+        // 执行备份（按格式分发，与 PE GUI worker 一致）。
+        // 此前恒走 LZX WIM，忽略 config.format/swm —— ESD/SWM/GHO 都会产出错误文件。
         let dism = Dism::new();
         let capture_dir = format!("{}\\", source_partition);
 
-        let backup_result =
-            if config.incremental && std::path::Path::new(&config.save_path).exists() {
-                dism.append_image(
-                    &config.save_path,
-                    &capture_dir,
-                    &config.name,
-                    &config.description,
-                    None,
-                )
-            } else {
-                dism.capture_image(
-                    &config.save_path,
-                    &capture_dir,
-                    &config.name,
-                    &config.description,
-                    None,
-                )
-            };
+        use crate::core::config::BackupFormat;
+        let backup_result = match config.format {
+            BackupFormat::Gho => {
+                let ghost = core::ghost::Ghost::new();
+                if !ghost.is_available() {
+                    eprintln!("[PE BACKUP] Ghost 工具不可用");
+                    show_error_message("系统备份失败: Ghost 工具不可用");
+                    return Ok(());
+                }
+                ghost.create_image_from_letter(&source_partition, &config.save_path, None)
+            }
+            BackupFormat::Esd => {
+                if config.incremental && std::path::Path::new(&config.save_path).exists() {
+                    dism.append_image_esd(&config.save_path, &capture_dir, &config.name, &config.description, None)
+                } else {
+                    dism.capture_image_esd(&config.save_path, &capture_dir, &config.name, &config.description, None)
+                }
+            }
+            BackupFormat::Swm => {
+                dism.capture_image_swm(&config.save_path, &capture_dir, &config.name, &config.description, config.swm_split_size, None)
+            }
+            BackupFormat::Wim => {
+                if config.incremental && std::path::Path::new(&config.save_path).exists() {
+                    dism.append_image(&config.save_path, &capture_dir, &config.name, &config.description, None)
+                } else {
+                    dism.capture_image(&config.save_path, &capture_dir, &config.name, &config.description, None)
+                }
+            }
+        };
 
         if let Err(e) = backup_result {
             eprintln!("[PE BACKUP] 备份失败: {}", e);

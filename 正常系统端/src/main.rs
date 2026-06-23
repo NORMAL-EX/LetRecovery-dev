@@ -602,30 +602,42 @@ fn execute_pe_install(
     Ok(())
 }
 
-/// 执行PE备份
+/// 执行PE备份（按格式分发：0=WIM,1=ESD,2=SWM,3=GHO）。
+/// 此前恒走 LZX WIM，忽略 format/swm —— ESD/SWM/GHO 都会产出错误文件。
 fn execute_pe_backup(
     source_partition: &str,
     config: &core::install_config::BackupConfig,
 ) -> anyhow::Result<()> {
-    let dism = core::dism::Dism::new();
     let capture_dir = format!("{}\\", source_partition);
-    
-    if config.incremental && std::path::Path::new(&config.save_path).exists() {
-        dism.append_image(
-            &config.save_path,
-            &capture_dir,
-            &config.name,
-            &config.description,
-            None,
-        )
-    } else {
-        dism.capture_image(
-            &config.save_path,
-            &capture_dir,
-            &config.name,
-            &config.description,
-            None,
-        )
+
+    match config.format {
+        3 => {
+            let ghost = core::ghost::Ghost::new();
+            if !ghost.is_available() {
+                anyhow::bail!("Ghost 工具不可用");
+            }
+            ghost.create_image_from_letter(source_partition, &config.save_path, None)
+        }
+        1 => {
+            let dism = core::dism::Dism::new();
+            if config.incremental && std::path::Path::new(&config.save_path).exists() {
+                dism.append_image_esd(&config.save_path, &capture_dir, &config.name, &config.description, None)
+            } else {
+                dism.capture_image_esd(&config.save_path, &capture_dir, &config.name, &config.description, None)
+            }
+        }
+        2 => {
+            let dism = core::dism::Dism::new();
+            dism.capture_image_swm(&config.save_path, &capture_dir, &config.name, &config.description, config.swm_split_size, None)
+        }
+        _ => {
+            let dism = core::dism::Dism::new();
+            if config.incremental && std::path::Path::new(&config.save_path).exists() {
+                dism.append_image(&config.save_path, &capture_dir, &config.name, &config.description, None)
+            } else {
+                dism.capture_image(&config.save_path, &capture_dir, &config.name, &config.description, None)
+            }
+        }
     }
 }
 

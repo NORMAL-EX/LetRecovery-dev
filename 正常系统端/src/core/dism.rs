@@ -15,7 +15,7 @@ use std::sync::mpsc::Sender;
 use crate::core::dism_cmd::DismCmd;
 use crate::core::driver::DriverManager;
 use crate::core::system_utils;
-use lr_core::image_meta::{WimProgress, WIM_COMPRESS_LZX};
+use lr_core::image_meta::{WimProgress, WIM_COMPRESS_LZX, WIM_COMPRESS_LZMS};
 use lr_core::wimlib::WimlibManager;
 use lr_core::WimEngineManager;
 
@@ -177,6 +177,154 @@ impl Dism {
 
         // 对于追加操作，WimManager 的 capture_image 在文件存在时会自动追加
         self.capture_image(image_file, capture_dir, name, description, progress_tx)
+    }
+
+    /// 捕获系统镜像为 ESD（LZMS solid 高压缩）。目标文件已存在则追加镜像。
+    /// 与 PE 端 `Dism::capture_image_esd` 等价，供桌面 Direct 备份按格式分发使用。
+    pub fn capture_image_esd(
+        &self,
+        image_file: &str,
+        capture_dir: &str,
+        name: &str,
+        description: &str,
+        progress_tx: Option<Sender<DismProgress>>,
+    ) -> Result<()> {
+        println!("[Dism] 捕获 ESD 镜像(LZMS): {} -> {}", capture_dir, image_file);
+
+        let wim_manager = WimEngineManager::new_current()
+            .map_err(|e| anyhow::anyhow!("镜像引擎初始化失败: {}", e))?;
+
+        let (wim_tx, wim_rx) = std::sync::mpsc::channel::<WimProgress>();
+        let progress_tx_clone = progress_tx.clone();
+        let forward_thread = std::thread::spawn(move || {
+            while let Ok(progress) = wim_rx.recv() {
+                if let Some(ref tx) = progress_tx_clone {
+                    let _ = tx.send(DismProgress {
+                        percentage: progress.percentage,
+                        status: progress.status,
+                    });
+                }
+            }
+        });
+
+        let result = wim_manager.capture_image(
+            capture_dir,
+            image_file,
+            name,
+            description,
+            WIM_COMPRESS_LZMS,
+            Some(wim_tx),
+        );
+        let _ = forward_thread.join();
+
+        match result {
+            Ok(_) => {
+                println!("[Dism] ESD 镜像捕获成功");
+                Ok(())
+            }
+            Err(e) => anyhow::bail!("ESD 镜像捕获失败: {}", e),
+        }
+    }
+
+    /// 增量备份 ESD（文件存在时自动追加镜像）。
+    pub fn append_image_esd(
+        &self,
+        image_file: &str,
+        capture_dir: &str,
+        name: &str,
+        description: &str,
+        progress_tx: Option<Sender<DismProgress>>,
+    ) -> Result<()> {
+        println!("[Dism] 追加 ESD 镜像: {} -> {}", capture_dir, image_file);
+        self.capture_image_esd(image_file, capture_dir, name, description, progress_tx)
+    }
+
+    /// 捕获为 SWM 分卷：先抓为临时 WIM(LZX)，再用 libwim 分割为 .swm。
+    /// 与 PE 端 `Dism::capture_image_swm` 等价。
+    pub fn capture_image_swm(
+        &self,
+        image_file: &str,
+        capture_dir: &str,
+        name: &str,
+        description: &str,
+        split_size_mb: u32,
+        progress_tx: Option<Sender<DismProgress>>,
+    ) -> Result<()> {
+        println!(
+            "[Dism] 捕获 SWM 分卷: {} -> {} (分卷 {}MB)",
+            capture_dir, image_file, split_size_mb
+        );
+
+        // 临时 WIM 与最终 .swm 同目录
+        let temp_wim = format!("{}.tmp.wim", image_file.trim_end_matches(".swm"));
+
+        if let Some(ref tx) = progress_tx {
+            let _ = tx.send(DismProgress {
+                percentage: 0,
+                status: "正在捕获镜像...".to_string(),
+            });
+        }
+
+        let engine = WimEngineManager::new_current()
+            .map_err(|e| anyhow::anyhow!("镜像引擎初始化失败: {}", e))?;
+
+        let (wim_tx, wim_rx) = std::sync::mpsc::channel::<WimProgress>();
+        let progress_tx_clone = progress_tx.clone();
+        let forward_thread = std::thread::spawn(move || {
+            while let Ok(progress) = wim_rx.recv() {
+                if let Some(ref tx) = progress_tx_clone {
+                    // 捕获阶段占 80% 进度，分割占后 20%
+                    let _ = tx.send(DismProgress {
+                        percentage: (progress.percentage as u32 * 80 / 100) as u8,
+                        status: progress.status,
+                    });
+                }
+            }
+        });
+
+        let result = engine.capture_image(
+            capture_dir,
+            &temp_wim,
+            name,
+            description,
+            WIM_COMPRESS_LZX,
+            Some(wim_tx),
+        );
+        let _ = forward_thread.join();
+
+        if let Err(e) = result {
+            let _ = std::fs::remove_file(&temp_wim);
+            anyhow::bail!("捕获镜像失败: {}", e);
+        }
+
+        if let Some(ref tx) = progress_tx {
+            let _ = tx.send(DismProgress {
+                percentage: 80,
+                status: "正在分割镜像...".to_string(),
+            });
+        }
+
+        // 分卷由 libwim 执行（与生成引擎无关）。
+        let wim_manager = WimlibManager::new()
+            .map_err(|e| anyhow::anyhow!("wimlib 初始化失败: {}", e))?;
+        let split_result = wim_manager.split_wim(&temp_wim, image_file, split_size_mb as u64);
+
+        // 清理临时 WIM
+        let _ = std::fs::remove_file(&temp_wim);
+
+        match split_result {
+            Ok(_) => {
+                if let Some(ref tx) = progress_tx {
+                    let _ = tx.send(DismProgress {
+                        percentage: 100,
+                        status: "分卷完成".to_string(),
+                    });
+                }
+                println!("[Dism] SWM 分卷镜像创建成功");
+                Ok(())
+            }
+            Err(e) => anyhow::bail!("分割镜像失败: {}", e),
+        }
     }
 
     // ========================================================================
