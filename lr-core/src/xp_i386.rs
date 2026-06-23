@@ -110,8 +110,11 @@ pub fn install_from_i386(
         return Err(format!("复制 i386 失败:\n{}", gbk_to_utf8(&out.stderr)));
     }
 
-    // 1.5) 建空 $OEM$（OemPreinstall=Yes 需要它存在；空目录无副作用）。
-    let _ = create_dir_all_retry(&format!("{win}\\$WIN_NT$.~LS\\$OEM$"));
+    // 1.5) 建空 $OEM$（OemPreinstall=Yes 需要它存在；空目录无副作用）。失败要记日志：
+    //      否则文本安装阶段会因 OemPreinstall=Yes 找不到 $OEM$ 而报错。
+    if let Err(e) = create_dir_all_retry(&format!("{win}\\$WIN_NT$.~LS\\$OEM$")) {
+        log.push_str(&format!("警告: 建 $WIN_NT$.~LS\\$OEM$ 失败（{e}）；OemPreinstall=Yes 可能在文本阶段报错\n"));
+    }
 
     // 1.6) 建 $WIN_NT$.~BT（文本启动阶段的 BootPath）：照搬 DSI——
     //      a) 整个 <arch>\SYSTEM32 → $WIN_NT$.~BT\SYSTEM32；
@@ -154,17 +157,35 @@ pub fn install_from_i386(
         "$WIN_NT$.~BT 引导文件：按清单复制 {bt_copied} 个（源中缺 {bt_missing} 个，已跳过）\n"
     ));
 
+    // 1.7) 硬校验：文本安装阶段必需的几个核心文件必须在源里（每个正版 XP/2003 i386/AMD64 源都有）。
+    //      精简/重封装介质若缺这些，重启会卡在蓝屏「文件无法加载 / inf 损坏」——宁可现在就明确报错。
+    let required = ["biosinfo.inf", "setupdd.sy_", "ntkrnlmp.ex_", "ntfs.sy_", "setupreg.hiv"];
+    let missing: Vec<&str> = required
+        .iter()
+        .copied()
+        .filter(|n| !i386_src.join(n).exists())
+        .collect();
+    if !missing.is_empty() {
+        return Err(format!(
+            "源 {} 缺少文本安装必需文件: {}。这不是完整的 XP/2003 安装源（疑似精简/重封装介质），无法进入蓝屏文本安装。",
+            i386_src.display(),
+            missing.join(", ")
+        ));
+    }
+
     // 2) 引导文件落根目录：
     //    setupldr.bin -> \NTLDR（开机直接进文本安装）；ntdetect.com -> \NTDETECT.COM；
     //    biosinfo.inf / bootfont.bin 若源里有也一并复制（setupldr 需要 biosinfo；bootfont 为蓝底本地化字库）。
-    std::fs::copy(&setupldr, format!("{win}\\NTLDR")).map_err(|e| format!("写 NTLDR 失败: {e}"))?;
-    std::fs::copy(&ntdetect, format!("{win}\\NTDETECT.COM"))
+    // 用 copy_force/write_force：先清目标 +r+s+h 再写——之前装过 XP / 修过引导的盘上，根目录
+    //    NTLDR/NTDETECT.COM/TXTSETUP.SIF 常带 只读+系统+隐藏，直接 std::fs::copy 会 os error 5（拒绝访问）。
+    copy_force(&setupldr, &format!("{win}\\NTLDR")).map_err(|e| format!("写 NTLDR 失败: {e}"))?;
+    copy_force(&ntdetect, &format!("{win}\\NTDETECT.COM"))
         .map_err(|e| format!("写 NTDETECT.COM 失败: {e}"))?;
     log.push_str("已写入 NTLDR(setupldr) / NTDETECT.COM\n");
     for opt in ["biosinfo.inf", "bootfont.bin"] {
         let s = i386_src.join(opt);
         if s.exists() {
-            match std::fs::copy(&s, format!("{win}\\{opt}")) {
+            match copy_force(&s, &format!("{win}\\{opt}")) {
                 Ok(_) => log.push_str(&format!("已复制 {opt}\n")),
                 Err(e) => log.push_str(&format!("复制 {opt} 失败（忽略）: {e}\n")),
             }
@@ -198,9 +219,9 @@ pub fn install_from_i386(
         crate::xp_textmode_drv::integrate(&txt, &drivers, &[Path::new(&ls_src), Path::new(&bt)]);
     log.push_str(&drvlog);
 
-    std::fs::write(format!("{bt}\\TXTSETUP.SIF"), final_txtsetup.as_bytes())
+    write_force(&format!("{bt}\\TXTSETUP.SIF"), final_txtsetup.as_bytes())
         .map_err(|e| format!("写 $WIN_NT$.~BT\\TXTSETUP.SIF 失败: {e}"))?;
-    std::fs::write(format!("{win}\\TXTSETUP.SIF"), final_txtsetup.as_bytes())
+    write_force(&format!("{win}\\TXTSETUP.SIF"), final_txtsetup.as_bytes())
         .map_err(|e| format!("写根 TXTSETUP.SIF 失败: {e}"))?;
     log.push_str("已写入 TXTSETUP.SIF（$WIN_NT$.~BT 与根；含文本期驱动集成）\n");
 
@@ -233,12 +254,12 @@ pub fn install_from_i386(
         }
     };
     let sif_content = force_winnt_keys(&sif_raw);
-    std::fs::write(format!("{bt}\\WINNT.SIF"), sif_content.as_bytes())
+    write_force(&format!("{bt}\\WINNT.SIF"), sif_content.as_bytes())
         .map_err(|e| format!("写 $WIN_NT$.~BT\\WINNT.SIF 失败: {e}"))?;
     log.push_str("已写入 $WIN_NT$.~BT\\WINNT.SIF（已强制 MsDosInitiated=1 等硬盘安装必需键）\n");
 
-    // 4.5) 标记目标分区为「活动分区」。Legacy/MBR BIOS 必须从活动分区加载 NTLDR；
-    //      本引擎只支持 Legacy/MBR（GPT/UEFI 目标由调用方拦截），故此处直接置活动。失败仅告警。
+    // 4.5) 标记目标分区为「活动分区」。Legacy/MBR BIOS 只从活动分区加载 NTLDR；非活动 = 重启
+    //      黑屏「Missing operating system」且无任何提示。故置活动失败视为【硬错误】，宁可现在就报。
     let letter = win.trim_end_matches(':');
     match set_volume_active(letter) {
         Ok(o) => {
@@ -249,30 +270,56 @@ pub fn install_from_i386(
                 log.push('\n');
             }
         }
-        Err(e) => log.push_str(&format!(
-            "警告: 标记活动分区失败（{e}）。若目标盘为 GPT，XP 无法安装；Legacy/MBR 下可能需手动把目标分区设为活动\n"
-        )),
+        Err(e) => {
+            return Err(format!(
+                "标记 {win} 为活动分区失败（{e}）。Legacy/MBR 下不置活动会导致重启无法引导。请确认目标盘是 MBR 基本磁盘（非 GPT/动态盘）后重试。"
+            ));
+        }
     }
 
-    // 5) bootsect /nt52 写 XP 引导码（使引导扇区/MBR 加载 NTLDR）
+    // 5) bootsect /nt52 写 XP 引导码（使引导扇区/MBR 加载 NTLDR）。缺 bootsect.exe = 准备出一块
+    //    不能开机的盘，故【硬错误】而非默默成功。
     let bootsect = bin_dir.join("bootsect.exe");
-    if bootsect.exists() {
-        let out = new_command(&bootsect)
-            .args(["/nt52", win, "/mbr", "/force"])
-            .output()
-            .map_err(|e| format!("bootsect 执行失败: {e}"))?;
-        log.push_str(&gbk_to_utf8(&out.stdout));
-        log.push_str(&gbk_to_utf8(&out.stderr));
-        if !out.status.success() {
-            log.push_str("[bootsect 返回非 0，可能仍可引导]\n");
-        }
-        log.push_str("已用 bootsect /nt52 写引导码\n");
-    } else {
-        log.push_str("警告: 未找到 bootsect.exe，未写引导扇区——重启可能无法进入安装\n");
+    if !bootsect.exists() {
+        return Err(format!(
+            "未找到 {}：无法写 NT5 引导码，准备好的盘重启进不去文本安装。请确认安装包 bin\\bootsect.exe 存在。",
+            bootsect.display()
+        ));
     }
+    let out = new_command(&bootsect)
+        .args(["/nt52", win, "/mbr", "/force"])
+        .output()
+        .map_err(|e| format!("bootsect 执行失败: {e}"))?;
+    log.push_str(&gbk_to_utf8(&out.stdout));
+    log.push_str(&gbk_to_utf8(&out.stderr));
+    if !out.status.success() {
+        // bootsect 偶有非 0 但实际已写成功，故不直接判错；但要醒目提示以便对照实机现象。
+        log.push_str("⚠ 警告: bootsect 返回非 0——引导扇区可能未写成功，若重启进不去文本安装请重做此步\n");
+    }
+    log.push_str("已用 bootsect /nt52 写引导码\n");
 
     log.push_str("i386 硬盘文本安装准备完成，重启进入 XP/2003 蓝底文本安装阶段。\n");
     Ok(log)
+}
+
+/// 清掉目标文件的 只读/系统/隐藏 属性（若存在）。重装/修过引导的盘上根引导文件常带这些属性，
+/// 不清会让 `std::fs::copy`/`write` 抛 os error 5（拒绝访问）。失败忽略（文件不存在或本就无属性）。
+fn clear_file_attrs(path: &str) {
+    if Path::new(path).exists() {
+        let _ = new_command("attrib").args(["-R", "-S", "-H", path]).output();
+    }
+}
+
+/// 先清属性再复制（应对目标带 +r+s+h）。
+fn copy_force(src: &Path, dst: &str) -> std::io::Result<u64> {
+    clear_file_attrs(dst);
+    std::fs::copy(src, dst)
+}
+
+/// 先清属性再写（应对目标带 +r+s+h）。
+fn write_force(path: &str, bytes: &[u8]) -> std::io::Result<()> {
+    clear_file_attrs(path);
+    std::fs::write(path, bytes)
 }
 
 /// 带重试地探测目标卷此刻可写：根目录存在 + 能建/删一个探针目录。
@@ -345,14 +392,26 @@ fn read_product_key(bin_dir: &Path) -> Option<String> {
     None
 }
 
-/// 把任意换行规整为 CRLF（winnt.sif 应为 DOS 换行；用户自定义文件可能是 LF）。
+/// 把任意换行规整为 CRLF（winnt.sif 应为 DOS 换行；用户自定义文件可能是 LF）。同时去掉行首 UTF-8 BOM
+/// ——否则带 BOM 的自定义 .sif 首行会变成 `\u{feff}[Data]`，节头识别失败，强制键被追加到被忽略的重复节。
 fn normalize_crlf(s: &str) -> String {
+    let s = s.strip_prefix('\u{feff}').unwrap_or(s);
     let mut out = String::with_capacity(s.len() + 16);
     for line in s.split('\n') {
         out.push_str(line.strip_suffix('\r').unwrap_or(line));
         out.push_str("\r\n");
     }
     out
+}
+
+/// 取 INI 节标题行的节名（去首尾空白、容忍行尾注释/多余内容，如 `[Data]  ; 注释`）。非节标题返回 None。
+fn ini_header_name(line: &str) -> Option<&str> {
+    let t = line.trim();
+    if !t.starts_with('[') {
+        return None;
+    }
+    let close = t.find(']')?;
+    Some(t[1..close].trim())
 }
 
 /// 用 diskpart 把指定盘符（如 `"C"`）的卷标记为「活动分区」。仅 MBR 有意义。
@@ -400,19 +459,20 @@ fn force_winnt_keys(content: &str) -> String {
 fn set_ini_key(content: &str, section: &str, key: &str, value: &str) -> String {
     let nl = "\r\n";
     let kv = format!("{key}={value}{nl}");
+    // section 形如 "[Data]" → 取内部名 "Data" 与节标题名比对（容忍行尾注释/BOM）。
+    let sec_inner = section.trim().trim_start_matches('[').trim_end_matches(']');
     let mut out = String::with_capacity(content.len() + 64);
     let mut in_target = false;
     let mut inserted = false;
     let mut seen_section = false;
     for line in content.split_inclusive('\n') {
         let t = line.trim();
-        let is_header = t.starts_with('[') && t.ends_with(']');
-        if is_header {
+        if let Some(name) = ini_header_name(t) {
             if in_target && !inserted {
                 out.push_str(&kv);
                 inserted = true;
             }
-            in_target = t.eq_ignore_ascii_case(section);
+            in_target = name.eq_ignore_ascii_case(sec_inner);
             if in_target {
                 seen_section = true;
                 inserted = false;
@@ -534,6 +594,24 @@ mod tests {
         assert!(out.contains("OemPreinstall=Yes") && !out.contains("OemPreinstall=No"));
         assert!(out.contains("Floppyless=1")); // 原本缺 → 补进 [Data]
         assert!(out.contains("TargetPath=\\WINDOWS")); // 无关行保留
+    }
+
+    #[test]
+    fn force_keys_handles_bom_and_commented_header() {
+        // 带 UTF-8 BOM 的自定义 .sif + 节头带行尾注释：必须仍能命中 [Data]，强制键改对，不产生重复节
+        let input = "\u{feff}[Data]  ; partition data\r\nMsDosInitiated=\"0\"\r\n";
+        let out = force_winnt_keys(input);
+        assert!(out.contains("MsDosInitiated=1"));
+        assert!(!out.contains("MsDosInitiated=\"0\""));
+        // 不能追加出第二个 [Data]（否则 XP 只读第一个，强制键落到被忽略的尾节）
+        assert_eq!(out.matches("[Data]").count(), 1);
+    }
+
+    #[test]
+    fn ini_header_name_tolerates_comment() {
+        assert_eq!(ini_header_name("[Data]"), Some("Data"));
+        assert_eq!(ini_header_name("  [Unattended]  ; x"), Some("Unattended"));
+        assert_eq!(ini_header_name("Key=Val"), None);
     }
 
     #[test]

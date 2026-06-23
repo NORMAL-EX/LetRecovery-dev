@@ -189,6 +189,12 @@ impl App {
                     // 使用实际的解密进度（从加密百分比计算得出）
                     self.install_progress.step_progress = progress.percentage;
                     return;
+                } else if let Some(msg) = progress.status.strip_prefix("ERROR:") {
+                    // 引擎/格式化失败：写入 install_error → 渲染时显示醒目红色错误条（不再只在步骤名一闪）
+                    println!("[INSTALL UI] 安装失败: {}", msg);
+                    self.install_error = Some(msg.to_string());
+                    self.install_progress.current_step = "安装失败".to_string();
+                    return;
                 }
 
                 if let Some((step, name)) = parse_step_from_status(&progress.status) {
@@ -276,6 +282,7 @@ impl App {
 
         self.install_step = 1;
         self.install_progress.current_step = "格式化分区".to_string();
+        self.install_error = None; // 清掉上一次失败的残留，避免新安装一开始就显示旧错误
 
         std::thread::spawn(move || {
             println!("[INSTALL THREAD] 安装线程启动");
@@ -303,7 +310,20 @@ impl App {
                 send_step(&progress_tx, 1, "格式化分区", 30);
                 match format_partition(&target_partition) {
                     Ok(_) => println!("[INSTALL STEP 1] 格式化完成"),
-                    Err(e) => println!("[INSTALL STEP 1] 格式化失败: {}", e),
+                    Err(e) => {
+                        println!("[INSTALL STEP 1] 格式化失败: {}", e);
+                        // XP i386：格式化失败不能继续——否则会把安装文件层叠到旧/脏文件系统上。
+                        if options.is_xp_i386 {
+                            send_error(
+                                &progress_tx,
+                                &format!(
+                                    "格式化分区 {} 失败：{}。已中止，未写入任何安装文件。请确认该分区未被占用后重试。",
+                                    target_partition, e
+                                ),
+                            );
+                            return;
+                        }
+                    }
                 }
                 send_step(&progress_tx, 1, "格式化分区", 100);
             } else {
@@ -349,9 +369,8 @@ impl App {
                     }
                     Err(e) => {
                         println!("[INSTALL i386] 失败: {}", e);
-                        // install_error 当前未被写入（ERROR: 状态不显示），这里把失败原因放进
-                        // 步骤名，让 UI「当前步骤」可见，并停在未完成态（用户可点「取消安装」）。
-                        send_step(&progress_tx, 3, &format!("XP 文本安装准备失败：{}", e), 0);
+                        // 失败原因写入 install_error → UI 显示醒目红色错误条（之前只塞进步骤名一闪而过）。
+                        send_error(&progress_tx, &format!("XP/2003 文本安装准备失败：{}", e));
                     }
                 }
                 return;
@@ -881,6 +900,14 @@ fn send_step(tx: &mpsc::Sender<DismProgress>, step: usize, name: &str, percentag
     let _ = tx.send(DismProgress {
         percentage,
         status: format!("STEP:{}:{}", step, name),
+    });
+}
+
+/// 发送失败消息（UI 收到后写入 install_error，显示红色错误条）。
+fn send_error(tx: &mpsc::Sender<DismProgress>, msg: &str) {
+    let _ = tx.send(DismProgress {
+        percentage: 0,
+        status: format!("ERROR:{}", msg),
     });
 }
 
