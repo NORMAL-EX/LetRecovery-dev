@@ -198,6 +198,16 @@ jobs:
           cp -f assets/release/repair_boot.txt pkg/bin/repair_boot.txt
           # diskpart 脚本目录（含说明；用户把分区脚本放这里）
           if [ -d assets/release/diskpart ]; then cp -rf assets/release/diskpart/. pkg/diskpart/; fi
+          # 用户驱动文件夹（按 Windows 版本）：随包提供目录 + README，供用户放驱动
+          # （安装对应版本系统时自动 DISM 离线注入；XP 仍用 bin/drivers/xp 存储驱动机制）
+          for v in win7 win8 win10 win11; do
+            if [ -d "bin/drivers/$v" ]; then
+              mkdir -p "pkg/bin/drivers/$v"
+              cp -rf "bin/drivers/$v/." "pkg/bin/drivers/$v/"
+            fi
+          done
+          if [ -f bin/drivers/README.md ]; then cp -f bin/drivers/README.md pkg/bin/drivers/README.md; fi
+          echo '--- pkg/bin/drivers ---'; ls -R pkg/bin/drivers 2>/dev/null || true
           # dev release 默认启用「运行 Diskpart 脚本」功能
           python -c "import json,io; d=json.load(open('pkg/config.json',encoding='utf-8')); d['enable_diskpart_scripts']=True; io.open('pkg/config.json','w',encoding='utf-8',newline='\n').write(json.dumps(d,ensure_ascii=False,indent=2)+'\n')"
           echo '--- repair_boot.txt ---'; cat pkg/bin/repair_boot.txt

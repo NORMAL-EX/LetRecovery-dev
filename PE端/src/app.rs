@@ -569,6 +569,8 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
     if let Err(e) = apply_advanced_options(&target_partition, &config) {
         log::warn!("应用高级选项失败: {}", e);
     }
+    // 注入数据分区上的用户驱动（bin/drivers/<版本> 由正常端复制而来）
+    crate::ui::advanced_options::inject_user_drivers_from_data(&target_partition, &data_dir);
     let _ = tx.send(WorkerMessage::SetProgress(100));
 
     // Step 7: 生成无人值守配置

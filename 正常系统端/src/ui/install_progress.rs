@@ -545,6 +545,11 @@ impl App {
                 Err(e) => println!("[INSTALL STEP 6] 高级选项应用失败: {}", e),
             }
             send_step(&progress_tx, 6, "应用高级选项", 50);
+
+            // 注入用户驱动：bin/drivers/<版本> 下用户放置的驱动，按目标系统版本自动注入
+            // （win7/win8/win10/win11 走 DISM 离线注入；XP 由上方 apply_to_system 的 XP 注入处理）。
+            inject_user_version_drivers(&target_partition, is_xp);
+            send_step(&progress_tx, 6, "应用高级选项", 70);
             
             if options.unattended_install {
                 println!("[INSTALL STEP 6] 生成无人值守配置");
@@ -771,6 +776,20 @@ impl App {
                 }
             }
 
+            // 复制用户驱动文件夹（bin/drivers/{win7,win8,win10,win11}）到数据分区，
+            // 供重启进 PE 后按目标系统版本注入。XP 驱动随 PE WIM 内置，无需复制。
+            for ver in ["win7", "win8", "win10", "win11"] {
+                let src = crate::utils::path::get_drivers_dir().join(ver);
+                if !user_driver_dir_has_inf(&src) {
+                    continue;
+                }
+                let dst = format!("{}\\user_drivers\\{}", data_dir, ver);
+                match copy_dir_recursive(&src.to_string_lossy(), &dst) {
+                    Ok(_) => println!("[INSTALL PE] 已复制用户驱动 {} -> {}", ver, dst),
+                    Err(e) => println!("[INSTALL PE] 复制用户驱动 {} 失败: {}", ver, e),
+                }
+            }
+
             // Step 5: 写入配置文件
             send_step(&progress_tx, 5, "写入配置文件", 0);
             std::thread::sleep(std::time::Duration::from_millis(50));
@@ -865,6 +884,76 @@ fn parse_step_from_status(status: &str) -> Option<(usize, String)> {
         }
     }
     None
+}
+
+/// 根据目标系统识别用户驱动文件夹名（win7/win8/win10/win11）。
+/// XP 由现有 XP 注入机制处理（bin/drivers/xp/{ahci,nvme,usb3}），这里返回 None。
+fn detect_user_driver_version(target_partition: &str, is_xp: bool) -> Option<&'static str> {
+    if is_xp {
+        return None;
+    }
+    // 读目标系统 \Windows\System32\ntdll.dll 版本：6.1=win7，6.2/6.3=win8/8.1，
+    // 10.0 且 build<22000=win10，build>=22000=win11。
+    let ntdll = Path::new(target_partition)
+        .join("Windows")
+        .join("System32")
+        .join("ntdll.dll");
+    let (major, minor, build, _) = crate::core::system_utils::get_file_version(&ntdll)?;
+    match (major, minor) {
+        (6, 1) => Some("win7"),
+        (6, 2) | (6, 3) => Some("win8"),
+        (10, _) => Some(if build >= 22000 { "win11" } else { "win10" }),
+        _ => None,
+    }
+}
+
+/// 递归判断目录下是否存在驱动 .inf 文件。
+fn user_driver_dir_has_inf(dir: &Path) -> bool {
+    if !dir.exists() {
+        return false;
+    }
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        if let Ok(rd) = std::fs::read_dir(&d) {
+            for entry in rd.flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else if p
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| e.eq_ignore_ascii_case("inf"))
+                    .unwrap_or(false)
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// 注入 `bin/drivers/<版本>` 下用户放置的驱动到目标系统（win7/8/10/11，DISM 离线注入）。
+/// 目录不存在或无 .inf 则静默跳过。失败仅记日志，不打断安装。
+fn inject_user_version_drivers(target_partition: &str, is_xp: bool) {
+    let version = match detect_user_driver_version(target_partition, is_xp) {
+        Some(v) => v,
+        None => return,
+    };
+    let dir = crate::utils::path::get_drivers_dir().join(version);
+    if !user_driver_dir_has_inf(&dir) {
+        return;
+    }
+    println!(
+        "[USER DRV] 注入 bin/drivers/{} 用户驱动到 {} ...",
+        version, target_partition
+    );
+    let dism = crate::core::dism::Dism::new();
+    let image_path = format!("{}\\", target_partition);
+    match dism.add_drivers_offline(&image_path, &dir.to_string_lossy()) {
+        Ok(_) => println!("[USER DRV] bin/drivers/{} 注入成功", version),
+        Err(e) => println!("[USER DRV] bin/drivers/{} 注入失败: {}（继续安装）", version, e),
+    }
 }
 
 /// 格式化分区

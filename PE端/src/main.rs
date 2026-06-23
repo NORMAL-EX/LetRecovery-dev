@@ -542,6 +542,8 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
         // Step 6: 应用高级选项
         println!("[PE INSTALL] Step 6: 应用高级选项");
         let _ = apply_advanced_options(&target_partition, &config);
+        // 注入数据分区上的用户驱动（bin/drivers/<版本> 由正常端复制而来）
+        ui::advanced_options::inject_user_drivers_from_data(&target_partition, &data_dir);
 
         // Step 7: 生成无人值守配置
         if config.unattended {
