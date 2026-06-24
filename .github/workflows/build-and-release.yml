@@ -11,6 +11,10 @@ on:
         description: "Release 标签(留空=用当天日期,如 2026.6.17)"
         required: false
         default: ""
+  # 开发分支：push 即自动构建发布（无需 workflow_dispatch 权限；tag 留空走当天日期）。
+  push:
+    branches:
+      - claude/dazzling-knuth-x9795l
 
 permissions:
   contents: write
