@@ -1000,14 +1000,9 @@ fn format_partition(partition: &str) -> anyhow::Result<()> {
 
     println!("[FORMAT] 格式化分区: {}", partition);
 
-    // 先尽力卸载该卷，释放可能占用它的句柄（PE 里资源管理器正浏览该盘、或上次失败残留的句柄
-    // 会导致 format 报「无法锁定驱动器，卷仍在使用中」）。失败忽略——卷本就空闲时 dismount 也无碍。
-    let _ = create_command("cmd")
-        .args(["/c", &format!("fsutil volume dismount {}", partition)])
-        .output();
-
     // 注意：format 没有 /Y 开关（无效开关会让格式化静默失败）。用管道喂确认：第一行 y 答
     // 「Proceed with Format (Y/N)?」，第二行空行答结尾「卷标」提问。失败原因多在 stdout 不在 stderr。
+    // （不再在 format 前 fsutil 卸载该卷——那样会把盘符卸掉，紧接着 format 反而报「指定的驱动器不存在」。）
     let mut last_reason = String::new();
     for attempt in 1..=2 {
         let output = create_command("cmd")
