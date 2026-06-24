@@ -81,12 +81,19 @@ pub fn install_from_i386(
     // 0.4) 源完整性硬校验：文本安装阶段必需的核心文件必须在源里（每个正版 XP/2003 i386/AMD64 源都有）。
     //      精简/重封装介质若缺这些，重启会卡蓝屏「文件无法加载 / inf 损坏」——在动盘、拷几个 G 之前
     //      就明确报错。下面拷完后还会在【目标】里复测一遍，确保它们真拷过去了。
-    const REQUIRED_FILES: [&str; 5] =
-        ["biosinfo.inf", "setupdd.sy_", "ntkrnlmp.ex_", "ntfs.sy_", "setupreg.hiv"];
-    let missing_src: Vec<&str> = REQUIRED_FILES
+    //      每项列出可接受的名字（任一存在即可）：多数只有压缩名(.sy_/.ex_)，但 ntfs 在重封装/换过驱动的
+    //      介质上常是解压名 ntfs.sys——与 iso.rs::xp_i386_dir 探测、NT5.txt 清单一致（都认 .sy_ 或 .sys）。
+    const REQUIRED_FILES: [&[&str]; 5] = [
+        &["biosinfo.inf"],
+        &["setupdd.sy_"],
+        &["ntkrnlmp.ex_"],
+        &["ntfs.sy_", "ntfs.sys"],
+        &["setupreg.hiv"],
+    ];
+    let missing_src: Vec<String> = REQUIRED_FILES
         .iter()
-        .copied()
-        .filter(|n| !i386_src.join(n).exists())
+        .filter(|names| !names.iter().any(|&n| i386_src.join(n).exists()))
+        .map(|names| names.join("/"))
         .collect();
     if !missing_src.is_empty() {
         return Err(format!(
@@ -138,10 +145,10 @@ pub fn install_from_i386(
     // 拷贝结果硬校验（真正权威的成功判据，不依赖 xcopy 退出码）：核心文件必须真的落进了本地源目录。
     // 若因被占用/中断导致核心文件没拷过去，文本安装必然蓝屏，这里就要拦下。
     let ls_path = Path::new(&ls_src);
-    let missing_dst: Vec<&str> = REQUIRED_FILES
+    let missing_dst: Vec<String> = REQUIRED_FILES
         .iter()
-        .copied()
-        .filter(|n| !ls_path.join(n).exists())
+        .filter(|names| !names.iter().any(|&n| ls_path.join(n).exists()))
+        .map(|names| names.join("/"))
         .collect();
     if !missing_dst.is_empty() {
         return Err(format!(
