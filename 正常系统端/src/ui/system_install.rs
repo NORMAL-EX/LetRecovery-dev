@@ -367,8 +367,15 @@ impl App {
                         let p = path.to_string_lossy().to_string();
                         match std::fs::read_to_string(&path) {
                             Ok(content) => {
-                                self.custom_unattend_path = p;
-                                self.custom_unattend_error = if is_xp {
+                                self.custom_unattend_path = p.clone();
+                                // 据【文件本身】判类型分发校验：扩展名 .sif，或内容是 INI 风格（去 BOM 后以
+                                // `[节]` 开头）→ winnt.sif(INI) 校验；否则按 unattend.xml 校验。
+                                // 不依赖介质检测状态——否则「先选应答文件、后认 XP 介质」会把 .sif 错当
+                                // XML 校验（报 unknown token at 1:1），且切介质后不会重新校验、错误赖着不走。
+                                let body = content.trim_start_matches('\u{feff}');
+                                let is_sif = p.to_ascii_lowercase().ends_with(".sif")
+                                    || body.trim_start().starts_with('[');
+                                self.custom_unattend_error = if is_sif {
                                     crate::core::install_config::validate_winnt_sif(&content).err()
                                 } else {
                                     crate::core::install_config::validate_unattend_xml(&content)

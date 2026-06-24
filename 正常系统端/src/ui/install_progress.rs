@@ -997,27 +997,41 @@ fn inject_user_version_drivers(target_partition: &str, is_xp: bool) {
 /// 格式化分区
 fn format_partition(partition: &str) -> anyhow::Result<()> {
     use crate::utils::cmd::create_command;
-    
+
     println!("[FORMAT] 格式化分区: {}", partition);
 
-    // 注意：format 没有 /Y 开关（之前的 /Y 是无效开关，会让格式化报错并被静默吞掉，
-    // 目标盘其实没被格式化，进而引发后续找不到路径等连锁问题）。改用管道喂入确认：
-    // 第一行 y 回答「Proceed with Format (Y/N)?」，第二行空行回答结尾的「卷标」提问。
-    let output = create_command("cmd")
-        .args(["/c", &format!("(echo y&echo.)|format {} /FS:NTFS /Q", partition)])
-        .output()?;
-    
-    let stdout = crate::utils::encoding::gbk_to_utf8(&output.stdout);
-    let stderr = crate::utils::encoding::gbk_to_utf8(&output.stderr);
-    
-    println!("[FORMAT] stdout: {}", stdout);
-    println!("[FORMAT] stderr: {}", stderr);
-    
-    if !output.status.success() {
-        anyhow::bail!("格式化失败: {}", stderr);
+    // 先尽力卸载该卷，释放可能占用它的句柄（PE 里资源管理器正浏览该盘、或上次失败残留的句柄
+    // 会导致 format 报「无法锁定驱动器，卷仍在使用中」）。失败忽略——卷本就空闲时 dismount 也无碍。
+    let _ = create_command("cmd")
+        .args(["/c", &format!("fsutil volume dismount {}", partition)])
+        .output();
+
+    // 注意：format 没有 /Y 开关（无效开关会让格式化静默失败）。用管道喂确认：第一行 y 答
+    // 「Proceed with Format (Y/N)?」，第二行空行答结尾「卷标」提问。失败原因多在 stdout 不在 stderr。
+    let mut last_reason = String::new();
+    for attempt in 1..=2 {
+        let output = create_command("cmd")
+            .args(["/c", &format!("(echo y&echo.)|format {} /FS:NTFS /Q", partition)])
+            .output()?;
+        let stdout = crate::utils::encoding::gbk_to_utf8(&output.stdout);
+        let stderr = crate::utils::encoding::gbk_to_utf8(&output.stderr);
+        println!("[FORMAT] (尝试 {}) status={:?}", attempt, output.status.code());
+        println!("[FORMAT] (尝试 {}) stdout: {}", attempt, stdout);
+        println!("[FORMAT] (尝试 {}) stderr: {}", attempt, stderr);
+        if output.status.success() {
+            return Ok(());
+        }
+        // 失败原因多打印在 stdout（如「无法锁定驱动器，卷仍在使用中」/「Cannot lock the drive」），
+        // 取 stdout+stderr 拼成可读原因，方便用户/日志定位，而不是空白。
+        last_reason = format!("{} {}", stdout.trim(), stderr.trim()).trim().to_string();
+        std::thread::sleep(std::time::Duration::from_millis(800));
     }
-    
-    Ok(())
+    let reason = if last_reason.is_empty() {
+        "format 返回非 0（无输出）。请关闭正在浏览该分区的资源管理器/程序后重试，或确认它不是只读/受占用。".to_string()
+    } else {
+        last_reason
+    };
+    anyhow::bail!("格式化失败: {}", reason);
 }
 
 /// 导出驱动
