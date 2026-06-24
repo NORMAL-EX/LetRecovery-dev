@@ -41,10 +41,11 @@ pub struct AppConfig {
     #[serde(default)]
     pub wim_engine: u8,
 
-    /// 是否启用「运行 Diskpart 脚本」功能（系统安装页的复选框）。
-    /// 默认关闭，需在 config.json 显式置 true 才在界面显示。
+    /// 是否启用「高级选项」（设置页总开关）。默认关闭，需在设置里或 config.json 显式置 true。
+    /// 开启后解锁：安装 XP 时可选 UEFI 引导（魔改镜像用）、系统安装页的「运行 Diskpart 脚本」复选框、
+    /// 以及自定义修复引导脚本 bin\repair_boot.txt。面向高级用户，小白不要开。
     #[serde(default)]
-    pub enable_diskpart_scripts: bool,
+    pub enable_advanced_options: bool,
 }
 
 /// 日志默认启用
@@ -73,7 +74,7 @@ impl Default for AppConfig {
             language: String::from("zh-CN"),  // 默认简体中文
             pe_cache: crate::download::config::PeCache::default(),
             wim_engine: 0,  // 默认 libwim
-            enable_diskpart_scripts: false,
+            enable_advanced_options: false,
         }
     }
 }
@@ -208,6 +209,14 @@ impl AppConfig {
     /// 将当前配置中的引擎选择应用到进程级全局（启动时调用一次）
     pub fn apply_wim_engine(&self) {
         lr_core::set_active_engine(lr_core::WimEngine::from_u8(self.wim_engine));
+    }
+
+    /// 设置「高级选项」总开关并保存
+    pub fn set_advanced_options(&mut self, enabled: bool) {
+        self.enable_advanced_options = enabled;
+        if let Err(e) = self.save() {
+            log::warn!("保存配置失败: {}", e);
+        }
     }
 
     /// 设置界面语言并保存

@@ -335,8 +335,8 @@ impl App {
             
             ui.checkbox(&mut self.auto_reboot, "立即重启");
 
-            // 运行 Diskpart 脚本（仅在 config.json 启用该功能时显示）
-            if self.app_config.enable_diskpart_scripts {
+            // 运行 Diskpart 脚本（仅在「高级选项」开启时显示）
+            if self.app_config.enable_advanced_options {
                 ui.checkbox(&mut self.run_diskpart_scripts, "运行Diskpart脚本")
                     .on_hover_text(
                         "安装前运行 程序目录\\diskpart\\ 下的所有脚本(.cmd/.bat 走 cmd，.txt 走 diskpart)，\n在 PE 中、格式化/释放镜像之前执行，可用于自定义分区。",
@@ -1180,12 +1180,16 @@ impl App {
         // (1) 仅 Legacy/BIOS + MBR——XP 不支持 GPT/UEFI 启动；
         // (2) 不支持在运行中的系统上原地安装到当前系统盘（需进 PE）。
         if self.xp_i386_source.is_some() {
-            let actual_mode =
-                Self::get_actual_boot_mode(self.selected_boot_mode, partition.partition_style);
-            if partition.partition_style == PartitionStyle::GPT || actual_mode == "UEFI" {
+            // XP i386 仅 Legacy/MBR。拦截条件：目标盘【确为 GPT】，或用户【显式选了 UEFI 引导】。
+            // 分区表「未知」(探测失败) 不再当 UEFI 拦——之前一块其实是 MBR 的盘，只因探测打了个嗝
+            // 被判「未知」就被挡死。「高级选项」开启时整体放行（供 UEFI 化魔改镜像，或先用 Diskpart 脚本改分区）。
+            let target_is_uefi = partition.partition_style == PartitionStyle::GPT
+                || self.selected_boot_mode == BootModeSelection::UEFI;
+            if target_is_uefi && !self.app_config.enable_advanced_options {
                 self.show_error(
                     "原版 Windows XP/2003（i386 介质）仅支持 Legacy/BIOS + MBR 启动，无法安装到 GPT/UEFI 目标。\n\
-                     请将目标磁盘转换为 MBR 并以 Legacy 引导，或改用「UEFI 化的 XP x64 WIM 镜像」。",
+                     如确需（例如使用 UEFI 化的魔改镜像，或先用 Diskpart 脚本把盘改成 MBR），\n\
+                     请到「关于 → 高级选项」开启后重试。",
                 );
                 return;
             }
@@ -1279,8 +1283,8 @@ impl App {
             // 或 i386 文本安装介质（selected_is_xp 已并入 is_xp_i386）。
             is_xp: selected_is_xp,
             is_xp_i386,
-            // 仅在 config.json 启用该功能时才让其生效
-            run_diskpart_scripts: self.app_config.enable_diskpart_scripts
+            // 仅在「高级选项」开启时才让其生效
+            run_diskpart_scripts: self.app_config.enable_advanced_options
                 && self.run_diskpart_scripts,
         };
 

@@ -215,6 +215,35 @@ impl App {
                 ui.add_space(10.0);
                 ui.separator();
 
+                // 高级选项（总开关，存 config.json；小白勿开）
+                ui.add_space(10.0);
+                ui.heading(tr!("高级选项"));
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    let mut adv = self.app_config.enable_advanced_options;
+                    if ui.checkbox(&mut adv, tr!("启用高级选项")).changed() {
+                        self.app_config.set_advanced_options(adv);
+                    }
+                });
+                ui.add_space(5.0);
+                ui.indent("advanced_options_desc", |ui| {
+                    ui.colored_label(
+                        egui::Color32::from_rgb(220, 80, 80),
+                        tr!("⚠ 面向高级用户，小白请勿开启，设置不当可能导致无法开机。"),
+                    );
+                    ui.colored_label(
+                        egui::Color32::GRAY,
+                        tr!("开启后解锁：安装 XP 时可选 UEFI 引导（供 UEFI 化魔改镜像）、"),
+                    );
+                    ui.colored_label(
+                        egui::Color32::GRAY,
+                        tr!("系统安装页「运行 Diskpart 脚本」、自定义修复引导脚本 bin\\repair_boot.txt。"),
+                    );
+                });
+
+                ui.add_space(10.0);
+                ui.separator();
+
                 ui.add_space(15.0);
 
                 // 版权信息
@@ -253,6 +282,7 @@ impl App {
 
                 ui.label(format!("• {}", tr!("部分系统镜像及 PE 下载服务由 Cloud-PE 云盘提供")));
                 ui.label(format!("• {}", tr!("感谢 电脑病毒爱好者 提供 WinPE")));
+                ui.label(format!("• {}", tr!("感谢 Tik 参与测试与反馈")));
 
                 ui.add_space(30.0);
                 ui.separator();

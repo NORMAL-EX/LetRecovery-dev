@@ -298,9 +298,12 @@ assign letter=S
             anyhow::bail!("Windows 目录不存在: {}", windows_path);
         }
 
-        // 用户可编辑的修复引导脚本（bin\repair_boot.txt）优先；失败则回退默认逻辑
+        // 用户可编辑的修复引导脚本（bin\repair_boot.txt）——仅在「高级选项」开启时启用，优先于默认逻辑；
+        // 失败则回退默认逻辑。小白默认关闭，避免一份误放的 repair_boot.txt 把引导改坏。
+        let allow_custom_repair =
+            crate::core::app_config::AppConfig::load().enable_advanced_options;
         let repair_script = get_bin_dir().join("repair_boot.txt");
-        if repair_script.exists() {
+        if allow_custom_repair && repair_script.exists() {
             println!("[BOOT] 检测到自定义修复引导脚本: {}", repair_script.display());
             let esp = if use_uefi {
                 self.find_esp_on_same_disk(windows_partition)

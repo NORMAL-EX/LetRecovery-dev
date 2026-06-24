@@ -529,7 +529,27 @@ fn set_volume_active(letter: &str) -> Result<String, String> {
     if !out.status.success() {
         return Err(format!("diskpart 返回非 0: {}", so.trim()));
     }
+    // diskpart 即使内部失败（目标是 GPT/动态盘/逻辑分区，无法设活动）也常返回 0，故再按输出里的错误标志判一次。
+    // 用【否定检测】：只有命中已知错误词才算失败，绝不会把成功误判为失败 → 不会挡住本能正常设活动的盘。
+    if diskpart_reported_failure(&so) {
+        return Err(format!(
+            "diskpart 未能把 {letter}: 设为活动分区（可能目标是 GPT/动态盘/逻辑分区，无法设活动）：\n{}",
+            so.trim()
+        ));
+    }
     Ok(so)
+}
+
+/// diskpart 输出里是否报了失败（中/英 PE）。diskpart 内部失败常仍返回 0，故按输出里的错误词判断。
+/// 仅否定检测：命中已知错误词才算失败；成功串（「…标记为活动分区」/「marked … as active」）不含这些词，故不会误判。
+fn diskpart_reported_failure(output: &str) -> bool {
+    let lo = output.to_ascii_lowercase();
+    output.contains("无法")
+        || output.contains("错误")
+        || lo.contains("cannot")
+        || lo.contains("is not")
+        || lo.contains("no volume")
+        || lo.contains("error")
 }
 
 /// 强制写入硬盘安装必需的应答键（照搬 DSI 的 `NT5部署无人值守`）。无论用户自定义 .sif 怎么写，
@@ -659,6 +679,24 @@ InstallDefaultComponents=Yes\r\n"
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn diskpart_reported_failure_negative_detection() {
+        // 成功串（中/英）→ 不算失败（关键：成功串里没有「无法/错误/cannot/is not/error」）
+        assert!(!diskpart_reported_failure("DiskPart 已将当前分区标记为活动分区。"));
+        assert!(!diskpart_reported_failure(
+            "DiskPart marked the current partition as active."
+        ));
+        assert!(!diskpart_reported_failure(""));
+        // 失败串 → 算失败
+        assert!(diskpart_reported_failure(
+            "DiskPart 无法在所选磁盘上标记活动分区。"
+        ));
+        assert!(diskpart_reported_failure(
+            "The selected disk is not a fixed MBR disk."
+        ));
+        assert!(diskpart_reported_failure("There is no volume selected."));
+    }
 
     #[test]
     fn winnt_sif_without_key_is_defaulthide() {

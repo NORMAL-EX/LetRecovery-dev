@@ -238,7 +238,7 @@ pub struct App {
     pub auto_reboot: bool,
     pub selected_boot_mode: BootModeSelection,
     pub driver_action: DriverAction,
-    /// 安装前运行 diskpart 脚本（系统安装页复选框；受 config.json 的 enable_diskpart_scripts 控制是否显示）
+    /// 安装前运行 diskpart 脚本（系统安装页复选框；受「高级选项」总开关 enable_advanced_options 控制是否显示）
     pub run_diskpart_scripts: bool,
 
     // 高级选项

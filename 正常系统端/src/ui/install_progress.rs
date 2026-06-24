@@ -291,14 +291,29 @@ impl App {
             let driver_backup_path = temp_dir.join("LetRecovery_DriverBackup");
             let driver_backup_str = driver_backup_path.to_string_lossy().to_string();
 
-            // 装机前运行 diskpart 脚本（分区准备）——直接读程序目录\diskpart\（当前已在 PE）
+            // 装机前运行 diskpart 脚本（分区准备）——直接读程序目录\diskpart\（当前已在 PE）。
+            // 结果回报到 UI：成功则步骤走到 100%；失败则弹红色错误条并中止（之前只 println 到控制台，
+            // 用户根本看不到跑没跑）。脚本是用来准备分区的，失败还往下走会把系统装到错误的分区布局上。
             if options.run_diskpart_scripts {
                 send_step(&progress_tx, 1, "运行 Diskpart 脚本", 0);
                 let scripts_dir = crate::utils::path::get_exe_dir().join("diskpart");
                 println!("[INSTALL] 运行 Diskpart 脚本: {}", scripts_dir.display());
                 match lr_core::diskpart::run_scripts_in_dir(&scripts_dir) {
-                    Ok(out) => println!("[INSTALL] Diskpart 脚本执行完成:\n{}", out),
-                    Err(e) => println!("[INSTALL] Diskpart 脚本执行失败: {}", e),
+                    Ok(out) => {
+                        println!("[INSTALL] Diskpart 脚本执行完成:\n{}", out);
+                        send_step(&progress_tx, 1, "运行 Diskpart 脚本", 100);
+                    }
+                    Err(e) => {
+                        println!("[INSTALL] Diskpart 脚本执行失败: {}", e);
+                        send_error(
+                            &progress_tx,
+                            &format!(
+                                "Diskpart 脚本执行失败，已中止安装（未格式化、未写入任何文件）：\n{}",
+                                e
+                            ),
+                        );
+                        return;
+                    }
                 }
             }
 
@@ -339,6 +354,10 @@ impl App {
             if options.is_xp_i386 {
                 send_step(&progress_tx, 2, "导出驱动", 100); // 跳过（XP 文本安装阶段不适用）
                 send_step(&progress_tx, 3, "释放系统镜像", 0);
+                // 准备 XP 引导前：先清掉目标盘上【其他】分区的活动标志，确保目标成为唯一活动分区。
+                // （微软文档：diskpart 的 active 不自动清旧的活动分区；同盘存在多个活动分区时 BIOS/XP 会
+                //   引导分区表里第一个活动分区——往往是旧 C: → 出现“装到 W: 却进了 C:”。照搬「设新活动前先移除旧活动」。）
+                deactivate_sibling_active_partitions(&target_partition, &partitions);
                 let i386_src = std::path::PathBuf::from(&image_path);
                 let bin_dir = crate::utils::path::get_bin_dir();
                 // 用户自定义无人值守(XP 为 winnt.sif)：非空则传给引擎，原样覆盖内置生成的应答。
@@ -1036,6 +1055,58 @@ fn format_partition(partition: &str) -> anyhow::Result<()> {
         reason
     };
     anyhow::bail!("格式化失败（diskpart）: {}", reason);
+}
+
+/// 把目标分区所在【同一物理盘】上其他分区的活动标志清掉，确保目标成为唯一活动分区。
+///
+/// 微软文档：diskpart 的 `active` 命令不会自动清掉旧的活动分区，而 MBR 盘只应有一个活动分区；
+/// 同盘存在多个活动分区时，BIOS/XP 安装程序会引导/认定分区表里【第一个枚举到的活动分区】(往往是旧 C:)，
+/// 于是“装到 W: 却进了 C:”。这里在准备 XP 引导前，照搬微软「设新活动前先移除旧活动」，先清同盘其他活动标志。
+///
+/// 逐个分区单独跑 diskpart（一条失败不影响其他）；`inactive` 对逻辑盘/非活动分区会被 diskpart 忽略或报错，
+/// 均按【尽力而为】处理、失败仅记日志不阻断。只处理【有盘符、同物理盘、非目标】的分区。
+fn deactivate_sibling_active_partitions(target: &str, partitions: &[Partition]) {
+    let tl = target.trim_end_matches('\\').trim_end_matches(':');
+    let target_disk = partitions
+        .iter()
+        .find(|p| {
+            p.letter
+                .trim_end_matches('\\')
+                .trim_end_matches(':')
+                .eq_ignore_ascii_case(tl)
+        })
+        .and_then(|p| p.disk_number);
+    let target_disk = match target_disk {
+        Some(d) => d,
+        None => {
+            println!("[ACTIVE] 未能确定 {} 的物理磁盘号，跳过清同盘其他活动标志", target);
+            return;
+        }
+    };
+    for p in partitions {
+        let pl = p.letter.trim_end_matches('\\').trim_end_matches(':');
+        if p.disk_number == Some(target_disk) && !pl.is_empty() && !pl.eq_ignore_ascii_case(tl) {
+            let script = format!("select volume {}\r\ninactive\r\nexit\r\n", pl);
+            let tmp = std::env::temp_dir().join("lr_xp_deactivate.txt");
+            if std::fs::write(&tmp, script.as_bytes()).is_err() {
+                continue;
+            }
+            let tmp_str = tmp.to_string_lossy().into_owned();
+            let out = crate::utils::cmd::create_command("diskpart")
+                .args(["/s", tmp_str.as_str()])
+                .output();
+            let _ = std::fs::remove_file(&tmp);
+            match out {
+                Ok(o) => println!(
+                    "[ACTIVE] 已尝试清同盘分区 {}: 的活动标志（disk {}）：{}",
+                    pl,
+                    target_disk,
+                    crate::utils::encoding::gbk_to_utf8(&o.stdout).trim()
+                ),
+                Err(e) => println!("[ACTIVE] 清 {}: 活动标志失败（忽略）：{}", pl, e),
+            }
+        }
+    }
 }
 
 /// 导出驱动
