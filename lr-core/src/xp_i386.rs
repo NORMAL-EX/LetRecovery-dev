@@ -78,6 +78,24 @@ pub fn install_from_i386(
         }
     }
 
+    // 0.4) 源完整性硬校验：文本安装阶段必需的核心文件必须在源里（每个正版 XP/2003 i386/AMD64 源都有）。
+    //      精简/重封装介质若缺这些，重启会卡蓝屏「文件无法加载 / inf 损坏」——在动盘、拷几个 G 之前
+    //      就明确报错。下面拷完后还会在【目标】里复测一遍，确保它们真拷过去了。
+    const REQUIRED_FILES: [&str; 5] =
+        ["biosinfo.inf", "setupdd.sy_", "ntkrnlmp.ex_", "ntfs.sy_", "setupreg.hiv"];
+    let missing_src: Vec<&str> = REQUIRED_FILES
+        .iter()
+        .copied()
+        .filter(|n| !i386_src.join(n).exists())
+        .collect();
+    if !missing_src.is_empty() {
+        return Err(format!(
+            "源 {} 缺少文本安装必需文件: {}。这不是完整的 XP/2003 安装源（疑似精简/重封装介质），无法进入蓝屏文本安装。",
+            i386_src.display(),
+            missing_src.join(", ")
+        ));
+    }
+
     // 0.5) 关键修复：确认目标分区根目录此刻【真的可写】，带重试。
     //      之前实机报「创建 C:\$WIN_NT$.~LS\I386 失败: 系统找不到指定的路径 (os error 3)」即出在
     //      下一步的 create_dir：刚格式化结束时盘符可能短暂卸载/重挂，或所选盘符当前并未挂载。
@@ -101,13 +119,35 @@ pub fn install_from_i386(
     log.push_str(&format!("复制 {src_sub_name} 源到 {ls_src} ...\n"));
     create_dir_all_retry(&ls_src).map_err(|e| format!("创建 {ls_src} 失败: {e}"))?;
     let src = i386_src.to_string_lossy().to_string();
+    // /C：单个文件出错（被占用/锁定等）也继续拷其余文件，不因一个非关键文件失败就整盘中止
+    //    （照搬 DSI 的容错——它直接忽略 xcopy 退出码）。但比 DSI 更稳：拷完后在【目标】里复测核心
+    //    文件是否到位，而不是去猜「xcopy 加 /C 后非 0 退出」到底是部分跳过还是整体失败。
     let out = new_command("xcopy")
-        .args([src.as_str(), ls_src.as_str(), "/E", "/I", "/H", "/R", "/Y", "/Q"])
+        .args([src.as_str(), ls_src.as_str(), "/E", "/I", "/H", "/C", "/R", "/Y", "/Q"])
         .output()
         .map_err(|e| format!("xcopy 执行失败: {e}"))?;
     log.push_str(&gbk_to_utf8(&out.stdout));
     if !out.status.success() {
-        return Err(format!("复制 i386 失败:\n{}", gbk_to_utf8(&out.stderr)));
+        // 有 /C 时非 0 退出多半是「部分文件被占用已跳过」而非整体失败；不直接判错，交给下面的
+        // 「目标核心文件实测」定夺，但记下来便于排查。
+        log.push_str(&format!(
+            "警告: xcopy 返回非 0（已用 /C 跳过出错文件继续）：{}\n",
+            gbk_to_utf8(&out.stderr).trim()
+        ));
+    }
+    // 拷贝结果硬校验（真正权威的成功判据，不依赖 xcopy 退出码）：核心文件必须真的落进了本地源目录。
+    // 若因被占用/中断导致核心文件没拷过去，文本安装必然蓝屏，这里就要拦下。
+    let ls_path = Path::new(&ls_src);
+    let missing_dst: Vec<&str> = REQUIRED_FILES
+        .iter()
+        .copied()
+        .filter(|n| !ls_path.join(n).exists())
+        .collect();
+    if !missing_dst.is_empty() {
+        return Err(format!(
+            "复制到本地源 {ls_src} 后仍缺少核心文件: {}（源文件可能被占用或复制中断）。已用 /C 跳过出错文件，但这些是必需的，无法继续。",
+            missing_dst.join(", ")
+        ));
     }
 
     // 1.4) XP x64 / Server 2003 x64：本地源要【两份都拷】——照搬 DSI（§四 同时 xcopy AMD64 与 I386）。
@@ -182,22 +222,6 @@ pub fn install_from_i386(
     log.push_str(&format!(
         "$WIN_NT$.~BT 引导文件：按清单复制 {bt_copied} 个（源中缺 {bt_missing} 个，已跳过）\n"
     ));
-
-    // 1.7) 硬校验：文本安装阶段必需的几个核心文件必须在源里（每个正版 XP/2003 i386/AMD64 源都有）。
-    //      精简/重封装介质若缺这些，重启会卡在蓝屏「文件无法加载 / inf 损坏」——宁可现在就明确报错。
-    let required = ["biosinfo.inf", "setupdd.sy_", "ntkrnlmp.ex_", "ntfs.sy_", "setupreg.hiv"];
-    let missing: Vec<&str> = required
-        .iter()
-        .copied()
-        .filter(|n| !i386_src.join(n).exists())
-        .collect();
-    if !missing.is_empty() {
-        return Err(format!(
-            "源 {} 缺少文本安装必需文件: {}。这不是完整的 XP/2003 安装源（疑似精简/重封装介质），无法进入蓝屏文本安装。",
-            i386_src.display(),
-            missing.join(", ")
-        ));
-    }
 
     // 2) 引导文件落根目录：
     //    setupldr.bin -> \NTLDR（开机直接进文本安装）；ntdetect.com -> \NTDETECT.COM；
