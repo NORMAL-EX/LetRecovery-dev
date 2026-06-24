@@ -241,6 +241,17 @@ pub fn install_from_i386(
         if src_sub_name == "AMD64" { "amd64" } else { "x86" },
         drivers.len()
     ));
+    // 32 位 i386 介质却一个文本期存储驱动都没扫到：自带的 AHCI/NVMe 驱动是 64 位（仅 AMD64 介质可用），
+    // bin\drivers\xp\x86 默认是空的。此时蓝底文本安装很可能「找不到硬盘」——醒目提示用户切 IDE 或自备 32 位驱动，
+    // 避免装到一半才在蓝屏里发现没驱动（与 DSI 一样不内置 32 位 AHCI 驱动，这是已知能力缺口而非错误）。
+    if drivers.is_empty() && src_sub_name != "AMD64" {
+        log.push_str(
+            "⚠ 警告: 未集成任何 32 位文本期存储驱动（bin\\drivers\\xp\\x86 为空，自带 AHCI/NVMe 驱动是 64 位、仅 AMD64 介质可用）。\
+             若重启进蓝底文本安装时提示「Setup 找不到硬盘 / Setup did not find any hard disk drives」，\
+             请进 BIOS 把 SATA/存储模式切到 IDE / Compatibility / Legacy 后重试；\
+             或把 32 位 AHCI/NVMe 驱动（.inf+.sys）放进 bin\\drivers\\xp\\x86 再重做。\n",
+        );
+    }
     let (final_txtsetup, drvlog) =
         crate::xp_textmode_drv::integrate(&txt, &drivers, &[Path::new(&ls_src), Path::new(&bt)]);
     log.push_str(&drvlog);

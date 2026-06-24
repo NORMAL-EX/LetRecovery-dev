@@ -115,6 +115,9 @@ pub fn integrate(txtsetup: &str, drivers: &[TxtmodeDriver], copy_dirs: &[&Path])
     let mut scsi_load: Vec<String> = Vec::new();
     let mut scsi: Vec<String> = Vec::new();
     let mut hwid_db: Vec<String> = Vec::new();
+    // 跨驱动去重：多个驱动可能共享依赖 .sys（如 ahci 与 nvme 目录都带 storport.sys / ntoskrn8.sys），
+    // [SourceDisksFiles] 同名文件只能写一行，否则会在追加块里产生重复键。键名大小写不敏感。
+    let mut sdf_seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for d in drivers {
         // 1) 拷所有 .sys 进每个目标目录（覆盖同名——让魔改 storport.sys 替换原版）。
@@ -139,8 +142,11 @@ pub fn integrate(txtsetup: &str, drivers: &[TxtmodeDriver], copy_dirs: &[&Path])
             if copied_any {
                 log.push_str(&format!("[TXTDRV] 拷入 {} 个目标: {}\n", copy_dirs.len(), name));
             }
-            // [SourceDisksFiles] 仅在原 txtsetup 没有该键时加（避免与原版 storport.sys 等重复键）。
-            if !section_has_key(txtsetup, "[SourceDisksFiles]", &name) {
+            // [SourceDisksFiles]：原 txtsetup 没有该键、且本次还没为同名文件加过行时才加
+            //（既避免与原版 storport.sys 等重复键，也避免多个驱动共享依赖 .sys 时重复键）。
+            if sdf_seen.insert(name.to_ascii_lowercase())
+                && !section_has_key(txtsetup, "[SourceDisksFiles]", &name)
+            {
                 source_disks_files.push(format!("{} = 1,,,,,,4_,4,1,,,1,4", name));
             }
         }
@@ -477,5 +483,50 @@ ServiceBinary  = %12%\\stornvme.sys
         assert!(out.contains("genahci = \"genahci (LetRecovery textmode)\""));
         assert!(out.contains("PCI\\CC_010601 = \"genahci\""));
         // storport.sys 已存在不重复加；这里没有可拷 .sys 故 SourceDisksFiles 不新增
+    }
+
+    #[test]
+    fn integrate_dedups_shared_sys_across_drivers() {
+        // ahci 与 nvme 两个驱动各自的目录都带 storport.sys / ntoskrn8.sys（依赖）。
+        // [SourceDisksFiles] 里每个文件名只能出现一行，不能因被两个驱动各扫到而写两次。
+        // （.sys 不存在 → 拷贝只记警告，但 SourceDisksFiles 行照常按去重逻辑生成。）
+        let ts = "[SourceDisksFiles]\r\n[SCSI.Load]\r\n[SCSI]\r\n[HardwareIdsDatabase]\r\n";
+        let mk = |svc: &str, files: &[&str]| TxtmodeDriver {
+            service: svc.into(),
+            miniport_sys: format!("{svc}.sys"),
+            desc: format!("{svc} (LetRecovery textmode)"),
+            hwids: vec![],
+            sys_files: files
+                .iter()
+                .map(|s| PathBuf::from(format!("/nonexistent/{s}")))
+                .collect(),
+        };
+        let ahci = mk("genahci", &["genahci.sys", "ntoskrn8.sys", "storport.sys"]);
+        let nvme = mk("stornvme", &["stornvme.sys", "ntoskrn8.sys", "storport.sys"]);
+        let (out, _log) = integrate(ts, &[ahci, nvme], &[Path::new("/nonexistent-dst")]);
+
+        let count_in_sdf = |key: &str| -> usize {
+            let mut in_sec = false;
+            let mut n = 0;
+            for line in out.lines() {
+                let t = line.trim();
+                if t.starts_with('[') && t.ends_with(']') {
+                    in_sec = t.eq_ignore_ascii_case("[SourceDisksFiles]");
+                    continue;
+                }
+                if in_sec {
+                    if let Some((k, _)) = t.split_once('=') {
+                        if k.trim().eq_ignore_ascii_case(key) {
+                            n += 1;
+                        }
+                    }
+                }
+            }
+            n
+        };
+        assert_eq!(count_in_sdf("storport.sys"), 1, "共享依赖 storport.sys 应只一行");
+        assert_eq!(count_in_sdf("ntoskrn8.sys"), 1, "共享依赖 ntoskrn8.sys 应只一行");
+        assert_eq!(count_in_sdf("genahci.sys"), 1);
+        assert_eq!(count_in_sdf("stornvme.sys"), 1);
     }
 }
