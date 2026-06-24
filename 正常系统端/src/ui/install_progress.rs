@@ -994,39 +994,48 @@ fn inject_user_version_drivers(target_partition: &str, is_xp: bool) {
     }
 }
 
-/// 格式化分区
+/// 格式化分区（用 diskpart，而不是 format.com）
 fn format_partition(partition: &str) -> anyhow::Result<()> {
     use crate::utils::cmd::create_command;
 
-    println!("[FORMAT] 格式化分区: {}", partition);
+    let letter = partition.trim_end_matches('\\').trim_end_matches(':');
+    println!("[FORMAT] 用 diskpart 格式化分区: {} (volume {})", partition, letter);
 
-    // 注意：format 没有 /Y 开关（无效开关会让格式化静默失败）。用管道喂确认：第一行 y 答
-    // 「Proceed with Format (Y/N)?」，第二行空行答结尾「卷标」提问。失败原因多在 stdout 不在 stderr。
-    // （不再在 format 前 fsutil 卸载该卷——那样会把盘符卸掉，紧接着 format 反而报「指定的驱动器不存在」。）
-    let mut last_reason = String::new();
-    for attempt in 1..=2 {
-        let output = create_command("cmd")
-            .args(["/c", &format!("(echo y&echo.)|format {} /FS:NTFS /Q", partition)])
-            .output()?;
-        let stdout = crate::utils::encoding::gbk_to_utf8(&output.stdout);
-        let stderr = crate::utils::encoding::gbk_to_utf8(&output.stderr);
-        println!("[FORMAT] (尝试 {}) status={:?}", attempt, output.status.code());
-        println!("[FORMAT] (尝试 {}) stdout: {}", attempt, stdout);
-        println!("[FORMAT] (尝试 {}) stderr: {}", attempt, stderr);
-        if output.status.success() {
-            return Ok(());
-        }
-        // 失败原因多打印在 stdout（如「无法锁定驱动器，卷仍在使用中」/「Cannot lock the drive」），
-        // 取 stdout+stderr 拼成可读原因，方便用户/日志定位，而不是空白。
-        last_reason = format!("{} {}", stdout.trim(), stderr.trim()).trim().to_string();
-        std::thread::sleep(std::time::Duration::from_millis(800));
+    // 用 diskpart 格式化，而不是 format.com 管道喂提示：
+    // format.com 在【卷已有卷标】时会先问「输入驱动器 X: 的当前卷标」做安全确认，喂 y 会被当成卷标 →
+    // 报「卷标不正确」中止（实机 C:(卷标 DATA) 就栽在这）。diskpart 不问卷标，直接快速格式化为 NTFS；
+    // override 在卷被占用（如 PE 资源管理器正浏览该盘）时强制卸载文件系统后再格式化，且不丢盘符。
+    let script =
+        format!("select volume {letter}\r\nformat fs=ntfs quick override\r\nexit\r\n");
+    let tmp = std::env::temp_dir().join("lr_xp_format.txt");
+    std::fs::write(&tmp, script.as_bytes())?;
+    let tmp_str = tmp.to_string_lossy().into_owned();
+    let output = create_command("diskpart")
+        .args(["/s", tmp_str.as_str()])
+        .output()?;
+    let _ = std::fs::remove_file(&tmp);
+
+    let stdout = crate::utils::encoding::gbk_to_utf8(&output.stdout);
+    let stderr = crate::utils::encoding::gbk_to_utf8(&output.stderr);
+    println!("[FORMAT] diskpart stdout:\n{}", stdout);
+    println!("[FORMAT] diskpart stderr:\n{}", stderr);
+
+    // diskpart 即使出错也常返回 0，故按输出判断成功：含「成功格式化 / successfully formatted」才算成功。
+    let lo = stdout.to_ascii_lowercase();
+    if stdout.contains("成功格式化") || lo.contains("successfully formatted") {
+        println!("[FORMAT] diskpart 格式化成功");
+        return Ok(());
     }
-    let reason = if last_reason.is_empty() {
-        "format 返回非 0（无输出）。请关闭正在浏览该分区的资源管理器/程序后重试，或确认它不是只读/受占用。".to_string()
+
+    // 失败：diskpart 把具体原因打印在 stdout（如找不到卷/卷被锁定）。把完整输出回报，便于定位。
+    let reason = format!("{}\n{}", stdout.trim(), stderr.trim());
+    let reason = reason.trim();
+    let reason = if reason.is_empty() {
+        "diskpart 无输出，格式化失败。请确认该分区未被占用后重试。"
     } else {
-        last_reason
+        reason
     };
-    anyhow::bail!("格式化失败: {}", reason);
+    anyhow::bail!("格式化失败（diskpart）: {}", reason);
 }
 
 /// 导出驱动
