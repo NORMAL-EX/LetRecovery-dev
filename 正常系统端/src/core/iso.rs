@@ -397,11 +397,28 @@ impl IsoMounter {
         false
     }
 
-    /// 该盘符是否为 XP/2003 的 i386 文本安装介质（无 \sources，有 \I386\setupldr.bin）。
-    /// 返回 i386 目录路径。
+    /// 该盘符是否为 XP/2003 文本安装介质（无 \sources，有 \AMD64 或 \I386 的 setupldr.bin）。
+    /// 返回该 arch 目录路径。
+    ///
+    /// 关键：**优先 AMD64**。XP x64 / Server 2003 x64 介质同时含 `\AMD64`（真正完整的 64 位安装源）
+    /// 和 `\I386`（仅 32 位 WOW 支持文件，**残缺**、没有 ntfs.sy_ 等引导文件）。若按 I386 优先会选中
+    /// 残缺目录导致安装失败。故先认完整源：除 setupldr.bin 外还要求 ntfs.sy_ 存在（残缺的 \I386 缺它）。
     pub fn xp_i386_dir(drive: &str) -> Option<String> {
         let d = drive.trim_end_matches('\\');
-        for arch in ["I386", "AMD64"] {
+        // 第一轮：完整可引导源（setupldr.bin + ntfs 驱动）。AMD64 优先。
+        // ntfs.sy_（压缩名，retail）或 ntfs.sys（解压重封装）任一即可——残缺的 x64 \I386 两者都没有。
+        for arch in ["AMD64", "I386"] {
+            let dir = format!("{}\\{}", d, arch);
+            let has_setupldr = Path::new(&format!("{}\\setupldr.bin", dir)).exists();
+            let has_ntfs = Path::new(&format!("{}\\ntfs.sy_", dir)).exists()
+                || Path::new(&format!("{}\\ntfs.sys", dir)).exists();
+            if has_setupldr && has_ntfs {
+                return Some(dir);
+            }
+        }
+        // 兜底：只有 setupldr.bin 的目录（个别重封装介质 ntfs.sy_ 名字不同）。仍 AMD64 优先；
+        // 真残缺时交由引擎的「必需文件校验」给出明确报错（缺哪个文件），而不是默默跑挂。
+        for arch in ["AMD64", "I386"] {
             let dir = format!("{}\\{}", d, arch);
             if Path::new(&format!("{}\\setupldr.bin", dir)).exists() {
                 return Some(dir);

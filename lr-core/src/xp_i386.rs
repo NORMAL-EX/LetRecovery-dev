@@ -110,6 +110,32 @@ pub fn install_from_i386(
         return Err(format!("复制 i386 失败:\n{}", gbk_to_utf8(&out.stderr)));
     }
 
+    // 1.4) XP x64 / Server 2003 x64：本地源要【两份都拷】——照搬 DSI（§四 同时 xcopy AMD64 与 I386）。
+    //      x64 介质的 \I386 是 32 位 WoW 组件目录（残缺、非可引导源），GUI 安装阶段装 WoW64（32 位
+    //      子系统）要从 LS\I386 取文件；只拷 \AMD64 会导致图形阶段缺 32 位组件。引导/BT 仍只用 AMD64。
+    if src_sub_name == "AMD64" {
+        if let Some(sib_i386) = i386_src.parent().map(|p| p.join("I386")) {
+            if sib_i386.exists() {
+                let s = sib_i386.to_string_lossy().to_string();
+                let d = format!("{win}\\$WIN_NT$.~LS\\I386");
+                let _ = create_dir_all_retry(&d);
+                match new_command("xcopy")
+                    .args([s.as_str(), d.as_str(), "/E", "/I", "/H", "/R", "/Y", "/Q"])
+                    .output()
+                {
+                    Ok(o) if o.status.success() => {
+                        log.push_str("已并拷同级 \\I386（32 位 WoW64 组件）→ $WIN_NT$.~LS\\I386\n")
+                    }
+                    Ok(o) => log.push_str(&format!(
+                        "警告: 并拷 \\I386（WoW64）非 0：{}；XP x64 图形阶段可能缺 32 位组件\n",
+                        gbk_to_utf8(&o.stderr)
+                    )),
+                    Err(e) => log.push_str(&format!("警告: 并拷 \\I386（WoW64）失败：{e}\n")),
+                }
+            }
+        }
+    }
+
     // 1.5) 建空 $OEM$（OemPreinstall=Yes 需要它存在；空目录无副作用）。失败要记日志：
     //      否则文本安装阶段会因 OemPreinstall=Yes 找不到 $OEM$ 而报错。
     if let Err(e) = create_dir_all_retry(&format!("{win}\\$WIN_NT$.~LS\\$OEM$")) {

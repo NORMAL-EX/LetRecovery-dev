@@ -11,6 +11,10 @@
 即识别为 XP/2003 i386 文本安装介质（`iso::xp_i386_dir` / `is_valid_i386`），UI 显示绿色
 「已识别为 Windows XP/2003 i386 文本安装介质」。
 
+> **架构优先 AMD64**：XP x64 / Server 2003 x64 介质同时含 `\AMD64`（完整 64 位源）与 `\I386`
+> （仅 WOW 支持文件、**残缺**、无 `ntfs.sy_` 等引导文件）。`xp_i386_dir` 先认完整源（要求
+> `setupldr.bin` + `ntfs.sy_`）、AMD64 优先，避免误选残缺的 `\I386`；32 位介质只有 `\I386` 时正常回落。
+
 ## 准备流程（重启前在 PE/当前系统里做）
 
 目标盘 `WIN`（如 `C:`），来源 `i386_src`（如挂载盘 `G:\I386`）：
@@ -19,6 +23,8 @@
    卸载/重挂，过去会在下一步 `create_dir` 抛裸 `os error 3（系统找不到指定的路径）`；
    现在带 ~5s 重试，过不了就给出可读原因（盘符未挂载 / 非 NTFS / GPT 等）。
 2. **本地源**：`xcopy <arch>`（I386/AMD64）→ `WIN\$WIN_NT$.~LS\<arch>`；建空 `$WIN_NT$.~LS\$OEM$`。
+   - **XP x64 双拷**（照搬 DSI §四）：当源是 `\AMD64` 时，同级若有 `\I386`（32 位 WoW 组件）一并
+     拷到 `LS\I386`——GUI 安装阶段装 WoW64 子系统要用。引导/BT 仍只用 `\AMD64`（完整可引导源）。
 3. **`$WIN_NT$.~BT`（BootPath）**：拷 `<arch>\SYSTEM32` 整目录 → `$WIN_NT$.~BT\SYSTEM32`；
    按内嵌清单 `xp_nt5_bootfiles.txt`（照搬 DSI `nt5\NT5.txt`，~150 文件）把 `<arch>\<名>`
    **原样**（压缩名 `.SY_/.DL_/.EX_` 不解压，setupdd 自理）复制进 `$WIN_NT$.~BT\`。源里缺的条目跳过。
