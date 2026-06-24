@@ -253,11 +253,6 @@ pub fn install_from_i386(
     //    setupldr/setupdd 自会用 $WIN_NT$.~BT 作引导路径、$WIN_NT$.~LS 作源）。仅做文本期驱动集成，
     //    再写入 $WIN_NT$.~BT\TXTSETUP.SIF（setupldr 实际读这份）与根目录各一份。
     let raw = std::fs::read(&txtsetup).map_err(|e| format!("读 txtsetup.sif 失败: {e}"))?;
-    let txt = match String::from_utf8(raw.clone()) {
-        Ok(s) => s,
-        Err(_) => gbk_to_utf8(&raw),
-    };
-    let txt = normalize_crlf(&txt);
 
     // 文本期存储驱动集成（按架构）：驱动 .sys 同时拷进源($WIN_NT$.~LS\<arch>)与引导($WIN_NT$.~BT)。
     let xp_drv = bin_dir.join("drivers").join("xp");
@@ -283,30 +278,54 @@ pub fn install_from_i386(
              或把 32 位 AHCI/NVMe 驱动（.inf+.sys）放进 bin\\drivers\\xp\\x86 再重做。\n",
         );
     }
-    let (final_txtsetup, drvlog) =
-        crate::xp_textmode_drv::integrate(&txt, &drivers, &[Path::new(&ls_src), Path::new(&bt)]);
-    log.push_str(&drvlog);
-
-    write_force(&format!("{bt}\\TXTSETUP.SIF"), final_txtsetup.as_bytes())
+    // 关键编码处理：txtsetup.sif 是 ANSI（中文版=GBK/CP936），setupdd 按 ANSI 读它。绝不能改写成 UTF-8——
+    //   否则非 ASCII 行全乱 → 蓝屏「安装程序用在第 N 行上的 .SIF 文件中有一个语法错误」。
+    //   · 无驱动要集成（原版 32 位 i386 即此路）：原样写源文件字节，一个字节都不动（最稳，且 NT5.txt 清单
+    //     已把同一份字节拷进 $WIN_NT$.~BT，这里只是覆盖成相同内容 + 落一份到根目录）。
+    //   · 有驱动要集成：解码→追加 ASCII 集成行→按【原编码】写回（原是 GBK 就编回 GBK；追加的都是 ASCII，无损）。
+    let txtsetup_bytes: Vec<u8> = if drivers.is_empty() {
+        log.push_str("文本期无驱动集成：TXTSETUP.SIF 原样写入（保持原 ANSI/GBK 编码不变）\n");
+        raw.clone()
+    } else {
+        let was_utf8 = std::str::from_utf8(&raw).is_ok();
+        let txt = if was_utf8 {
+            String::from_utf8_lossy(&raw).into_owned()
+        } else {
+            gbk_to_utf8(&raw)
+        };
+        let txt = normalize_crlf(&txt);
+        let (final_txtsetup, drvlog) =
+            crate::xp_textmode_drv::integrate(&txt, &drivers, &[Path::new(&ls_src), Path::new(&bt)]);
+        log.push_str(&drvlog);
+        // 原是 GBK 就编回 GBK（集成追加的都是 ASCII，是 GBK 子集，无损）；原本就是纯 ASCII/UTF-8 才按 UTF-8 写。
+        if was_utf8 {
+            final_txtsetup.into_bytes()
+        } else {
+            crate::encoding::utf8_to_gbk(&final_txtsetup)
+        }
+    };
+    write_force(&format!("{bt}\\TXTSETUP.SIF"), &txtsetup_bytes)
         .map_err(|e| format!("写 $WIN_NT$.~BT\\TXTSETUP.SIF 失败: {e}"))?;
-    write_force(&format!("{win}\\TXTSETUP.SIF"), final_txtsetup.as_bytes())
+    write_force(&format!("{win}\\TXTSETUP.SIF"), &txtsetup_bytes)
         .map_err(|e| format!("写根 TXTSETUP.SIF 失败: {e}"))?;
-    log.push_str("已写入 TXTSETUP.SIF（$WIN_NT$.~BT 与根；含文本期驱动集成）\n");
+    log.push_str("已写入 TXTSETUP.SIF（$WIN_NT$.~BT 与根）\n");
 
     // 4) winnt.sif 应答：优先用户自定义；否则内置生成。无论哪种，都【强制写入硬盘安装必需的键】
     //    （照搬 DSI 的 NT5部署无人值守：MsDosInitiated=1 / Floppyless=1 / AutoPartition=0 /
     //    UnattendedInstall=Yes / OemPreinstall=Yes）——缺它们文本安装会去找光盘而失败。
     //    放在 $WIN_NT$.~BT\WINNT.SIF（文本安装阶段读这份）。
-    let sif_raw = match custom_sif {
+    let (sif_raw, sif_was_utf8) = match custom_sif {
         Some(p) if p.exists() => {
             let raw = std::fs::read(p)
                 .map_err(|e| format!("读自定义 winnt.sif 失败 {}: {e}", p.display()))?;
-            let s = match String::from_utf8(raw.clone()) {
-                Ok(s) => s,
-                Err(_) => gbk_to_utf8(&raw),
+            let was_utf8 = std::str::from_utf8(&raw).is_ok();
+            let s = if was_utf8 {
+                String::from_utf8_lossy(&raw).into_owned()
+            } else {
+                gbk_to_utf8(&raw)
             };
             log.push_str(&format!("使用自定义无人值守应答: {}\n", p.display()));
-            normalize_crlf(&s)
+            (normalize_crlf(&s), was_utf8)
         }
         _ => {
             let product_key = read_product_key(bin_dir);
@@ -318,11 +337,18 @@ pub fn install_from_i386(
                     "未提供产品密钥（可放 bin\\xp\\productkey.txt 实现全自动）→ 仅「密钥」页停顿，其余无人值守\n",
                 ),
             }
-            winnt_sif(product_key.as_deref())
+            // 内置生成的应答是纯 ASCII，按 UTF-8(=ASCII) 写即可。
+            (winnt_sif(product_key.as_deref()), true)
         }
     };
     let sif_content = force_winnt_keys(&sif_raw);
-    write_force(&format!("{bt}\\WINNT.SIF"), sif_content.as_bytes())
+    // 同 txtsetup：WINNT.SIF 也按 ANSI 读，原是 GBK（自定义中文应答）就编回 GBK，别改成 UTF-8。
+    let sif_bytes = if sif_was_utf8 {
+        sif_content.into_bytes()
+    } else {
+        crate::encoding::utf8_to_gbk(&sif_content)
+    };
+    write_force(&format!("{bt}\\WINNT.SIF"), &sif_bytes)
         .map_err(|e| format!("写 $WIN_NT$.~BT\\WINNT.SIF 失败: {e}"))?;
     log.push_str("已写入 $WIN_NT$.~BT\\WINNT.SIF（已强制 MsDosInitiated=1 等硬盘安装必需键）\n");
 
