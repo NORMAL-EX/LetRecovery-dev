@@ -55,7 +55,7 @@ pub enum BootModeSelection {
 impl std::fmt::Display for BootModeSelection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            BootModeSelection::Auto => write!(f, "自动"),
+            BootModeSelection::Auto => write!(f, "{}", tr!("自动")),
             BootModeSelection::UEFI => write!(f, "UEFI"),
             BootModeSelection::Legacy => write!(f, "Legacy"),
         }
@@ -157,9 +157,9 @@ pub enum DriverAction {
 impl std::fmt::Display for DriverAction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            DriverAction::None => write!(f, "无"),
-            DriverAction::SaveOnly => write!(f, "仅保存"),
-            DriverAction::AutoImport => write!(f, "自动导入"),
+            DriverAction::None => write!(f, "{}", tr!("无")),
+            DriverAction::SaveOnly => write!(f, "{}", tr!("仅保存")),
+            DriverAction::AutoImport => write!(f, "{}", tr!("自动导入")),
         }
     }
 }
@@ -1133,8 +1133,8 @@ impl App {
         self.download_save_path = exe_dir.join("downloads").to_string_lossy().to_string();
 
         // 设置默认备份名称
-        self.backup_name = format!("系统备份_{}", chrono::Local::now().format("%Y%m%d_%H%M%S"));
-        self.backup_description = "使用 LetRecovery 创建的系统备份".to_string();
+        self.backup_name = tr!("系统备份_{}", chrono::Local::now().format("%Y%m%d_%H%M%S"));
+        self.backup_description = tr!("使用 LetRecovery 创建的系统备份");
         
         // 预加载Windows分区信息（后台异步）
         self.start_load_windows_partitions();
@@ -1256,8 +1256,8 @@ impl App {
         self.download_save_path = exe_dir.join("downloads").to_string_lossy().to_string();
 
         // 设置默认备份名称
-        self.backup_name = format!("系统备份_{}", chrono::Local::now().format("%Y%m%d_%H%M%S"));
-        self.backup_description = "使用 LetRecovery 创建的系统备份".to_string();
+        self.backup_name = tr!("系统备份_{}", chrono::Local::now().format("%Y%m%d_%H%M%S"));
+        self.backup_description = tr!("使用 LetRecovery 创建的系统备份");
         
         // 预加载Windows分区信息（后台异步）
         self.start_load_windows_partitions();
@@ -1449,7 +1449,7 @@ impl eframe::App for App {
         
         // 错误对话框
         if self.show_error_dialog {
-            egui::Window::new("错误")
+            egui::Window::new(tr!("错误"))
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
@@ -1460,7 +1460,7 @@ impl eframe::App for App {
                         ui.add_space(10.0);
                         ui.label(&self.error_dialog_message);
                         ui.add_space(20.0);
-                        if ui.button("确定").clicked() {
+                        if ui.button(tr!("确定")).clicked() {
                             self.show_error_dialog = false;
                             self.error_dialog_message.clear();
                         }
@@ -1471,7 +1471,7 @@ impl eframe::App for App {
         
         // 无人值守冲突提示对话框
         if self.show_unattend_conflict_modal {
-            egui::Window::new("无人值守选项不可用")
+            egui::Window::new(tr!("无人值守选项不可用"))
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
@@ -1483,31 +1483,31 @@ impl eframe::App for App {
                         ui.add_space(10.0);
                     });
                     
-                    ui.label("目标分区的系统文件中已存在无人值守配置文件（unattend.xml）。");
+                    ui.label(tr!("目标分区的系统文件中已存在无人值守配置文件（unattend.xml）。"));
                     ui.add_space(10.0);
-                    ui.label("为避免配置冲突导致安装失败，无人值守选项已被禁用。");
+                    ui.label(tr!("为避免配置冲突导致安装失败，无人值守选项已被禁用。"));
                     ui.add_space(10.0);
                     
                     ui.separator();
                     ui.add_space(5.0);
                     
-                    ui.label(egui::RichText::new("以下高级选项也将受到影响：").strong());
+                    ui.label(egui::RichText::new(tr!("以下高级选项也将受到影响：")).strong());
                     ui.add_space(5.0);
-                    ui.label("• OOBE绕过强制联网");
-                    ui.label("• 自定义用户名");
-                    ui.label("• 删除预装UWP应用");
+                    ui.label(tr!("• OOBE绕过强制联网"));
+                    ui.label(tr!("• 自定义用户名"));
+                    ui.label(tr!("• 删除预装UWP应用"));
                     
                     ui.add_space(10.0);
                     ui.separator();
                     ui.add_space(5.0);
                     
-                    ui.label(egui::RichText::new("解决方法：").small());
-                    ui.label(egui::RichText::new("勾选「格式化分区」选项，安装时将清除现有配置文件。").small());
+                    ui.label(egui::RichText::new(tr!("解决方法：")).small());
+                    ui.label(egui::RichText::new(tr!("勾选「格式化分区」选项，安装时将清除现有配置文件。")).small());
                     
                     ui.add_space(15.0);
                     
                     ui.vertical_centered(|ui| {
-                        if ui.button("我知道了").clicked() {
+                        if ui.button(tr!("我知道了")).clicked() {
                             self.show_unattend_conflict_modal = false;
                         }
                     });
@@ -1533,13 +1533,13 @@ impl eframe::App for App {
         egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
             ui.horizontal(|ui| {
                 if let Some(info) = &self.system_info {
-                    ui.label(format!(
+                    ui.label(tr!(
                         "启动模式: {} | TPM: {} {} | 安全启动: {} | {}",
                         info.boot_mode,
                         if info.tpm_enabled {
-                            "已启用"
+                            tr!("已启用")
                         } else {
-                            "已禁用"
+                            tr!("已禁用")
                         },
                         if !info.tpm_version.is_empty() {
                             format!("v{}", info.tpm_version)
@@ -1547,14 +1547,14 @@ impl eframe::App for App {
                             String::new()
                         },
                         if info.secure_boot {
-                            "已开启"
+                            tr!("已开启")
                         } else {
-                            "已关闭"
+                            tr!("已关闭")
                         },
                         if info.is_pe_environment {
-                            "PE环境"
+                            tr!("PE环境")
                         } else {
-                            "桌面环境"
+                            tr!("桌面环境")
                         },
                     ));
                 }
@@ -1814,7 +1814,7 @@ impl eframe::App for App {
                 self.last_is_xp = Some(is_xp);
             }
 
-            egui::Window::new("高级选项")
+            egui::Window::new(tr!("高级选项"))
                 .open(&mut self.show_advanced_options)
                 .min_width(500.0)
                 .min_height(400.0)

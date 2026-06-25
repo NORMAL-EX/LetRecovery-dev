@@ -6,6 +6,7 @@
 use egui;
 use std::sync::mpsc;
 
+use crate::tr;
 use crate::app::App;
 use crate::core::install_config::{ConfigFileManager, ExpandConfig};
 use crate::core::quick_partition::{get_physical_disks, query_shrink_max};
@@ -113,7 +114,7 @@ impl App {
         self.show_expand_c_dialog = true;
         self.expand_c_state = ExpandCDialogState::default();
         self.expand_c_state.loading = true;
-        self.expand_c_state.message = "正在分析 C 盘可扩容空间...".to_string();
+        self.expand_c_state.message = tr!("正在分析 C 盘可扩容空间...");
 
         // 启动后台加载
         self.start_load_expand_c_info();
@@ -145,7 +146,7 @@ impl App {
                 self.expand_c_state.reason = result.reason.clone();
 
                 if !result.found {
-                    self.expand_c_state.message = "未找到当前系统 C 盘".to_string();
+                    self.expand_c_state.message = tr!("未找到当前系统 C 盘");
                 } else if !result.can_expand {
                     self.expand_c_state.message = result.reason.clone();
                 } else {
@@ -174,7 +175,7 @@ impl App {
 
         let mut window_open = self.show_expand_c_dialog;
 
-        egui::Window::new("无损扩大C盘")
+        egui::Window::new(tr!("无损扩大C盘"))
             .open(&mut window_open)
             .resizable(true)
             .default_width(520.0)
@@ -185,7 +186,7 @@ impl App {
                     ui.vertical_centered(|ui| {
                         ui.add_space(40.0);
                         ui.spinner();
-                        ui.label("正在分析 C 盘可扩容空间...");
+                        ui.label(tr!("正在分析 C 盘可扩容空间..."));
                     });
                     return;
                 }
@@ -195,7 +196,7 @@ impl App {
                     ui.vertical_centered(|ui| {
                         ui.add_space(40.0);
                         ui.spinner();
-                        ui.label("正在准备扩容环境，请勿中断...");
+                        ui.label(tr!("正在准备扩容环境，请勿中断..."));
                     });
                     return;
                 }
@@ -207,31 +208,31 @@ impl App {
                     let free_gb = self.expand_c_state.free_mb as f64 / 1024.0;
                     let max_gb = self.expand_c_state.max_size_mb as f64 / 1024.0;
 
-                    ui.label(egui::RichText::new("当前系统盘 (C:)").strong());
+                    ui.label(egui::RichText::new(tr!("当前系统盘 (C:)")).strong());
                     ui.add_space(5.0);
                     egui::Grid::new("expand_c_info_grid")
                         .num_columns(2)
                         .spacing([15.0, 6.0])
                         .show(ui, |ui| {
-                            ui.label("当前总大小:");
+                            ui.label(tr!("当前总大小:"));
                             ui.label(format!("{:.1} GB", cur_gb));
                             ui.end_row();
 
-                            ui.label("已用空间:");
+                            ui.label(tr!("已用空间:"));
                             ui.colored_label(
                                 egui::Color32::from_rgb(241, 196, 15),
                                 format!("{:.1} GB", used_gb),
                             );
                             ui.end_row();
 
-                            ui.label("空闲空间:");
+                            ui.label(tr!("空闲空间:"));
                             ui.colored_label(
                                 egui::Color32::from_rgb(46, 204, 113),
                                 format!("{:.1} GB", free_gb),
                             );
                             ui.end_row();
 
-                            ui.label("最大可扩容到:");
+                            ui.label(tr!("最大可扩容到:"));
                             ui.colored_label(
                                 egui::Color32::from_rgb(52, 152, 219),
                                 format!("{:.1} GB", max_gb),
@@ -247,13 +248,13 @@ impl App {
                         ui.colored_label(
                             egui::Color32::from_rgb(231, 76, 60),
                             if self.expand_c_state.reason.is_empty() {
-                                "C 盘后方没有可用于扩容的空间".to_string()
+                                tr!("C 盘后方没有可用于扩容的空间")
                             } else {
                                 self.expand_c_state.reason.clone()
                             },
                         );
                         ui.add_space(10.0);
-                        if ui.button("关闭").clicked() {
+                        if ui.button(tr!("关闭")).clicked() {
                             should_close = true;
                         }
                         return;
@@ -265,7 +266,7 @@ impl App {
                     let min_gb = min_mb as f64 / 1024.0;
 
                     ui.horizontal(|ui| {
-                        ui.label("目标大小 (GB):");
+                        ui.label(tr!("目标大小 (GB):"));
                         if ui
                             .add(
                                 egui::TextEdit::singleline(&mut self.expand_c_state.target_size_text)
@@ -295,10 +296,10 @@ impl App {
 
                     ui.add_space(5.0);
                     ui.label(
-                        egui::RichText::new(format!(
-                            "可设置范围: {:.1} GB - {:.1} GB",
-                            min_gb,
-                            max_mb as f64 / 1024.0
+                        egui::RichText::new(tr!(
+                            "可设置范围: {} GB - {} GB",
+                            format!("{:.1}", min_gb),
+                            format!("{:.1}", max_mb as f64 / 1024.0)
                         ))
                         .small()
                         .color(egui::Color32::GRAY),
@@ -309,11 +310,11 @@ impl App {
                     // 说明
                     ui.colored_label(
                         egui::Color32::from_rgb(52, 152, 219),
-                        "提示: 此操作为无损扩容，C 盘数据会保留。",
+                        tr!("提示: 此操作为无损扩容，C 盘数据会保留。"),
                     );
                     ui.colored_label(
                         egui::Color32::from_rgb(241, 196, 15),
-                        "若本机没有 WinPE，将先自动下载 WinPE；随后会安装 PE 引导并重启进入 WinPE 完成扩容。",
+                        tr!("若本机没有 WinPE，将先自动下载 WinPE；随后会安装 PE 引导并重启进入 WinPE 完成扩容。"),
                     );
 
                     // 当目标超过“相邻未分配空间”可达上限时，需要移动后方分区(搬数据)，给出醒目警告。
@@ -322,14 +323,10 @@ impl App {
                         ui.add_space(6.0);
                         ui.colored_label(
                             egui::Color32::from_rgb(231, 76, 60),
-                            format!(
-                                "⚠ 超过 {:.1} GB 的部分需要移动 C 盘后方分区的数据来腾挪空间：\n\
-                                 · 该过程会搬移后方分区(如 D:)的数据，耗时较长；\n\
-                                 · 进行中切勿断电/强制关机，否则可能损坏后方分区；\n\
-                                 · 此为实验性功能，建议先在测试机/虚拟机验证。\n\
-                                 若只想要稳妥的纯扩展，请把目标控制在 {:.1} GB 以内。",
-                                no_move_max as f64 / 1024.0,
-                                no_move_max as f64 / 1024.0,
+                            tr!(
+                                "⚠ 超过 {} GB 的部分需要移动 C 盘后方分区的数据来腾挪空间：\n· 该过程会搬移后方分区(如 D:)的数据，耗时较长；\n· 进行中切勿断电/强制关机，否则可能损坏后方分区；\n· 此为实验性功能，建议先在测试机/虚拟机验证。\n若只想要稳妥的纯扩展，请把目标控制在 {} GB 以内。",
+                                format!("{:.1}", no_move_max as f64 / 1024.0),
+                                format!("{:.1}", no_move_max as f64 / 1024.0),
                             ),
                         );
                     }
@@ -352,12 +349,12 @@ impl App {
 
                     ui.horizontal(|ui| {
                         if ui
-                            .add(egui::Button::new("开始扩容").min_size(egui::vec2(120.0, 35.0)))
+                            .add(egui::Button::new(tr!("开始扩容")).min_size(egui::vec2(120.0, 35.0)))
                             .clicked()
                         {
                             should_show_confirm = true;
                         }
-                        if ui.button("关闭").clicked() {
+                        if ui.button(tr!("关闭")).clicked() {
                             should_close = true;
                         }
                     });
@@ -366,7 +363,7 @@ impl App {
 
         // 确认对话框
         if self.expand_c_state.show_confirm_dialog {
-            egui::Window::new("确认扩容")
+            egui::Window::new(tr!("确认扩容"))
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
@@ -374,14 +371,14 @@ impl App {
                     ui.vertical_centered(|ui| {
                         ui.add_space(10.0);
                         let target_gb = self.expand_c_state.target_size_mb as f64 / 1024.0;
-                        ui.label(format!("确定要将 C 盘扩容到 {:.1} GB 吗？", target_gb));
-                        ui.label("电脑将重启进入 WinPE 完成无损扩容。");
+                        ui.label(tr!("确定要将 C 盘扩容到 {} GB 吗？", format!("{:.1}", target_gb)));
+                        ui.label(tr!("电脑将重启进入 WinPE 完成无损扩容。"));
                         ui.add_space(20.0);
                         ui.horizontal(|ui| {
-                            if ui.button("确定执行").clicked() {
+                            if ui.button(tr!("确定执行")).clicked() {
                                 should_start = true;
                             }
-                            if ui.button("取消").clicked() {
+                            if ui.button(tr!("取消")).clicked() {
                                 self.expand_c_state.show_confirm_dialog = false;
                             }
                         });
@@ -416,10 +413,10 @@ impl App {
         let target_mb = self.expand_c_state.target_size_mb;
 
         if target_mb < min_mb || target_mb > max_mb {
-            self.expand_c_state.message = format!(
-                "目标大小必须在 {:.1} GB 到 {:.1} GB 之间",
-                min_mb as f64 / 1024.0,
-                max_mb as f64 / 1024.0
+            self.expand_c_state.message = tr!(
+                "目标大小必须在 {} GB 到 {} GB 之间",
+                format!("{:.1}", min_mb as f64 / 1024.0),
+                format!("{:.1}", max_mb as f64 / 1024.0)
             );
             return;
         }
@@ -445,7 +442,7 @@ impl App {
                 return;
             }
         } else {
-            self.expand_c_state.message = "未选择 PE 环境，无法扩容".to_string();
+            self.expand_c_state.message = tr!("未选择 PE 环境，无法扩容");
             return;
         }
 
@@ -460,7 +457,7 @@ impl App {
         // 取消下载页面残留状态（如果是下载后进来的）
         self.show_expand_c_dialog = true;
         self.expand_c_state.executing = true;
-        self.expand_c_state.message = "正在准备扩容环境...".to_string();
+        self.expand_c_state.message = tr!("正在准备扩容环境...");
 
         let target_size_mb = if self.expand_c_state.target_size_mb >= self.expand_c_state.max_size_mb
         {
@@ -479,7 +476,7 @@ impl App {
             Some(p) => p,
             None => {
                 self.expand_c_state.executing = false;
-                self.expand_c_state.message = "未选择 PE 环境，无法扩容".to_string();
+                self.expand_c_state.message = tr!("未选择 PE 环境，无法扩容");
                 return;
             }
         };
@@ -487,7 +484,7 @@ impl App {
         let (pe_exists, pe_path) = crate::core::pe::PeManager::check_pe_exists(&pe_info.filename);
         if !pe_exists {
             self.expand_c_state.executing = false;
-            self.expand_c_state.message = "PE 文件不存在，无法扩容".to_string();
+            self.expand_c_state.message = tr!("PE 文件不存在，无法扩容");
             return;
         }
 
@@ -510,7 +507,7 @@ impl App {
             Err(e) => {
                 println!("[EXPAND PE] 扩容配置写入失败: {}", e);
                 self.expand_c_state.executing = false;
-                self.expand_c_state.message = format!("写入扩容配置失败: {}", e);
+                self.expand_c_state.message = tr!("写入扩容配置失败: {}", e);
                 return;
             }
         }
@@ -523,7 +520,7 @@ impl App {
             Err(e) => {
                 println!("[EXPAND PE] PE引导安装失败: {}", e);
                 self.expand_c_state.executing = false;
-                self.expand_c_state.message = format!("安装 PE 引导失败: {}", e);
+                self.expand_c_state.message = tr!("安装 PE 引导失败: {}", e);
                 return;
             }
         }
@@ -540,7 +537,7 @@ impl App {
             ])
             .spawn();
 
-        self.expand_c_state.message = "准备完成，即将重启进入 WinPE...".to_string();
+        self.expand_c_state.message = tr!("准备完成，即将重启进入 WinPE...");
         println!("[EXPAND PE] ========== 扩容PE准备结束 ==========");
     }
 }
@@ -570,7 +567,7 @@ fn compute_expand_c_info() -> ExpandCLoadResult {
     let (disk, c_idx) = match (found_disk, c_index) {
         (Some(d), Some(i)) => (d, i),
         _ => {
-            result.reason = "未找到当前系统 C 盘".to_string();
+            result.reason = tr!("未找到当前系统 C 盘");
             return result;
         }
     };
@@ -634,15 +631,15 @@ fn compute_expand_c_info() -> ExpandCLoadResult {
     if max_size_mb > result.current_size_mb + 1024 {
         result.can_expand = true;
         if next_shrinkable_mb > 1024 {
-            result.reason = format!(
-                "可无损并入：相邻未分配约 {:.1} GB（直接扩）+ 后方分区可让出约 {:.1} GB（需移动该分区的数据）。",
-                unallocated_after_mb as f64 / 1024.0,
-                next_shrinkable_mb as f64 / 1024.0,
+            result.reason = tr!(
+                "可无损并入：相邻未分配约 {} GB（直接扩）+ 后方分区可让出约 {} GB（需移动该分区的数据）。",
+                format!("{:.1}", unallocated_after_mb as f64 / 1024.0),
+                format!("{:.1}", next_shrinkable_mb as f64 / 1024.0),
             );
         }
     } else {
         result.can_expand = false;
-        result.reason = "C 盘后方没有可用于扩容的空间。可先用「一键分区」在 C 盘后方腾出未分配空间。".to_string();
+        result.reason = tr!("C 盘后方没有可用于扩容的空间。可先用「一键分区」在 C 盘后方腾出未分配空间。");
     }
 
     result

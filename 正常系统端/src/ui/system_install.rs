@@ -195,7 +195,7 @@ impl App {
         ui.separator();
 
         // 分区选择表格
-        ui.label("选择安装分区:");
+        ui.label(tr!("选择安装分区:"));
 
         let partitions_clone: Vec<Partition> = self.partitions.clone();
         let mut partition_clicked: Option<usize> = None;
@@ -722,7 +722,7 @@ impl App {
                         let _ = tx.send(IsoMountResult::XpI386(i386_dir));
                     } else {
                         println!("[ISO MOUNT THREAD] 未找到安装镜像");
-                        let _ = tx.send(IsoMountResult::Error("ISO 中未找到 install.wim/esd".to_string()));
+                        let _ = tx.send(IsoMountResult::Error(tr!("ISO 中未找到 install.wim/esd")));
                     }
                 }
                 Err(e) => {
@@ -811,7 +811,7 @@ impl App {
                                     } else {
                                         log::error!("[EASY MODE] 未找到目标分卷 {}，自动安装失败", target_volume_index);
                                         self.easy_mode_pending_auto_start = false;
-                                        self.show_error(&format!("未找到目标分卷 {}，请手动选择", target_volume_index));
+                                        self.show_error(&tr!("未找到目标分卷 {}，请手动选择", target_volume_index));
                                     }
                                 } else {
                                     // 普通模式：自动选择第一个可安装的系统镜像
@@ -832,7 +832,7 @@ impl App {
                                 self.image_volumes.clear();
                                 self.selected_volume = None;
                                 // 保存错误信息供UI显示
-                                self.iso_mount_error = Some(format!("镜像信息加载失败: {}", error));
+                                self.iso_mount_error = Some(tr!("镜像信息加载失败: {}", error));
                             }
                         }
                     }
@@ -1194,16 +1194,16 @@ impl App {
                 || self.selected_boot_mode == BootModeSelection::UEFI;
             if target_is_uefi && !self.app_config.enable_advanced_options {
                 self.show_error(
-                    "原版 Windows XP/2003（i386 介质）仅支持 Legacy/BIOS + MBR 启动，无法安装到 GPT/UEFI 目标。\n\
+                    &tr!("原版 Windows XP/2003（i386 介质）仅支持 Legacy/BIOS + MBR 启动，无法安装到 GPT/UEFI 目标。\n\
                      如确需（例如使用 UEFI 化的魔改镜像，或先用 Diskpart 脚本把盘改成 MBR），\n\
-                     请到「关于 → 高级选项」开启后重试。",
+                     请到「关于 → 高级选项」开启后重试。"),
                 );
                 return;
             }
             if !self.is_pe_environment() && partition.is_system_partition {
                 self.show_error(
-                    "从 XP i386 介质安装不支持在运行中的系统上原地安装到当前系统盘。\n\
-                     请先重启进入 PE 环境，再选择目标分区进行安装。",
+                    &tr!("从 XP i386 介质安装不支持在运行中的系统上原地安装到当前系统盘。\n\
+                     请先重启进入 PE 环境，再选择目标分区进行安装。"),
                 );
                 return;
             }

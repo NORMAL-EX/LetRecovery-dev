@@ -2,6 +2,7 @@ use egui;
 use std::sync::mpsc;
 use std::path::Path;
 
+use crate::tr;
 use crate::app::{App, BootModeSelection, InstallMode};
 use crate::core::dism::DismProgress;
 use crate::core::disk::{Partition, PartitionStyle};
@@ -11,14 +12,14 @@ use crate::ui::advanced_options::AdvancedOptions;
 
 impl App {
     pub fn show_install_progress(&mut self, ui: &mut egui::Ui) {
-        ui.heading("安装进度");
+        ui.heading(tr!("安装进度"));
         ui.separator();
 
         self.update_install_progress();
 
         if !self.is_installing {
-            ui.label("没有正在进行的安装任务");
-            if ui.button("返回").clicked() {
+            ui.label(tr!("没有正在进行的安装任务"));
+            if ui.button(tr!("返回")).clicked() {
                 self.current_panel = crate::app::Panel::SystemInstall;
             }
             return;
@@ -26,13 +27,13 @@ impl App {
 
         // 显示安装模式
         let mode_text = match self.install_mode {
-            InstallMode::Direct => "直接安装",
-            InstallMode::ViaPE => "通过PE安装",
+            InstallMode::Direct => tr!("直接安装"),
+            InstallMode::ViaPE => tr!("通过PE安装"),
         };
-        ui.label(format!("安装模式: {}", mode_text));
+        ui.label(tr!("安装模式: {}", mode_text));
 
         ui.add_space(15.0);
-        ui.label(format!(
+        ui.label(tr!(
             "当前步骤: {}",
             self.install_progress.current_step
         ));
@@ -45,7 +46,7 @@ impl App {
 
         ui.add_space(10.0);
 
-        ui.label("总体进度:");
+        ui.label(tr!("总体进度:"));
         ui.add(
             egui::ProgressBar::new(self.install_progress.total_progress as f32 / 100.0)
                 .text(format!("{}%", self.install_progress.total_progress))
@@ -55,33 +56,33 @@ impl App {
         ui.add_space(20.0);
 
         // 安装步骤列表
-        ui.label("安装步骤:");
+        ui.label(tr!("安装步骤:"));
         egui::ScrollArea::vertical()
             .max_height(200.0)
             .show(ui, |ui| {
                 let mut steps = match self.install_mode {
                     InstallMode::Direct => vec![
-                        "格式化分区",
-                        "导出驱动",
-                        "释放系统镜像",
-                        "导入驱动",
-                        "修复引导",
-                        "应用高级选项",
-                        "完成安装",
+                        tr!("格式化分区"),
+                        tr!("导出驱动"),
+                        tr!("释放系统镜像"),
+                        tr!("导入驱动"),
+                        tr!("修复引导"),
+                        tr!("应用高级选项"),
+                        tr!("完成安装"),
                     ],
                     InstallMode::ViaPE => vec![
-                        "检查PE环境",
-                        "安装PE引导",
-                        "导出驱动",
-                        "复制镜像文件",
-                        "写入配置文件",
-                        "准备重启",
+                        tr!("检查PE环境"),
+                        tr!("安装PE引导"),
+                        tr!("导出驱动"),
+                        tr!("复制镜像文件"),
+                        tr!("写入配置文件"),
+                        tr!("准备重启"),
                     ],
                 };
 
                 // 如果需要 BitLocker 解密，插入解密步骤作为第一步
                 if self.bitlocker_decryption_needed {
-                    steps.insert(0, "解密 BitLocker 分区");
+                    steps.insert(0, tr!("解密 BitLocker 分区"));
                 }
 
                 // 计算有效步骤索引（用于显示）
@@ -123,7 +124,7 @@ impl App {
         ui.add_space(20.0);
 
         if let Some(ref error) = self.install_error {
-            ui.colored_label(egui::Color32::RED, format!("错误: {}", error));
+            ui.colored_label(egui::Color32::RED, tr!("错误: {}", error));
             ui.add_space(10.0);
         }
 
@@ -131,27 +132,27 @@ impl App {
         if self.install_progress.total_progress >= 100 {
             match self.install_mode {
                 InstallMode::Direct => {
-                    ui.colored_label(egui::Color32::from_rgb(102, 187, 106), "安装完成！");
+                    ui.colored_label(egui::Color32::from_rgb(102, 187, 106), tr!("安装完成！"));
                     ui.add_space(10.0);
                     ui.horizontal(|ui| {
-                        if ui.button("立即重启").clicked() {
+                        if ui.button(tr!("立即重启")).clicked() {
                             self.reboot_system();
                         }
-                        if ui.button("返回主页").clicked() {
+                        if ui.button(tr!("返回主页")).clicked() {
                             self.is_installing = false;
                             self.current_panel = crate::app::Panel::SystemInstall;
                         }
                     });
                 }
                 InstallMode::ViaPE => {
-                    ui.colored_label(egui::Color32::from_rgb(102, 187, 106), "PE环境准备完成！");
-                    ui.label("系统将重启进入PE环境继续安装。");
+                    ui.colored_label(egui::Color32::from_rgb(102, 187, 106), tr!("PE环境准备完成！"));
+                    ui.label(tr!("系统将重启进入PE环境继续安装。"));
                     ui.add_space(10.0);
                     ui.horizontal(|ui| {
-                        if ui.button("立即重启").clicked() {
+                        if ui.button(tr!("立即重启")).clicked() {
                             self.reboot_system();
                         }
-                        if ui.button("稍后重启").clicked() {
+                        if ui.button(tr!("稍后重启")).clicked() {
                             self.is_installing = false;
                             self.current_panel = crate::app::Panel::SystemInstall;
                         }
@@ -159,7 +160,7 @@ impl App {
                 }
             }
         } else {
-            if ui.button("取消安装").clicked() {
+            if ui.button(tr!("取消安装")).clicked() {
                 println!("[INSTALL] 用户取消安装");
                 self.is_installing = false;
                 self.current_panel = crate::app::Panel::SystemInstall;
@@ -182,7 +183,7 @@ impl App {
                 if progress.status == "DECRYPTION_COMPLETE" {
                     println!("[INSTALL UI] BitLocker 解密完成，准备开始安装");
                     self.decrypting_partitions.clear();
-                    self.install_progress.current_step = "准备开始安装...".to_string();
+                    self.install_progress.current_step = tr!("准备开始安装...");
                     return;
                 } else if progress.status.starts_with("DECRYPTING:") {
                     self.install_progress.current_step = progress.status.trim_start_matches("DECRYPTING:").to_string();
@@ -193,7 +194,7 @@ impl App {
                     // 引擎/格式化失败：写入 install_error → 渲染时显示醒目红色错误条（不再只在步骤名一闪）
                     println!("[INSTALL UI] 安装失败: {}", msg);
                     self.install_error = Some(msg.to_string());
-                    self.install_progress.current_step = "安装失败".to_string();
+                    self.install_progress.current_step = tr!("安装失败");
                     return;
                 }
 
@@ -281,7 +282,7 @@ impl App {
             .unwrap_or(PartitionStyle::Unknown);
 
         self.install_step = 1;
-        self.install_progress.current_step = "格式化分区".to_string();
+        self.install_progress.current_step = tr!("格式化分区");
         self.install_error = None; // 清掉上一次失败的残留，避免新安装一开始就显示旧错误
 
         std::thread::spawn(move || {
@@ -295,19 +296,19 @@ impl App {
             // 结果回报到 UI：成功则步骤走到 100%；失败则弹红色错误条并中止（之前只 println 到控制台，
             // 用户根本看不到跑没跑）。脚本是用来准备分区的，失败还往下走会把系统装到错误的分区布局上。
             if options.run_diskpart_scripts {
-                send_step(&progress_tx, 1, "运行 Diskpart 脚本", 0);
+                send_step(&progress_tx, 1, &tr!("运行 Diskpart 脚本"), 0);
                 let scripts_dir = crate::utils::path::get_exe_dir().join("diskpart");
                 println!("[INSTALL] 运行 Diskpart 脚本: {}", scripts_dir.display());
                 match lr_core::diskpart::run_scripts_in_dir(&scripts_dir) {
                     Ok(out) => {
                         println!("[INSTALL] Diskpart 脚本执行完成:\n{}", out);
-                        send_step(&progress_tx, 1, "运行 Diskpart 脚本", 100);
+                        send_step(&progress_tx, 1, &tr!("运行 Diskpart 脚本"), 100);
                     }
                     Err(e) => {
                         println!("[INSTALL] Diskpart 脚本执行失败: {}", e);
                         send_error(
                             &progress_tx,
-                            &format!(
+                            &tr!(
                                 "Diskpart 脚本执行失败，已中止安装（未格式化、未写入任何文件）：\n{}",
                                 e
                             ),
@@ -318,11 +319,11 @@ impl App {
             }
 
             // Step 1: 格式化分区
-            send_step(&progress_tx, 1, "格式化分区", 0);
+            send_step(&progress_tx, 1, &tr!("格式化分区"), 0);
             std::thread::sleep(std::time::Duration::from_millis(50));
             if options.format_partition {
                 println!("[INSTALL STEP 1] 开始格式化分区: {}", target_partition);
-                send_step(&progress_tx, 1, "格式化分区", 30);
+                send_step(&progress_tx, 1, &tr!("格式化分区"), 30);
                 match format_partition(&target_partition) {
                     Ok(_) => println!("[INSTALL STEP 1] 格式化完成"),
                     Err(e) => {
@@ -331,7 +332,7 @@ impl App {
                         if options.is_xp_i386 {
                             send_error(
                                 &progress_tx,
-                                &format!(
+                                &tr!(
                                     "格式化分区 {} 失败：{}。已中止，未写入任何安装文件。请确认该分区未被占用后重试。",
                                     target_partition, e
                                 ),
@@ -340,10 +341,10 @@ impl App {
                         }
                     }
                 }
-                send_step(&progress_tx, 1, "格式化分区", 100);
+                send_step(&progress_tx, 1, &tr!("格式化分区"), 100);
             } else {
                 println!("[INSTALL STEP 1] 跳过格式化");
-                send_step(&progress_tx, 1, "格式化分区", 100);
+                send_step(&progress_tx, 1, &tr!("格式化分区"), 100);
             }
             std::thread::sleep(std::time::Duration::from_millis(100));
 
@@ -352,8 +353,8 @@ impl App {
             // bootsect /nt52 写 XP 引导）。引擎自行写引导，且此刻系统文件尚未释放（重启进文本安装
             // 阶段才复制），因此跳过 导出/导入驱动、引导修复、应用高级选项 等后续步骤。仅 Legacy/MBR。
             if options.is_xp_i386 {
-                send_step(&progress_tx, 2, "导出驱动", 100); // 跳过（XP 文本安装阶段不适用）
-                send_step(&progress_tx, 3, "释放系统镜像", 0);
+                send_step(&progress_tx, 2, &tr!("导出驱动"), 100); // 跳过（XP 文本安装阶段不适用）
+                send_step(&progress_tx, 3, &tr!("释放系统镜像"), 0);
                 // 准备 XP 引导前：先清掉目标盘上【其他】分区的活动标志，确保目标成为唯一活动分区。
                 // （微软文档：diskpart 的 active 不自动清旧的活动分区；同盘存在多个活动分区时 BIOS/XP 会
                 //   引导分区表里第一个活动分区——往往是旧 C: → 出现“装到 W: 却进了 C:”。照搬「设新活动前先移除旧活动」。）
@@ -379,47 +380,47 @@ impl App {
                 ) {
                     Ok(log) => {
                         println!("[INSTALL i386] 文本安装准备完成:\n{}", log);
-                        send_step(&progress_tx, 3, "释放系统镜像", 100);
-                        send_step(&progress_tx, 4, "导入驱动", 100);
-                        send_step(&progress_tx, 5, "修复引导", 100);
-                        send_step(&progress_tx, 6, "应用高级选项", 100);
-                        send_step(&progress_tx, 7, "完成安装", 100);
+                        send_step(&progress_tx, 3, &tr!("释放系统镜像"), 100);
+                        send_step(&progress_tx, 4, &tr!("导入驱动"), 100);
+                        send_step(&progress_tx, 5, &tr!("修复引导"), 100);
+                        send_step(&progress_tx, 6, &tr!("应用高级选项"), 100);
+                        send_step(&progress_tx, 7, &tr!("完成安装"), 100);
                         println!("[INSTALL i386] 完成。重启后进入 XP/2003 蓝底文本安装阶段。");
                     }
                     Err(e) => {
                         println!("[INSTALL i386] 失败: {}", e);
                         // 失败原因写入 install_error → UI 显示醒目红色错误条（之前只塞进步骤名一闪而过）。
-                        send_error(&progress_tx, &format!("XP/2003 文本安装准备失败：{}", e));
+                        send_error(&progress_tx, &tr!("XP/2003 文本安装准备失败：{}", e));
                     }
                 }
                 return;
             }
 
             // Step 2: 导出驱动
-            send_step(&progress_tx, 2, "导出驱动", 0);
+            send_step(&progress_tx, 2, &tr!("导出驱动"), 0);
             std::thread::sleep(std::time::Duration::from_millis(50));
             if options.export_drivers {
                 println!("[INSTALL STEP 2] 开始导出驱动到: {}", driver_backup_str);
-                send_step(&progress_tx, 2, "导出驱动", 20);
+                send_step(&progress_tx, 2, &tr!("导出驱动"), 20);
                 
                 match export_drivers(&driver_backup_str) {
                     Ok(_) => {
                         println!("[INSTALL STEP 2] 驱动导出成功");
-                        send_step(&progress_tx, 2, "导出驱动", 100);
+                        send_step(&progress_tx, 2, &tr!("导出驱动"), 100);
                     }
                     Err(e) => {
                         println!("[INSTALL STEP 2] 驱动导出失败: {} (继续安装)", e);
-                        send_step(&progress_tx, 2, "导出驱动", 100);
+                        send_step(&progress_tx, 2, &tr!("导出驱动"), 100);
                     }
                 }
             } else {
                 println!("[INSTALL STEP 2] 跳过导出驱动");
-                send_step(&progress_tx, 2, "导出驱动", 100);
+                send_step(&progress_tx, 2, &tr!("导出驱动"), 100);
             }
             std::thread::sleep(std::time::Duration::from_millis(100));
 
             // Step 3: 释放系统镜像
-            send_step(&progress_tx, 3, "释放系统镜像", 0);
+            send_step(&progress_tx, 3, &tr!("释放系统镜像"), 0);
             std::thread::sleep(std::time::Duration::from_millis(50));
             println!("[INSTALL STEP 3] 开始释放系统镜像");
 
@@ -433,7 +434,7 @@ impl App {
                 
                 if !ghost.is_available() {
                     println!("[INSTALL STEP 3] 错误: Ghost 可执行文件不存在");
-                    send_step(&progress_tx, 3, "释放系统镜像", 100);
+                    send_step(&progress_tx, 3, &tr!("释放系统镜像"), 100);
                 } else {
                     let ghost_tx = progress_tx.clone();
                     let (inner_tx, inner_rx) = mpsc::channel::<DismProgress>();
@@ -450,7 +451,7 @@ impl App {
                     }
                 }
                 
-                send_step(&progress_tx, 3, "释放系统镜像", 100);
+                send_step(&progress_tx, 3, &tr!("释放系统镜像"), 100);
             } else {
                 println!("[INSTALL STEP 3] 使用 DISM 应用 WIM/ESD 镜像");
                 let dism = crate::core::dism::Dism::new();
@@ -472,12 +473,12 @@ impl App {
                     Ok(_) => println!("[INSTALL STEP 3] DISM 镜像释放成功"),
                     Err(e) => println!("[INSTALL STEP 3] DISM 镜像释放失败: {}", e),
                 }
-                send_step(&progress_tx, 3, "释放系统镜像", 100);
+                send_step(&progress_tx, 3, &tr!("释放系统镜像"), 100);
             }
             std::thread::sleep(std::time::Duration::from_millis(100));
 
             // Step 4: 导入驱动（仅在 AutoImport 模式下导入）
-            send_step(&progress_tx, 4, "导入驱动", 0);
+            send_step(&progress_tx, 4, &tr!("导入驱动"), 0);
             std::thread::sleep(std::time::Duration::from_millis(50));
             
             // 判断是否需要导入驱动（只有 AutoImport 模式才导入）
@@ -485,24 +486,24 @@ impl App {
             
             if should_import && driver_backup_path.exists() {
                 println!("[INSTALL STEP 4] 开始导入驱动 (AutoImport模式)");
-                send_step(&progress_tx, 4, "导入驱动", 30);
+                send_step(&progress_tx, 4, &tr!("导入驱动"), 30);
                 
                 match import_drivers(&target_partition, &driver_backup_str) {
                     Ok(_) => {
                         println!("[INSTALL STEP 4] 驱动导入成功");
                         let _ = std::fs::remove_dir_all(&driver_backup_path);
-                        send_step(&progress_tx, 4, "导入驱动", 100);
+                        send_step(&progress_tx, 4, &tr!("导入驱动"), 100);
                     }
                     Err(e) => {
                         println!("[INSTALL STEP 4] 驱动导入失败: {}", e);
                         let _ = std::fs::remove_dir_all(&driver_backup_path);
-                        send_step(&progress_tx, 4, "导入驱动", 100);
+                        send_step(&progress_tx, 4, &tr!("导入驱动"), 100);
                     }
                 }
             } else if matches!(options.driver_action, crate::app::DriverAction::SaveOnly) && driver_backup_path.exists() {
                 // SaveOnly 模式：保留驱动备份到目标分区
                 println!("[INSTALL STEP 4] 仅保存驱动 (SaveOnly模式)");
-                send_step(&progress_tx, 4, "保存驱动", 30);
+                send_step(&progress_tx, 4, &tr!("保存驱动"), 30);
                 
                 let target_driver_dir = format!("{}\\LetRecovery_Drivers", target_partition);
                 if let Err(e) = copy_dir_recursive(&driver_backup_str, &target_driver_dir) {
@@ -512,10 +513,10 @@ impl App {
                 }
                 
                 let _ = std::fs::remove_dir_all(&driver_backup_path);
-                send_step(&progress_tx, 4, "保存驱动", 100);
+                send_step(&progress_tx, 4, &tr!("保存驱动"), 100);
             } else {
                 println!("[INSTALL STEP 4] 跳过驱动处理 (driver_action: {:?})", options.driver_action);
-                send_step(&progress_tx, 4, "导入驱动", 100);
+                send_step(&progress_tx, 4, &tr!("导入驱动"), 100);
             }
             std::thread::sleep(std::time::Duration::from_millis(100));
 
@@ -525,11 +526,11 @@ impl App {
                 || !std::path::Path::new(&format!("{}\\Windows\\Boot", target_partition)).exists();
 
             // Step 5: 修复引导
-            send_step(&progress_tx, 5, "修复引导", 0);
+            send_step(&progress_tx, 5, &tr!("修复引导"), 0);
             std::thread::sleep(std::time::Duration::from_millis(50));
             if options.repair_boot {
                 println!("[INSTALL STEP 5] 开始修复引导");
-                send_step(&progress_tx, 5, "修复引导", 20);
+                send_step(&progress_tx, 5, &tr!("修复引导"), 20);
                 
                 let use_uefi = match options.boot_mode {
                     BootModeSelection::UEFI => true,
@@ -538,7 +539,7 @@ impl App {
                 };
                 
                 println!("[INSTALL STEP 5] 引导模式: {}", if use_uefi { "UEFI" } else { "Legacy" });
-                send_step(&progress_tx, 5, "修复引导", 50);
+                send_step(&progress_tx, 5, &tr!("修复引导"), 50);
                 
                 let boot_manager = crate::core::bcdedit::BootManager::new();
                 // XP/2003 写 XP 引导；否则 bcdboot。is_xp 已在上方统一计算。
@@ -566,7 +567,7 @@ impl App {
                         // 如果是 Win7 + UEFI 模式，且启用了 UefiSeven 补丁
                         if use_uefi && advanced_options.win7_uefi_patch {
                             println!("[INSTALL STEP 5] 检测到 Win7 UEFI 补丁选项，开始应用 UefiSeven");
-                            send_step(&progress_tx, 5, "应用Win7 UEFI补丁", 70);
+                            send_step(&progress_tx, 5, &tr!("应用Win7 UEFI补丁"), 70);
                             
                             match advanced_options.apply_uefiseven_patch(&target_partition) {
                                 Ok(_) => println!("[INSTALL STEP 5] UefiSeven 补丁应用成功"),
@@ -576,29 +577,29 @@ impl App {
                     }
                     Err(e) => println!("[INSTALL STEP 5] 引导修复失败: {}", e),
                 }
-                send_step(&progress_tx, 5, "修复引导", 100);
+                send_step(&progress_tx, 5, &tr!("修复引导"), 100);
             } else {
                 println!("[INSTALL STEP 5] 跳过修复引导");
-                send_step(&progress_tx, 5, "修复引导", 100);
+                send_step(&progress_tx, 5, &tr!("修复引导"), 100);
             }
             std::thread::sleep(std::time::Duration::from_millis(100));
 
             // Step 6: 应用高级选项
-            send_step(&progress_tx, 6, "应用高级选项", 0);
+            send_step(&progress_tx, 6, &tr!("应用高级选项"), 0);
             std::thread::sleep(std::time::Duration::from_millis(50));
             println!("[INSTALL STEP 6] 应用高级选项");
-            send_step(&progress_tx, 6, "应用高级选项", 20);
+            send_step(&progress_tx, 6, &tr!("应用高级选项"), 20);
             
             match advanced_options.apply_to_system(&target_partition, is_xp) {
                 Ok(_) => println!("[INSTALL STEP 6] 高级选项应用成功"),
                 Err(e) => println!("[INSTALL STEP 6] 高级选项应用失败: {}", e),
             }
-            send_step(&progress_tx, 6, "应用高级选项", 50);
+            send_step(&progress_tx, 6, &tr!("应用高级选项"), 50);
 
             // 注入用户驱动：bin/drivers/<版本> 下用户放置的驱动，按目标系统版本自动注入
             // （win7/win8/win10/win11 走 DISM 离线注入；XP 由上方 apply_to_system 的 XP 注入处理）。
             inject_user_version_drivers(&target_partition, is_xp);
-            send_step(&progress_tx, 6, "应用高级选项", 70);
+            send_step(&progress_tx, 6, &tr!("应用高级选项"), 70);
             
             if options.unattended_install {
                 println!("[INSTALL STEP 6] 生成无人值守配置");
@@ -607,11 +608,11 @@ impl App {
                     Err(e) => println!("[INSTALL STEP 6] 无人值守配置生成失败: {}", e),
                 }
             }
-            send_step(&progress_tx, 6, "应用高级选项", 100);
+            send_step(&progress_tx, 6, &tr!("应用高级选项"), 100);
             std::thread::sleep(std::time::Duration::from_millis(100));
 
             // Step 7: 完成
-            send_step(&progress_tx, 7, "完成安装", 100);
+            send_step(&progress_tx, 7, &tr!("完成安装"), 100);
             println!("[INSTALL STEP 7] 安装完成!");
             println!("[INSTALL] ========== 安装结束 ==========");
         });
@@ -638,60 +639,60 @@ impl App {
         });
 
         self.install_step = 1;
-        self.install_progress.current_step = "检查PE环境".to_string();
+        self.install_progress.current_step = tr!("检查PE环境");
 
         std::thread::spawn(move || {
             println!("[INSTALL PE THREAD] PE安装线程启动");
 
             // Step 1: 检查PE环境
-            send_step(&progress_tx, 1, "检查PE环境", 0);
+            send_step(&progress_tx, 1, &tr!("检查PE环境"), 0);
             std::thread::sleep(std::time::Duration::from_millis(50));
             
             let pe_info = match pe_info {
                 Some(pe) => pe,
                 None => {
                     println!("[INSTALL PE STEP 1] 错误: 未选择PE环境");
-                    send_step(&progress_tx, 1, "检查PE环境", 100);
+                    send_step(&progress_tx, 1, &tr!("检查PE环境"), 100);
                     return;
                 }
             };
             
             println!("[INSTALL PE STEP 1] 检查PE: {}", pe_info.display_name);
-            send_step(&progress_tx, 1, "检查PE环境", 50);
+            send_step(&progress_tx, 1, &tr!("检查PE环境"), 50);
             
             let (pe_exists, pe_path) = crate::core::pe::PeManager::check_pe_exists(&pe_info.filename);
             if !pe_exists {
                 println!("[INSTALL PE STEP 1] PE文件不存在，需要下载");
                 // 这里应该触发下载，但为了简化，我们直接返回错误
-                send_step(&progress_tx, 1, "检查PE环境", 100);
+                send_step(&progress_tx, 1, &tr!("检查PE环境"), 100);
                 return;
             }
             
             println!("[INSTALL PE STEP 1] PE文件存在: {}", pe_path);
-            send_step(&progress_tx, 1, "检查PE环境", 100);
+            send_step(&progress_tx, 1, &tr!("检查PE环境"), 100);
             std::thread::sleep(std::time::Duration::from_millis(100));
 
             // Step 2: 安装PE引导
-            send_step(&progress_tx, 2, "安装PE引导", 0);
+            send_step(&progress_tx, 2, &tr!("安装PE引导"), 0);
             std::thread::sleep(std::time::Duration::from_millis(50));
             
             println!("[INSTALL PE STEP 2] 安装PE引导");
-            send_step(&progress_tx, 2, "安装PE引导", 30);
+            send_step(&progress_tx, 2, &tr!("安装PE引导"), 30);
             
             let pe_manager = crate::core::pe::PeManager::new();
             match pe_manager.boot_to_pe(&pe_path, &pe_info.display_name) {
                 Ok(_) => println!("[INSTALL PE STEP 2] PE引导安装成功"),
                 Err(e) => {
                     println!("[INSTALL PE STEP 2] PE引导安装失败: {}", e);
-                    send_step(&progress_tx, 2, "安装PE引导", 100);
+                    send_step(&progress_tx, 2, &tr!("安装PE引导"), 100);
                     return;
                 }
             }
-            send_step(&progress_tx, 2, "安装PE引导", 100);
+            send_step(&progress_tx, 2, &tr!("安装PE引导"), 100);
             std::thread::sleep(std::time::Duration::from_millis(100));
 
             // Step 3: 导出驱动
-            send_step(&progress_tx, 3, "导出驱动", 0);
+            send_step(&progress_tx, 3, &tr!("导出驱动"), 0);
             std::thread::sleep(std::time::Duration::from_millis(50));
             
             // 找一个可用的数据分区来存储数据（传入镜像路径以检查空间）
@@ -718,7 +719,7 @@ impl App {
             
             if should_export {
                 println!("[INSTALL PE STEP 3] 导出驱动到: {} (driver_action: {:?})", data_dir, options.driver_action);
-                send_step(&progress_tx, 3, "导出驱动", 30);
+                send_step(&progress_tx, 3, &tr!("导出驱动"), 30);
                 
                 let driver_path = format!("{}\\drivers", data_dir);
                 match export_drivers(&driver_path) {
@@ -728,20 +729,20 @@ impl App {
             } else {
                 println!("[INSTALL PE STEP 3] 跳过驱动导出 (driver_action: {:?})", options.driver_action);
             }
-            send_step(&progress_tx, 3, "导出驱动", 100);
+            send_step(&progress_tx, 3, &tr!("导出驱动"), 100);
             std::thread::sleep(std::time::Duration::from_millis(100));
 
             // Step 4 前置：校验源镜像完整性
             // 坏镜像在“复制几个 GB + 重启进 PE”之前就终止，省去白等；不动磁盘。
             {
                 use crate::core::image_verify::{ImageVerifier, VerifyStatus};
-                send_step(&progress_tx, 4, "校验镜像", 0);
+                send_step(&progress_tx, 4, &tr!("校验镜像"), 0);
                 println!("[INSTALL PE] 校验源镜像完整性: {}", image_path);
                 let (vtx, vrx) = mpsc::channel::<crate::core::image_verify::VerifyProgress>();
                 let ptx = progress_tx.clone();
                 let vh = std::thread::spawn(move || {
                     while let Ok(p) = vrx.recv() {
-                        send_step(&ptx, 4, "校验镜像", p.percentage);
+                        send_step(&ptx, 4, &tr!("校验镜像"), p.percentage);
                     }
                 });
                 let vres = ImageVerifier::new().verify(&image_path, Some(vtx));
@@ -761,7 +762,7 @@ impl App {
             }
 
             // Step 4: 复制镜像文件
-            send_step(&progress_tx, 4, "复制镜像文件", 0);
+            send_step(&progress_tx, 4, &tr!("复制镜像文件"), 0);
             std::thread::sleep(std::time::Duration::from_millis(50));
 
             println!("[INSTALL PE STEP 4] 复制镜像文件到数据分区");
@@ -774,7 +775,7 @@ impl App {
             
             // 使用带进度的复制函数
             match copy_file_with_progress(&image_path, &target_image_path, |progress| {
-                send_step(&progress_tx, 4, "复制镜像文件", progress);
+                send_step(&progress_tx, 4, &tr!("复制镜像文件"), progress);
             }) {
                 Ok(_) => println!("[INSTALL PE STEP 4] 镜像复制成功: {}", target_image_path),
                 Err(e) => {
@@ -787,7 +788,7 @@ impl App {
                     return;
                 }
             }
-            send_step(&progress_tx, 4, "复制镜像文件", 100);
+            send_step(&progress_tx, 4, &tr!("复制镜像文件"), 100);
             std::thread::sleep(std::time::Duration::from_millis(100));
 
             // Step 4.5: 如果启用了 Win7 UEFI 补丁，复制 UefiSeven 文件到数据目录
@@ -840,7 +841,7 @@ impl App {
             }
 
             // Step 5: 写入配置文件
-            send_step(&progress_tx, 5, "写入配置文件", 0);
+            send_step(&progress_tx, 5, &tr!("写入配置文件"), 0);
             std::thread::sleep(std::time::Duration::from_millis(50));
             
             println!("[INSTALL PE STEP 5] 写入配置文件");
@@ -896,11 +897,11 @@ impl App {
                 Err(e) => println!("[INSTALL PE STEP 5] 配置文件写入失败: {}", e),
             }
             
-            send_step(&progress_tx, 5, "写入配置文件", 100);
+            send_step(&progress_tx, 5, &tr!("写入配置文件"), 100);
             std::thread::sleep(std::time::Duration::from_millis(100));
 
             // Step 6: 准备重启
-            send_step(&progress_tx, 6, "准备重启", 100);
+            send_step(&progress_tx, 6, &tr!("准备重启"), 100);
             println!("[INSTALL PE STEP 6] PE安装准备完成，等待重启");
             println!("[INSTALL PE] ========== PE安装准备结束 ==========");
         });
@@ -1375,7 +1376,7 @@ fn find_data_partition(exclude_partition: &str, image_path: &str) -> Result<(Str
     let image_size = match std::fs::metadata(image_path) {
         Ok(meta) => meta.len(),
         Err(e) => {
-            return Err(format!("无法获取镜像文件大小: {}", e));
+            return Err(tr!("无法获取镜像文件大小: {}", e));
         }
     };
     
@@ -1391,7 +1392,7 @@ fn find_data_partition(exclude_partition: &str, image_path: &str) -> Result<(Str
             Ok((partition, is_auto_created))
         }
         Ok(None) => {
-            Err("没有找到可用的数据分区，且无法自动创建".to_string())
+            Err(tr!("没有找到可用的数据分区，且无法自动创建"))
         }
         Err(e) => {
             Err(format!("{}", e))

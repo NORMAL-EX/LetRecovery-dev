@@ -1130,7 +1130,7 @@ impl App {
                                 }
                             }
                         }
-                        ui.label(format!("已选择 {} 个分区", self.batch_format_selected.len()));
+                        ui.label(tr!("已选择 {} 个分区", self.batch_format_selected.len()));
                     });
 
                     ui.add_space(5.0);
@@ -1143,13 +1143,13 @@ impl App {
                             for partition in &self.batch_format_partitions.clone() {
                                 let mut selected = self.batch_format_selected.contains(&partition.letter);
                                 
-                                let display_text = format!(
-                                    "{} [{}] - {} ({:.1} GB / {:.1} GB 可用)",
+                                let display_text = tr!(
+                                    "{} [{}] - {} ({} GB / {} GB 可用)",
                                     partition.letter,
                                     if partition.label.is_empty() { "无标签" } else { &partition.label },
                                     partition.file_system,
-                                    partition.total_size_mb as f64 / 1024.0,
-                                    partition.free_size_mb as f64 / 1024.0,
+                                    format!("{:.1}", partition.total_size_mb as f64 / 1024.0),
+                                    format!("{:.1}", partition.free_size_mb as f64 / 1024.0),
                                 );
 
                                 if ui.checkbox(&mut selected, display_text).changed() {
@@ -1175,24 +1175,24 @@ impl App {
                 ui.horizontal(|ui| {
                     if self.batch_format_loading {
                         ui.spinner();
-                        ui.label("正在格式化...");
+                        ui.label(tr!("正在格式化..."));
                     } else {
                         let can_format = !self.batch_format_selected.is_empty()
                             && !self.batch_format_partitions_loading;
 
                         if ui
-                            .add_enabled(can_format, egui::Button::new("应用（格式化选中分区）"))
+                            .add_enabled(can_format, egui::Button::new(tr!("应用（格式化选中分区）")))
                             .clicked()
                         {
                             // 显示确认对话框
                             do_format = true;
                         }
 
-                        if ui.button("刷新").clicked() {
+                        if ui.button(tr!("刷新")).clicked() {
                             self.start_load_formatable_partitions();
                         }
 
-                        if ui.button("关闭").clicked() {
+                        if ui.button(tr!("关闭")).clicked() {
                             should_close = true;
                         }
                     }
@@ -1234,7 +1234,7 @@ impl App {
         }
 
         self.batch_format_loading = true;
-        self.batch_format_message = "正在格式化分区...".to_string();
+        self.batch_format_message = tr!("正在格式化分区...");
 
         let selected: Vec<String> = self.batch_format_selected.iter().cloned().collect();
         let (tx, rx) = mpsc::channel();
@@ -1270,23 +1270,23 @@ impl App {
         let mut do_resume = false;
         let mut do_export_recovery = false;
 
-        egui::Window::new("BitLocker管理")
+        egui::Window::new(tr!("BitLocker管理"))
             .resizable(true)
             .default_width(560.0)
             .default_height(420.0)
             .show(ui.ctx(), |ui| {
-                ui.label("管理本机 BitLocker 加密分区：解锁已锁定的分区，或彻底关闭（解密）已解锁的分区。");
+                ui.label(tr!("管理本机 BitLocker 加密分区：解锁已锁定的分区，或彻底关闭（解密）已解锁的分区。"));
                 ui.add_space(10.0);
 
                 if self.bitlocker_manage_partitions_loading {
                     ui.horizontal(|ui| {
                         ui.spinner();
-                        ui.label("正在检测 BitLocker 分区...");
+                        ui.label(tr!("正在检测 BitLocker 分区..."));
                     });
                 } else if self.bitlocker_manage_partitions.is_empty() {
                     ui.colored_label(
                         egui::Color32::from_rgb(255, 165, 0),
-                        "未检测到 BitLocker 加密分区",
+                        tr!("未检测到 BitLocker 加密分区"),
                     );
                 } else {
                     // 分区列表（单选）
@@ -1299,11 +1299,11 @@ impl App {
                                 .min_col_width(70.0)
                                 .striped(true)
                                 .show(ui, |ui| {
-                                    ui.label(egui::RichText::new("选择").strong());
-                                    ui.label(egui::RichText::new("分区").strong());
-                                    ui.label(egui::RichText::new("大小").strong());
-                                    ui.label(egui::RichText::new("卷标").strong());
-                                    ui.label(egui::RichText::new("状态").strong());
+                                    ui.label(egui::RichText::new(tr!("选择")).strong());
+                                    ui.label(egui::RichText::new(tr!("分区")).strong());
+                                    ui.label(egui::RichText::new(tr!("大小")).strong());
+                                    ui.label(egui::RichText::new(tr!("卷标")).strong());
+                                    ui.label(egui::RichText::new(tr!("状态")).strong());
                                     ui.end_row();
 
                                     for partition in &self.bitlocker_manage_partitions.clone() {
@@ -1361,15 +1361,15 @@ impl App {
                         Some(VolumeStatus::EncryptedLocked) => {
                             ui.add_space(5.0);
                             ui.horizontal(|ui| {
-                                ui.label("解锁方式:");
-                                ui.radio_value(&mut self.bitlocker_manage_mode, BitLockerUnlockMode::Password, "密码");
-                                ui.radio_value(&mut self.bitlocker_manage_mode, BitLockerUnlockMode::RecoveryKey, "恢复密钥");
+                                ui.label(tr!("解锁方式:"));
+                                ui.radio_value(&mut self.bitlocker_manage_mode, BitLockerUnlockMode::Password, tr!("密码"));
+                                ui.radio_value(&mut self.bitlocker_manage_mode, BitLockerUnlockMode::RecoveryKey, tr!("恢复密钥"));
                             });
                             ui.add_space(5.0);
                             match self.bitlocker_manage_mode {
                                 BitLockerUnlockMode::Password => {
                                     ui.horizontal(|ui| {
-                                        ui.label("密码:");
+                                        ui.label(tr!("密码:"));
                                         ui.add(
                                             egui::TextEdit::singleline(&mut self.bitlocker_manage_password)
                                                 .password(true)
@@ -1379,7 +1379,7 @@ impl App {
                                 }
                                 BitLockerUnlockMode::RecoveryKey => {
                                     ui.horizontal(|ui| {
-                                        ui.label("恢复密钥:");
+                                        ui.label(tr!("恢复密钥:"));
                                         ui.add(
                                             egui::TextEdit::singleline(&mut self.bitlocker_manage_recovery_key)
                                                 .desired_width(320.0)
@@ -1393,30 +1393,30 @@ impl App {
                             ui.add_space(5.0);
                             ui.colored_label(
                                 egui::Color32::from_rgb(100, 200, 100),
-                                "该分区已解锁，可彻底关闭 BitLocker（解密）",
+                                tr!("该分区已解锁，可彻底关闭 BitLocker（解密）"),
                             );
                             ui.colored_label(
                                 egui::Color32::from_rgb(255, 165, 0),
-                                "解密在后台进行，可能耗时较长，期间请勿断电或重启。",
+                                tr!("解密在后台进行，可能耗时较长，期间请勿断电或重启。"),
                             );
                         }
                         Some(VolumeStatus::Decrypting) => {
                             ui.add_space(5.0);
                             ui.colored_label(
                                 egui::Color32::from_rgb(100, 150, 255),
-                                "该分区正在解密中，请等待完成。",
+                                tr!("该分区正在解密中，请等待完成。"),
                             );
                         }
                         Some(VolumeStatus::Encrypting) => {
                             ui.add_space(5.0);
                             ui.colored_label(
                                 egui::Color32::from_rgb(100, 150, 255),
-                                "该分区正在加密中。",
+                                tr!("该分区正在加密中。"),
                             );
                         }
                         _ => {
                             ui.add_space(5.0);
-                            ui.label("请选择一个分区进行操作。");
+                            ui.label(tr!("请选择一个分区进行操作。"));
                         }
                     }
                 }
@@ -1434,14 +1434,14 @@ impl App {
                     ui.separator();
                     ui.colored_label(
                         egui::Color32::from_rgb(255, 165, 0),
-                        "恢复密钥（48 位数字），请妥善保管、勿泄露：",
+                        tr!("恢复密钥（48 位数字），请妥善保管、勿泄露："),
                     );
                     ui.monospace(key.as_str());
                     ui.horizontal(|ui| {
-                        if ui.button("导出到文件").clicked() {
+                        if ui.button(tr!("导出到文件")).clicked() {
                             do_export_recovery = true;
                         }
-                        if ui.button("隐藏").clicked() {
+                        if ui.button(tr!("隐藏")).clicked() {
                             self.bitlocker_manage_recovery_display = None;
                         }
                     });
@@ -1454,7 +1454,7 @@ impl App {
                 ui.horizontal(|ui| {
                     if self.bitlocker_manage_loading {
                         ui.spinner();
-                        ui.label("正在执行操作...");
+                        ui.label(tr!("正在执行操作..."));
                     } else {
                         let selected_status = self.bitlocker_manage_selected.as_ref().and_then(|letter| {
                             self.bitlocker_manage_partitions
@@ -1469,31 +1469,31 @@ impl App {
                                     BitLockerUnlockMode::Password => !self.bitlocker_manage_password.is_empty(),
                                     BitLockerUnlockMode::RecoveryKey => !self.bitlocker_manage_recovery_key.is_empty(),
                                 };
-                                if ui.add_enabled(can_unlock, egui::Button::new("解锁")).clicked() {
+                                if ui.add_enabled(can_unlock, egui::Button::new(tr!("解锁"))).clicked() {
                                     do_unlock = true;
                                 }
                             }
                             Some(VolumeStatus::EncryptedUnlocked) => {
-                                if ui.button("关闭 BitLocker（解密）").clicked() {
+                                if ui.button(tr!("关闭 BitLocker（解密）")).clicked() {
                                     do_decrypt = true;
                                 }
-                                if ui.button("查看恢复密钥").clicked() {
+                                if ui.button(tr!("查看恢复密钥")).clicked() {
                                     do_get_recovery = true;
                                 }
-                                if ui.button("挂起保护").clicked() {
+                                if ui.button(tr!("挂起保护")).clicked() {
                                     do_suspend = true;
                                 }
-                                if ui.button("恢复保护").clicked() {
+                                if ui.button(tr!("恢复保护")).clicked() {
                                     do_resume = true;
                                 }
                             }
                             _ => {}
                         }
 
-                        if ui.button("刷新").clicked() {
+                        if ui.button(tr!("刷新")).clicked() {
                             do_refresh = true;
                         }
-                        if ui.button("关闭").clicked() {
+                        if ui.button(tr!("关闭")).clicked() {
                             should_close = true;
                         }
                     }
@@ -1527,9 +1527,9 @@ impl App {
                     match std::fs::write(&path, key.as_bytes()) {
                         Ok(_) => {
                             self.bitlocker_manage_message =
-                                format!("恢复密钥已导出到 {}", path.display())
+                                tr!("恢复密钥已导出到 {}", path.display())
                         }
-                        Err(e) => self.bitlocker_manage_message = format!("导出失败: {}", e),
+                        Err(e) => self.bitlocker_manage_message = tr!("导出失败: {}", e),
                     }
                 }
             }
@@ -1568,13 +1568,13 @@ impl App {
         let drive = match &self.bitlocker_manage_selected {
             Some(d) => d.clone(),
             None => {
-                self.bitlocker_manage_message = "请先选择要解锁的分区".to_string();
+                self.bitlocker_manage_message = tr!("请先选择要解锁的分区");
                 return;
             }
         };
 
         self.bitlocker_manage_loading = true;
-        self.bitlocker_manage_message = "正在解锁...".to_string();
+        self.bitlocker_manage_message = tr!("正在解锁...");
 
         let mode = self.bitlocker_manage_mode;
         let password = self.bitlocker_manage_password.clone();
@@ -1605,13 +1605,13 @@ impl App {
         let drive = match &self.bitlocker_manage_selected {
             Some(d) => d.clone(),
             None => {
-                self.bitlocker_manage_message = "请先选择要解密的分区".to_string();
+                self.bitlocker_manage_message = tr!("请先选择要解密的分区");
                 return;
             }
         };
 
         self.bitlocker_manage_loading = true;
-        self.bitlocker_manage_message = "正在发起解密...".to_string();
+        self.bitlocker_manage_message = tr!("正在发起解密...");
 
         let (tx, rx) = mpsc::channel();
         self.bitlocker_manage_decrypt_rx = Some(rx);
@@ -1630,12 +1630,12 @@ impl App {
         let drive = match &self.bitlocker_manage_selected {
             Some(d) => d.clone(),
             None => {
-                self.bitlocker_manage_message = "请先选择分区".to_string();
+                self.bitlocker_manage_message = tr!("请先选择分区");
                 return;
             }
         };
         self.bitlocker_manage_loading = true;
-        self.bitlocker_manage_message = "正在读取恢复密钥...".to_string();
+        self.bitlocker_manage_message = tr!("正在读取恢复密钥...");
         self.bitlocker_manage_recovery_display = None;
         let (tx, rx) = mpsc::channel();
         self.bitlocker_manage_recovery_rx = Some(rx);
@@ -1662,13 +1662,13 @@ impl App {
         let drive = match &self.bitlocker_manage_selected {
             Some(d) => d.clone(),
             None => {
-                self.bitlocker_manage_message = "请先选择分区".to_string();
+                self.bitlocker_manage_message = tr!("请先选择分区");
                 return;
             }
         };
         self.bitlocker_manage_loading = true;
         self.bitlocker_manage_message =
-            if suspend { "正在挂起保护..." } else { "正在恢复保护..." }.to_string();
+            if suspend { tr!("正在挂起保护...") } else { tr!("正在恢复保护...") };
         let (tx, rx) = mpsc::channel();
         self.bitlocker_manage_protect_rx = Some(rx);
         std::thread::spawn(move || {
@@ -1707,14 +1707,14 @@ impl App {
                 self.bitlocker_manage_loading = false;
                 self.bitlocker_manage_unlock_rx = None;
                 if result.success {
-                    self.bitlocker_manage_message = format!("{} 解锁成功", result.letter);
+                    self.bitlocker_manage_message = tr!("{} 解锁成功", result.letter);
                     self.bitlocker_manage_password.clear();
                     self.bitlocker_manage_recovery_key.clear();
                     // 刷新列表以更新状态
                     self.start_load_bitlocker_manage_partitions();
                 } else {
                     self.bitlocker_manage_message =
-                        format!("{} 解锁失败: {}", result.letter, result.message);
+                        tr!("{} 解锁失败: {}", result.letter, result.message);
                 }
             }
         }
@@ -1730,7 +1730,7 @@ impl App {
                     self.start_load_bitlocker_manage_partitions();
                 } else {
                     self.bitlocker_manage_message =
-                        format!("{} 解密失败: {}", result.letter, result.message);
+                        tr!("{} 解密失败: {}", result.letter, result.message);
                 }
             }
         }
@@ -1743,10 +1743,10 @@ impl App {
                 match result {
                     Ok(key) => {
                         self.bitlocker_manage_recovery_display = Some(key);
-                        self.bitlocker_manage_message = "已读取恢复密钥".to_string();
+                        self.bitlocker_manage_message = tr!("已读取恢复密钥");
                     }
                     Err(e) => {
-                        self.bitlocker_manage_message = format!("读取恢复密钥失败: {}", e);
+                        self.bitlocker_manage_message = tr!("读取恢复密钥失败: {}", e);
                     }
                 }
             }
@@ -1763,7 +1763,7 @@ impl App {
                         self.start_load_bitlocker_manage_partitions();
                     }
                     Err(e) => {
-                        self.bitlocker_manage_message = format!("操作失败: {}", e);
+                        self.bitlocker_manage_message = tr!("操作失败: {}", e);
                     }
                 }
             }
@@ -1800,9 +1800,9 @@ impl App {
                 if !progress.current_file.is_empty() && !progress.current_file.starts_with("正在") {
                     // 添加到日志（限制日志长度）
                     let log_line = if progress.completed {
-                        format!("[完成] {}\n", progress.current_file)
+                        tr!("[完成] {}\n", progress.current_file)
                     } else {
-                        format!("[复制] {}\n", progress.current_file)
+                        tr!("[复制] {}\n", progress.current_file)
                     };
                     self.partition_copy_log.push_str(&log_line);
                     
@@ -1820,14 +1820,14 @@ impl App {
                 // 更新消息
                 if progress.completed {
                     let msg = if progress.failed_count > 0 {
-                        format!(
+                        tr!(
                             "复制完成！已复制 {} 个文件，跳过 {} 个，失败 {} 个",
                             progress.copied_count,
                             progress.skipped_count,
                             progress.failed_count
                         )
                     } else {
-                        format!(
+                        tr!(
                             "复制完成！已复制 {} 个文件，跳过 {} 个（已存在）",
                             progress.copied_count,
                             progress.skipped_count
@@ -1840,11 +1840,11 @@ impl App {
                     // 刷新分区列表
                     self.start_load_copyable_partitions();
                 } else if let Some(ref error) = progress.error {
-                    self.partition_copy_message = format!("错误: {}", error);
+                    self.partition_copy_message = tr!("错误: {}", error);
                     self.partition_copy_copying = false;
                     self.partition_copy_progress_rx = None;
                 } else {
-                    self.partition_copy_message = format!(
+                    self.partition_copy_message = tr!(
                         "正在复制 {}/{}（跳过 {}）: {}",
                         progress.copied_count,
                         progress.total_count,
@@ -1876,32 +1876,32 @@ impl App {
         let mut should_close = false;
         let mut do_copy = false;
 
-        egui::Window::new("分区对拷")
+        egui::Window::new(tr!("分区对拷"))
             .resizable(true)
             .default_width(650.0)
             .default_height(550.0)
             .show(ui.ctx(), |ui| {
-                ui.label("将源分区的所有文件复制到目标分区（支持断点续传）");
+                ui.label(tr!("将源分区的所有文件复制到目标分区（支持断点续传）"));
                 ui.add_space(10.0);
 
                 if self.partition_copy_partitions_loading {
                     ui.horizontal(|ui| {
                         ui.spinner();
-                        ui.label("正在检测分区...");
+                        ui.label(tr!("正在检测分区..."));
                     });
                 } else if self.partition_copy_partitions.is_empty() {
                     ui.colored_label(
                         egui::Color32::from_rgb(255, 165, 0),
-                        "未找到可用的分区",
+                        tr!("未找到可用的分区"),
                     );
                 } else {
                     // 克隆分区列表避免借用冲突
                     let partitions_clone = self.partition_copy_partitions.clone();
-                    
+
                     // ========== 源分区选择 ==========
                     ui.horizontal(|ui| {
-                        ui.label("请选择源分区:");
-                        let current_source = self.partition_copy_source.clone().unwrap_or_else(|| "请选择".to_string());
+                        ui.label(tr!("请选择源分区:"));
+                        let current_source = self.partition_copy_source.clone().unwrap_or_else(|| tr!("请选择"));
                         
                         egui::ComboBox::from_id_salt("partition_copy_source")
                             .selected_text(&current_source)
@@ -1934,11 +1934,11 @@ impl App {
                                     .spacing([10.0, 4.0])
                                     .min_col_width(80.0)
                                     .show(ui, |ui| {
-                                        ui.label(egui::RichText::new("分区卷").strong());
-                                        ui.label(egui::RichText::new("总空间").strong());
-                                        ui.label(egui::RichText::new("已用空间").strong());
-                                        ui.label(egui::RichText::new("卷标").strong());
-                                        ui.label(egui::RichText::new("状态").strong());
+                                        ui.label(egui::RichText::new(tr!("分区卷")).strong());
+                                        ui.label(egui::RichText::new(tr!("总空间")).strong());
+                                        ui.label(egui::RichText::new(tr!("已用空间")).strong());
+                                        ui.label(egui::RichText::new(tr!("卷标")).strong());
+                                        ui.label(egui::RichText::new(tr!("状态")).strong());
                                         ui.end_row();
                                     });
 
@@ -1962,7 +1962,7 @@ impl App {
                                             ui.label(format!("{:.1} GB", partition.total_size_mb as f64 / 1024.0));
                                             ui.label(format!("{:.1} GB", partition.used_size_mb as f64 / 1024.0));
                                             ui.label(if partition.label.is_empty() { "-" } else { &partition.label });
-                                            ui.label(if partition.has_system { "有系统" } else { "无系统" });
+                                            ui.label(if partition.has_system { tr!("有系统") } else { tr!("无系统") });
                                             ui.end_row();
                                         }
                                     });
@@ -1973,8 +1973,8 @@ impl App {
 
                     // ========== 目标分区选择 ==========
                     ui.horizontal(|ui| {
-                        ui.label("请选择目标分区:");
-                        let current_target = self.partition_copy_target.clone().unwrap_or_else(|| "请选择".to_string());
+                        ui.label(tr!("请选择目标分区:"));
+                        let current_target = self.partition_copy_target.clone().unwrap_or_else(|| tr!("请选择"));
                         
                         egui::ComboBox::from_id_salt("partition_copy_target")
                             .selected_text(&current_target)
@@ -2007,11 +2007,11 @@ impl App {
                                     .spacing([10.0, 4.0])
                                     .min_col_width(80.0)
                                     .show(ui, |ui| {
-                                        ui.label(egui::RichText::new("分区卷").strong());
-                                        ui.label(egui::RichText::new("总空间").strong());
-                                        ui.label(egui::RichText::new("已用空间").strong());
-                                        ui.label(egui::RichText::new("卷标").strong());
-                                        ui.label(egui::RichText::new("状态").strong());
+                                        ui.label(egui::RichText::new(tr!("分区卷")).strong());
+                                        ui.label(egui::RichText::new(tr!("总空间")).strong());
+                                        ui.label(egui::RichText::new(tr!("已用空间")).strong());
+                                        ui.label(egui::RichText::new(tr!("卷标")).strong());
+                                        ui.label(egui::RichText::new(tr!("状态")).strong());
                                         ui.end_row();
                                     });
 
@@ -2035,7 +2035,7 @@ impl App {
                                             ui.label(format!("{:.1} GB", partition.total_size_mb as f64 / 1024.0));
                                             ui.label(format!("{:.1} GB", partition.used_size_mb as f64 / 1024.0));
                                             ui.label(if partition.label.is_empty() { "-" } else { &partition.label });
-                                            ui.label(if partition.has_system { "有系统" } else { "无系统" });
+                                            ui.label(if partition.has_system { tr!("有系统") } else { tr!("无系统") });
                                             ui.end_row();
                                         }
                                     });
@@ -2047,7 +2047,7 @@ impl App {
 
                 // 显示复制日志（如果正在复制或已复制）
                 if self.partition_copy_copying || !self.partition_copy_log.is_empty() {
-                    ui.label("复制日志:");
+                    ui.label(tr!("复制日志:"));
                     ui.group(|ui| {
                         ui.set_min_height(100.0);
                         ui.set_max_height(100.0);
@@ -2077,7 +2077,7 @@ impl App {
                 ui.horizontal(|ui| {
                     if self.partition_copy_copying {
                         ui.spinner();
-                        ui.label("正在复制...");
+                        ui.label(tr!("正在复制..."));
                     } else {
                         // 检查是否可以开始复制
                         let source_valid = self.partition_copy_source.is_some();
@@ -2090,9 +2090,9 @@ impl App {
 
                         // 根据是否可以继续显示不同的按钮文字
                         let button_text = if self.partition_copy_is_resume {
-                            "继续对拷"
+                            tr!("继续对拷")
                         } else {
-                            "开始对拷"
+                            tr!("开始对拷")
                         };
 
                         if ui
@@ -2100,7 +2100,7 @@ impl App {
                             .clicked()
                         {
                             if same_partition {
-                                self.partition_copy_message = "错误: 源分区和目标分区不能相同！".to_string();
+                                self.partition_copy_message = tr!("错误: 源分区和目标分区不能相同！");
                             } else {
                                 do_copy = true;
                             }
@@ -2110,15 +2110,15 @@ impl App {
                         if same_partition {
                             ui.colored_label(
                                 egui::Color32::from_rgb(255, 80, 80),
-                                "源分区和目标分区不能相同！"
+                                tr!("源分区和目标分区不能相同！")
                             );
                         }
 
-                        if ui.button("刷新").clicked() {
+                        if ui.button(tr!("刷新")).clicked() {
                             self.start_load_copyable_partitions();
                         }
 
-                        if ui.button("关闭").clicked() {
+                        if ui.button(tr!("关闭")).clicked() {
                             should_close = true;
                         }
                     }
@@ -2157,7 +2157,7 @@ impl App {
         let source = match &self.partition_copy_source {
             Some(s) => s.clone(),
             None => {
-                self.partition_copy_message = "请选择源分区".to_string();
+                self.partition_copy_message = tr!("请选择源分区");
                 return;
             }
         };
@@ -2165,13 +2165,13 @@ impl App {
         let target = match &self.partition_copy_target {
             Some(t) => t.clone(),
             None => {
-                self.partition_copy_message = "请选择目标分区".to_string();
+                self.partition_copy_message = tr!("请选择目标分区");
                 return;
             }
         };
 
         if source == target {
-            self.partition_copy_message = "错误: 源分区和目标分区不能相同！".to_string();
+            self.partition_copy_message = tr!("错误: 源分区和目标分区不能相同！");
             return;
         }
 
@@ -2183,7 +2183,7 @@ impl App {
 
         self.partition_copy_copying = true;
         self.partition_copy_log.clear();
-        self.partition_copy_message = "正在准备复制...".to_string();
+        self.partition_copy_message = tr!("正在准备复制...");
 
         let is_resume = self.partition_copy_is_resume;
         
@@ -2214,14 +2214,14 @@ impl App {
         let mut do_skip = false;
         let mut do_skip_all = false;
 
-        egui::Window::new("BitLocker解锁")
+        egui::Window::new(tr!("BitLocker解锁"))
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
             .show(ui.ctx(), |ui| {
                 ui.set_min_width(500.0);
-                
-                ui.label("检测到以下分区被BitLocker加密锁定，需要解锁后才能继续安装：");
+
+                ui.label(tr!("检测到以下分区被BitLocker加密锁定，需要解锁后才能继续安装："));
                 ui.add_space(10.0);
 
                 // 显示锁定分区列表
@@ -2234,10 +2234,10 @@ impl App {
                             .min_col_width(80.0)
                             .striped(true)
                             .show(ui, |ui| {
-                                ui.label(egui::RichText::new("分区").strong());
-                                ui.label(egui::RichText::new("大小").strong());
-                                ui.label(egui::RichText::new("卷标").strong());
-                                ui.label(egui::RichText::new("状态").strong());
+                                ui.label(egui::RichText::new(tr!("分区")).strong());
+                                ui.label(egui::RichText::new(tr!("大小")).strong());
+                                ui.label(egui::RichText::new(tr!("卷标")).strong());
+                                ui.label(egui::RichText::new(tr!("状态")).strong());
                                 ui.end_row();
 
                                 for partition in &self.install_bitlocker_partitions {
@@ -2276,7 +2276,7 @@ impl App {
                     if let Some(ref current) = self.install_bitlocker_current {
                         ui.add_space(5.0);
                         ui.horizontal(|ui| {
-                            ui.label("当前解锁:");
+                            ui.label(tr!("当前解锁:"));
                             ui.strong(current);
                         });
                     }
@@ -2285,9 +2285,9 @@ impl App {
 
                     // 解锁模式选择
                     ui.horizontal(|ui| {
-                        ui.label("解锁方式:");
-                        ui.radio_value(&mut self.install_bitlocker_mode, BitLockerUnlockMode::Password, "密码");
-                        ui.radio_value(&mut self.install_bitlocker_mode, BitLockerUnlockMode::RecoveryKey, "恢复密钥");
+                        ui.label(tr!("解锁方式:"));
+                        ui.radio_value(&mut self.install_bitlocker_mode, BitLockerUnlockMode::Password, tr!("密码"));
+                        ui.radio_value(&mut self.install_bitlocker_mode, BitLockerUnlockMode::RecoveryKey, tr!("恢复密钥"));
                     });
 
                     ui.add_space(5.0);
@@ -2296,7 +2296,7 @@ impl App {
                     match self.install_bitlocker_mode {
                         BitLockerUnlockMode::Password => {
                             ui.horizontal(|ui| {
-                                ui.label("密码:");
+                                ui.label(tr!("密码:"));
                                 ui.add(
                                     egui::TextEdit::singleline(&mut self.install_bitlocker_password)
                                         .password(true)
@@ -2306,7 +2306,7 @@ impl App {
                         }
                         BitLockerUnlockMode::RecoveryKey => {
                             ui.horizontal(|ui| {
-                                ui.label("恢复密钥:");
+                                ui.label(tr!("恢复密钥:"));
                                 ui.add(
                                     egui::TextEdit::singleline(&mut self.install_bitlocker_recovery_key)
                                         .desired_width(300.0)
@@ -2320,7 +2320,7 @@ impl App {
                     ui.add_space(10.0);
                     ui.colored_label(
                         egui::Color32::from_rgb(100, 200, 100),
-                        "所有分区已解锁，可以继续安装",
+                        tr!("所有分区已解锁，可以继续安装"),
                     );
                 }
 
@@ -2339,7 +2339,7 @@ impl App {
                 ui.horizontal(|ui| {
                     if self.install_bitlocker_loading {
                         ui.spinner();
-                        ui.label("正在解锁...");
+                        ui.label(tr!("正在解锁..."));
                     } else if has_locked {
                         let can_unlock = self.install_bitlocker_current.is_some()
                             && match self.install_bitlocker_mode {
@@ -2347,31 +2347,31 @@ impl App {
                                 BitLockerUnlockMode::RecoveryKey => !self.install_bitlocker_recovery_key.is_empty(),
                             };
 
-                        if ui.add_enabled(can_unlock, egui::Button::new("解锁")).clicked() {
+                        if ui.add_enabled(can_unlock, egui::Button::new(tr!("解锁"))).clicked() {
                             do_unlock = true;
                         }
 
-                        if ui.button("跳过此分区").clicked() {
+                        if ui.button(tr!("跳过此分区")).clicked() {
                             do_skip = true;
                         }
 
-                        if ui.button("跳过所有").clicked() {
+                        if ui.button(tr!("跳过所有")).clicked() {
                             do_skip_all = true;
                         }
 
-                        if ui.button("取消安装").clicked() {
+                        if ui.button(tr!("取消安装")).clicked() {
                             should_close = true;
                         }
                     } else {
                         // 所有分区都已解锁
-                        if ui.button("继续安装").clicked() {
+                        if ui.button(tr!("继续安装")).clicked() {
                             should_close = true;
                             if self.install_bitlocker_continue_after {
                                 self.continue_installation_after_bitlocker();
                             }
                         }
 
-                        if ui.button("取消").clicked() {
+                        if ui.button(tr!("取消")).clicked() {
                             should_close = true;
                         }
                     }
@@ -2391,7 +2391,7 @@ impl App {
             // 跳过所有锁定的分区
             self.install_bitlocker_partitions.retain(|p| p.status != VolumeStatus::EncryptedLocked);
             self.install_bitlocker_current = None;
-            self.install_bitlocker_message = "已跳过所有锁定的分区".to_string();
+            self.install_bitlocker_message = tr!("已跳过所有锁定的分区");
         }
 
         if should_close {
@@ -2410,8 +2410,8 @@ impl App {
                 self.install_bitlocker_rx = None;
 
                 if result.success {
-                    self.install_bitlocker_message = format!("{} 解锁成功", result.letter);
-                    
+                    self.install_bitlocker_message = tr!("{} 解锁成功", result.letter);
+
                     // 更新分区状态
                     if let Some(partition) = self.install_bitlocker_partitions.iter_mut()
                         .find(|p| p.letter == result.letter)
@@ -2426,7 +2426,7 @@ impl App {
                     // 选择下一个需要解锁的分区
                     self.select_next_install_bitlocker_partition();
                 } else {
-                    self.install_bitlocker_message = format!("{} 解锁失败: {}", result.letter, result.message);
+                    self.install_bitlocker_message = tr!("{} 解锁失败: {}", result.letter, result.message);
                 }
             }
         }
@@ -2443,13 +2443,13 @@ impl App {
         let drive = match &self.install_bitlocker_current {
             Some(d) => d.clone(),
             None => {
-                self.install_bitlocker_message = "请先选择要解锁的分区".to_string();
+                self.install_bitlocker_message = tr!("请先选择要解锁的分区");
                 return;
             }
         };
 
         self.install_bitlocker_loading = true;
-        self.install_bitlocker_message = "正在解锁...".to_string();
+        self.install_bitlocker_message = tr!("正在解锁...");
 
         let mode = self.install_bitlocker_mode;
         let password = self.install_bitlocker_password.clone();
@@ -2477,7 +2477,7 @@ impl App {
         if let Some(ref current) = self.install_bitlocker_current.clone() {
             // 从列表中移除当前分区
             self.install_bitlocker_partitions.retain(|p| p.letter != *current);
-            self.install_bitlocker_message = format!("已跳过分区 {}", current);
+            self.install_bitlocker_message = tr!("已跳过分区 {}", current);
             
             // 选择下一个需要解锁的分区
             self.select_next_install_bitlocker_partition();
@@ -2513,14 +2513,14 @@ impl App {
         let mut do_skip = false;
         let mut do_skip_all = false;
 
-        egui::Window::new("BitLocker解锁 - 备份")
+        egui::Window::new(tr!("BitLocker解锁 - 备份"))
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
             .show(ui.ctx(), |ui| {
                 ui.set_min_width(500.0);
-                
-                ui.label("检测到以下分区被BitLocker加密锁定，需要解锁后才能继续备份：");
+
+                ui.label(tr!("检测到以下分区被BitLocker加密锁定，需要解锁后才能继续备份："));
                 ui.add_space(10.0);
 
                 // 显示锁定分区列表
@@ -2533,10 +2533,10 @@ impl App {
                             .min_col_width(80.0)
                             .striped(true)
                             .show(ui, |ui| {
-                                ui.label(egui::RichText::new("分区").strong());
-                                ui.label(egui::RichText::new("大小").strong());
-                                ui.label(egui::RichText::new("卷标").strong());
-                                ui.label(egui::RichText::new("状态").strong());
+                                ui.label(egui::RichText::new(tr!("分区")).strong());
+                                ui.label(egui::RichText::new(tr!("大小")).strong());
+                                ui.label(egui::RichText::new(tr!("卷标")).strong());
+                                ui.label(egui::RichText::new(tr!("状态")).strong());
                                 ui.end_row();
 
                                 for partition in &self.backup_bitlocker_partitions {
@@ -2575,7 +2575,7 @@ impl App {
                     if let Some(ref current) = self.backup_bitlocker_current {
                         ui.add_space(5.0);
                         ui.horizontal(|ui| {
-                            ui.label("当前解锁:");
+                            ui.label(tr!("当前解锁:"));
                             ui.strong(current);
                         });
                     }
@@ -2584,9 +2584,9 @@ impl App {
 
                     // 解锁模式选择
                     ui.horizontal(|ui| {
-                        ui.label("解锁方式:");
-                        ui.radio_value(&mut self.backup_bitlocker_mode, BitLockerUnlockMode::Password, "密码");
-                        ui.radio_value(&mut self.backup_bitlocker_mode, BitLockerUnlockMode::RecoveryKey, "恢复密钥");
+                        ui.label(tr!("解锁方式:"));
+                        ui.radio_value(&mut self.backup_bitlocker_mode, BitLockerUnlockMode::Password, tr!("密码"));
+                        ui.radio_value(&mut self.backup_bitlocker_mode, BitLockerUnlockMode::RecoveryKey, tr!("恢复密钥"));
                     });
 
                     ui.add_space(5.0);
@@ -2595,7 +2595,7 @@ impl App {
                     match self.backup_bitlocker_mode {
                         BitLockerUnlockMode::Password => {
                             ui.horizontal(|ui| {
-                                ui.label("密码:");
+                                ui.label(tr!("密码:"));
                                 ui.add(
                                     egui::TextEdit::singleline(&mut self.backup_bitlocker_password)
                                         .password(true)
@@ -2605,7 +2605,7 @@ impl App {
                         }
                         BitLockerUnlockMode::RecoveryKey => {
                             ui.horizontal(|ui| {
-                                ui.label("恢复密钥:");
+                                ui.label(tr!("恢复密钥:"));
                                 ui.add(
                                     egui::TextEdit::singleline(&mut self.backup_bitlocker_recovery_key)
                                         .desired_width(300.0)
@@ -2619,7 +2619,7 @@ impl App {
                     ui.add_space(10.0);
                     ui.colored_label(
                         egui::Color32::from_rgb(100, 200, 100),
-                        "所有分区已解锁，可以继续备份",
+                        tr!("所有分区已解锁，可以继续备份"),
                     );
                 }
 
@@ -2638,7 +2638,7 @@ impl App {
                 ui.horizontal(|ui| {
                     if self.backup_bitlocker_loading {
                         ui.spinner();
-                        ui.label("正在解锁...");
+                        ui.label(tr!("正在解锁..."));
                     } else if has_locked {
                         let can_unlock = self.backup_bitlocker_current.is_some()
                             && match self.backup_bitlocker_mode {
@@ -2646,31 +2646,31 @@ impl App {
                                 BitLockerUnlockMode::RecoveryKey => !self.backup_bitlocker_recovery_key.is_empty(),
                             };
 
-                        if ui.add_enabled(can_unlock, egui::Button::new("解锁")).clicked() {
+                        if ui.add_enabled(can_unlock, egui::Button::new(tr!("解锁"))).clicked() {
                             do_unlock = true;
                         }
 
-                        if ui.button("跳过此分区").clicked() {
+                        if ui.button(tr!("跳过此分区")).clicked() {
                             do_skip = true;
                         }
 
-                        if ui.button("跳过所有").clicked() {
+                        if ui.button(tr!("跳过所有")).clicked() {
                             do_skip_all = true;
                         }
 
-                        if ui.button("取消备份").clicked() {
+                        if ui.button(tr!("取消备份")).clicked() {
                             should_close = true;
                         }
                     } else {
                         // 所有分区都已解锁
-                        if ui.button("继续备份").clicked() {
+                        if ui.button(tr!("继续备份")).clicked() {
                             should_close = true;
                             if self.backup_bitlocker_continue_after {
                                 self.continue_backup_after_bitlocker();
                             }
                         }
 
-                        if ui.button("取消").clicked() {
+                        if ui.button(tr!("取消")).clicked() {
                             should_close = true;
                         }
                     }
@@ -2690,7 +2690,7 @@ impl App {
             // 跳过所有锁定的分区
             self.backup_bitlocker_partitions.retain(|p| p.status != VolumeStatus::EncryptedLocked);
             self.backup_bitlocker_current = None;
-            self.backup_bitlocker_message = "已跳过所有锁定的分区".to_string();
+            self.backup_bitlocker_message = tr!("已跳过所有锁定的分区");
         }
 
         if should_close {
@@ -2709,8 +2709,8 @@ impl App {
                 self.backup_bitlocker_rx = None;
 
                 if result.success {
-                    self.backup_bitlocker_message = format!("{} 解锁成功", result.letter);
-                    
+                    self.backup_bitlocker_message = tr!("{} 解锁成功", result.letter);
+
                     // 更新分区状态
                     if let Some(partition) = self.backup_bitlocker_partitions.iter_mut()
                         .find(|p| p.letter == result.letter)
@@ -2725,7 +2725,7 @@ impl App {
                     // 选择下一个需要解锁的分区
                     self.select_next_backup_bitlocker_partition();
                 } else {
-                    self.backup_bitlocker_message = format!("{} 解锁失败: {}", result.letter, result.message);
+                    self.backup_bitlocker_message = tr!("{} 解锁失败: {}", result.letter, result.message);
                 }
             }
         }
@@ -2742,13 +2742,13 @@ impl App {
         let drive = match &self.backup_bitlocker_current {
             Some(d) => d.clone(),
             None => {
-                self.backup_bitlocker_message = "请先选择要解锁的分区".to_string();
+                self.backup_bitlocker_message = tr!("请先选择要解锁的分区");
                 return;
             }
         };
 
         self.backup_bitlocker_loading = true;
-        self.backup_bitlocker_message = "正在解锁...".to_string();
+        self.backup_bitlocker_message = tr!("正在解锁...");
 
         let mode = self.backup_bitlocker_mode;
         let password = self.backup_bitlocker_password.clone();
@@ -2775,7 +2775,7 @@ impl App {
         if let Some(ref current) = self.backup_bitlocker_current.clone() {
             // 从列表中移除当前分区
             self.backup_bitlocker_partitions.retain(|p| p.letter != *current);
-            self.backup_bitlocker_message = format!("已跳过分区 {}", current);
+            self.backup_bitlocker_message = tr!("已跳过分区 {}", current);
             
             // 选择下一个需要解锁的分区
             self.select_next_backup_bitlocker_partition();
@@ -2805,35 +2805,35 @@ impl App {
         let windows_partitions = self.get_cached_windows_partitions();
         let is_loading_partitions = self.windows_partitions_loading;
 
-        egui::Window::new("一键修复引导")
+        egui::Window::new(tr!("一键修复引导"))
             .resizable(false)
             .default_width(450.0)
             .show(ui.ctx(), |ui| {
-                ui.label("修复Windows系统的启动引导");
+                ui.label(tr!("修复Windows系统的启动引导"));
                 ui.add_space(10.0);
 
                 // 分区选择
                 if is_loading_partitions {
                     ui.horizontal(|ui| {
                         ui.spinner();
-                        ui.label("正在检测Windows分区...");
+                        ui.label(tr!("正在检测Windows分区..."));
                     });
                 } else if windows_partitions.is_empty() {
                     ui.colored_label(
                         egui::Color32::from_rgb(255, 100, 100),
-                        "未检测到包含Windows系统的分区",
+                        tr!("未检测到包含Windows系统的分区"),
                     );
                     ui.add_space(5.0);
-                    ui.label("请确保目标分区包含有效的Windows系统");
+                    ui.label(tr!("请确保目标分区包含有效的Windows系统"));
                 } else {
                     ui.horizontal(|ui| {
-                        ui.label("选择目标系统分区:");
+                        ui.label(tr!("选择目标系统分区:"));
 
                         let current_text = self
                             .repair_boot_selected_partition
                             .as_ref()
                             .map(|letter| format_partition_display(&windows_partitions, letter))
-                            .unwrap_or_else(|| "请选择".to_string());
+                            .unwrap_or_else(|| tr!("请选择"));
 
                         egui::ComboBox::from_id_salt("repair_boot_partition_select")
                             .selected_text(current_text)
@@ -2861,11 +2861,11 @@ impl App {
                             ui.add_space(10.0);
                             ui.group(|ui| {
                                 ui.horizontal(|ui| {
-                                    ui.label("Windows版本:");
+                                    ui.label(tr!("Windows版本:"));
                                     ui.label(&partition.windows_version);
                                 });
                                 ui.horizontal(|ui| {
-                                    ui.label("系统架构:");
+                                    ui.label(tr!("系统架构:"));
                                     ui.label(&partition.architecture);
                                 });
                             });
@@ -2886,7 +2886,7 @@ impl App {
                 if self.repair_boot_loading {
                     ui.horizontal(|ui| {
                         ui.spinner();
-                        ui.label("正在修复引导...");
+                        ui.label(tr!("正在修复引导..."));
                     });
                     ui.add_space(10.0);
                 }
@@ -2901,20 +2901,20 @@ impl App {
                         && !windows_partitions.is_empty();
 
                     if ui
-                        .add_enabled(can_repair, egui::Button::new("开始修复"))
+                        .add_enabled(can_repair, egui::Button::new(tr!("开始修复")))
                         .clicked()
                     {
                         do_repair = true;
                     }
 
                     if ui
-                        .add_enabled(!self.repair_boot_loading, egui::Button::new("刷新"))
+                        .add_enabled(!self.repair_boot_loading, egui::Button::new(tr!("刷新")))
                         .clicked()
                     {
                         self.refresh_windows_partitions_cache();
                     }
 
-                    if ui.button("关闭").clicked() {
+                    if ui.button(tr!("关闭")).clicked() {
                         should_close = true;
                     }
                 });

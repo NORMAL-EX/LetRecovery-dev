@@ -3,6 +3,7 @@ use std::sync::mpsc;
 
 use crate::app::App;
 use crate::download::aria2::{Aria2Manager, DownloadProgress, DownloadStatus};
+use crate::tr;
 
 /// 下载控制命令
 #[derive(Debug, Clone)]
@@ -35,7 +36,7 @@ static mut MD5_VERIFY_RX: Option<mpsc::Receiver<Md5VerifyState>> = None;
 
 impl App {
     pub fn show_download_progress(&mut self, ui: &mut egui::Ui) {
-        ui.heading("下载进度");
+        ui.heading(tr!("下载进度"));
         ui.separator();
 
         // 从channel接收进度更新
@@ -78,9 +79,9 @@ impl App {
         // 显示初始化错误
         if let Some(ref error) = self.download_init_error {
             ui.add_space(15.0);
-            ui.colored_label(egui::Color32::RED, format!("错误: {}", error));
+            ui.colored_label(egui::Color32::RED, tr!("错误: {}", error));
             ui.add_space(10.0);
-            if ui.button("返回").clicked() {
+            if ui.button(tr!("返回")).clicked() {
                 self.download_init_error = None;
                 // 先获取待执行操作
                 let action = self.pe_download_then_action.take();
@@ -114,7 +115,7 @@ impl App {
 
             // 文件名
             if let Some(filename) = &filename_clone {
-                ui.label(format!("文件: {}", filename));
+                ui.label(tr!("文件: {}", filename));
             }
 
             // 进度条
@@ -126,13 +127,13 @@ impl App {
 
             // 详细信息
             ui.horizontal(|ui| {
-                ui.label(format!(
+                ui.label(tr!(
                     "已下载: {} / {}",
                     Self::format_bytes(progress.completed_length),
                     Self::format_bytes(progress.total_length)
                 ));
                 ui.separator();
-                ui.label(format!(
+                ui.label(tr!(
                     "速度: {}/s",
                     Self::format_bytes(progress.download_speed)
                 ));
@@ -146,7 +147,7 @@ impl App {
                 DownloadStatus::Complete => "下载完成",
                 DownloadStatus::Error(msg) => msg.as_str(),
             };
-            ui.label(format!("状态: {}", status_text));
+            ui.label(tr!("状态: {}", status_text));
 
             ui.add_space(15.0);
 
@@ -158,12 +159,12 @@ impl App {
             ui.horizontal(|ui| {
                 match status {
                     DownloadStatus::Active => {
-                        if ui.button("暂停").clicked() {
+                        if ui.button(tr!("暂停")).clicked() {
                             self.pause_current_download();
                         }
                     }
                     DownloadStatus::Paused => {
-                        if ui.button("继续").clicked() {
+                        if ui.button(tr!("继续")).clicked() {
                             self.resume_current_download();
                         }
                     }
@@ -173,7 +174,7 @@ impl App {
                             Md5VerifyState::NotStarted => {
                                 // 检查是否需要进行MD5校验（仅PE下载）
                                 if self.pending_pe_md5.is_some() && self.pe_download_then_action.is_some() {
-                                    ui.label("准备校验文件完整性...");
+                                    ui.label(tr!("准备校验文件完整性..."));
                                     
                                     // 启动异步MD5校验
                                     let expected_md5 = self.pending_pe_md5.clone().unwrap();
@@ -196,11 +197,11 @@ impl App {
                             Md5VerifyState::Verifying => {
                                 ui.horizontal(|ui| {
                                     ui.spinner();
-                                    ui.label("正在校验文件完整性，请稍候...");
+                                    ui.label(tr!("正在校验文件完整性，请稍候..."));
                                 });
                             }
                             Md5VerifyState::Passed => {
-                                ui.colored_label(egui::Color32::from_rgb(102, 187, 106), "下载完成！");
+                                ui.colored_label(egui::Color32::from_rgb(102, 187, 106), tr!("下载完成！"));
                                 
                                 // 清除MD5校验值
                                 self.pending_pe_md5 = None;
@@ -222,7 +223,7 @@ impl App {
                                         
                                         if is_easy_mode_auto {
                                             // 小白模式：直接开始安装
-                                            ui.label("正在准备自动安装...");
+                                            ui.label(tr!("正在准备自动安装..."));
                                             log::info!("[EASY MODE] 下载完成，自动开始安装流程");
                                             
                                             // 重置自动安装标志
@@ -239,7 +240,7 @@ impl App {
                                             self.current_panel = crate::app::Panel::SystemInstall;
                                         } else {
                                             // 普通模式：跳转到安装页面
-                                            ui.label("正在跳转到安装页面...");
+                                            ui.label(tr!("正在跳转到安装页面..."));
                                             self.current_panel = crate::app::Panel::SystemInstall;
                                             // 加载镜像信息
                                             self.load_image_volumes();
@@ -253,7 +254,7 @@ impl App {
                                 }
                                 // 检查是否需要下载后运行软件
                                 else if self.soft_download_then_run {
-                                    ui.label("正在启动软件...");
+                                    ui.label(tr!("正在启动软件..."));
                                     
                                     if let Some(ref run_path) = self.soft_download_then_run_path {
                                         let path = run_path.clone();
@@ -277,7 +278,7 @@ impl App {
                                 }
                                 // 检查是否有待继续的PE操作
                                 else if self.pe_download_then_action.is_some() {
-                                    ui.label("正在准备继续操作...");
+                                    ui.label(tr!("正在准备继续操作..."));
                                     // 延迟一帧后继续操作，避免状态冲突
                                     let action = self.pe_download_then_action.take();
                                     self.cleanup_download();
@@ -302,7 +303,7 @@ impl App {
                                         }
                                     }
                                 } else {
-                                    if ui.button("返回").clicked() {
+                                    if ui.button(tr!("返回")).clicked() {
                                         self.cleanup_download();
                                         self.current_panel = crate::app::Panel::OnlineDownload;
                                     }
@@ -311,18 +312,18 @@ impl App {
                             Md5VerifyState::Failed { expected, actual } => {
                                 // MD5校验失败
                                 ui.colored_label(
-                                    egui::Color32::RED, 
-                                    "文件校验失败！文件可能已损坏。"
+                                    egui::Color32::RED,
+                                    tr!("文件校验失败！文件可能已损坏。")
                                 );
                                 ui.add_space(5.0);
-                                ui.label(format!("预期MD5: {}", expected));
-                                ui.label(format!("实际MD5: {}", actual));
+                                ui.label(tr!("预期MD5: {}", expected));
+                                ui.label(tr!("实际MD5: {}", actual));
                                 ui.add_space(10.0);
                                 
                                 // 注意：删除文件的操作已移到 check_md5_verify_result() 中
                                 // 避免在 UI 渲染循环中重复执行
                                 
-                                if ui.button("返回重新下载").clicked() {
+                                if ui.button(tr!("返回重新下载")).clicked() {
                                     // 清理状态
                                     let action = self.pe_download_then_action.take();
                                     self.pending_pe_md5 = None;
@@ -348,18 +349,18 @@ impl App {
                             Md5VerifyState::Error(err) => {
                                 ui.colored_label(
                                     egui::Color32::from_rgb(255, 165, 0),
-                                    format!("校验出错: {}", err)
+                                    tr!("校验出错: {}", err)
                                 );
                                 ui.add_space(5.0);
-                                ui.label("文件可能正常，但无法验证完整性。");
+                                ui.label(tr!("文件可能正常，但无法验证完整性。"));
                                 ui.add_space(10.0);
-                                
-                                if ui.button("继续使用").clicked() {
+
+                                if ui.button(tr!("继续使用")).clicked() {
                                     self.pending_pe_md5 = None;
                                     self.md5_verify_state = Md5VerifyState::Passed;
                                 }
-                                
-                                if ui.button("返回").clicked() {
+
+                                if ui.button(tr!("返回")).clicked() {
                                     let action = self.pe_download_then_action.take();
                                     self.cleanup_download();
                                     match action {
@@ -381,7 +382,7 @@ impl App {
                         }
                     }
                     DownloadStatus::Error(_) => {
-                        if ui.button("返回").clicked() {
+                        if ui.button(tr!("返回")).clicked() {
                             // 先获取待执行操作
                             let action = self.pe_download_then_action.take();
                             self.cleanup_download();
@@ -406,7 +407,7 @@ impl App {
                 }
 
                 if !is_complete && !is_error {
-                    if ui.button("取消").clicked() {
+                    if ui.button(tr!("取消")).clicked() {
                         self.cancel_current_download();
                     }
                 }
@@ -415,11 +416,11 @@ impl App {
             // 显示等待状态或无任务
             if self.current_download.is_some() {
                 ui.add_space(15.0);
-                ui.label("正在初始化下载...");
+                ui.label(tr!("正在初始化下载..."));
                 ui.spinner();
             } else {
-                ui.label("没有正在进行的下载任务");
-                if ui.button("返回").clicked() {
+                ui.label(tr!("没有正在进行的下载任务"));
+                if ui.button(tr!("返回")).clicked() {
                     self.current_panel = crate::app::Panel::OnlineDownload;
                 }
             }
@@ -544,7 +545,7 @@ impl App {
                         total_length: 0,
                         download_speed: 0,
                         percentage: 0.0,
-                        status: DownloadStatus::Error(format!("创建运行时失败: {}", e)),
+                        status: DownloadStatus::Error(tr!("创建运行时失败: {}", e)),
                     });
                     return;
                 }
@@ -606,7 +607,7 @@ impl App {
                             total_length: 0,
                             download_speed: 0,
                             percentage: 0.0,
-                            status: DownloadStatus::Error(format!("初始化aria2失败: {}", e)),
+                            status: DownloadStatus::Error(tr!("初始化aria2失败: {}", e)),
                         });
                         return;
                     }
@@ -642,7 +643,7 @@ impl App {
                             total_length: 0,
                             download_speed: 0,
                             percentage: 0.0,
-                            status: DownloadStatus::Error(format!("添加任务失败: {}", e)),
+                            status: DownloadStatus::Error(tr!("添加任务失败: {}", e)),
                         });
                         return;
                     }
@@ -689,7 +690,7 @@ impl App {
                                 total_length: 0,
                                 download_speed: 0,
                                 percentage: 0.0,
-                                status: DownloadStatus::Error(format!("获取状态失败: {}", e)),
+                                status: DownloadStatus::Error(tr!("获取状态失败: {}", e)),
                             });
                             break;
                         }

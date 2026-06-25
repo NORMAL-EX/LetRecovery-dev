@@ -3,6 +3,7 @@ use walkdir::WalkDir;
 
 use crate::core::hardware_info::HardwareInfo;
 use crate::core::registry::OfflineRegistry;
+use crate::tr;
 use std::path::PathBuf;
 
 /// 系统安装高级选项
@@ -1497,12 +1498,12 @@ Write-Host "UWP应用清理完成"
         egui::ScrollArea::vertical().show(ui, |ui| {
             // ============ Win7 专用选项（仅当选择Win7镜像时显示）============
             if is_win7 {
-                ui.heading("Windows 7 专用选项");
+                ui.heading(tr!("Windows 7 专用选项"));
                 ui.separator();
-                
+
                 ui.colored_label(
                     egui::Color32::from_rgb(255, 165, 0),
-                    "以下选项仅适用于 Windows 7 x64 安装",
+                    tr!("以下选项仅适用于 Windows 7 x64 安装"),
                 );
                 ui.add_space(5.0);
                 
@@ -1510,28 +1511,28 @@ Write-Host "UWP应用清理完成"
 
                 // USB3 驱动注入（固定读取程序运行目录下的 drivers\usb3）
                 ui.vertical(|ui| {
-                    ui.checkbox(&mut self.win7_inject_usb3_driver, "注入USB3.0驱动");
+                    ui.checkbox(&mut self.win7_inject_usb3_driver, tr!("注入USB3.0驱动"));
                     if self.win7_inject_usb3_driver {
                         if let Some(dir) = &usb3_dir {
                             self.win7_usb3_driver_path = dir.to_string_lossy().to_string();
                             if !dir.exists() {
                                 ui.colored_label(
                                     egui::Color32::from_rgb(255, 165, 0),
-                                    "未找到该驱动目录，将跳过 USB3 驱动注入",
+                                    tr!("未找到该驱动目录，将跳过 USB3 驱动注入"),
                                 );
                             }
                         } else {
                             self.win7_usb3_driver_path.clear();
                             ui.colored_label(
                                 egui::Color32::from_rgb(255, 165, 0),
-                                "无法获取程序运行目录，将跳过 USB3 驱动注入",
+                                tr!("无法获取程序运行目录，将跳过 USB3 驱动注入"),
                             );
                         }
                     }
                 });
                 if self.win7_inject_usb3_driver {
                     ui.label(
-                        egui::RichText::new("Win7原生不支持USB3.0，安装时键鼠可能无法使用")
+                        egui::RichText::new(tr!("Win7原生不支持USB3.0，安装时键鼠可能无法使用"))
                             .small()
                             .color(egui::Color32::GRAY),
                     );
@@ -1539,50 +1540,49 @@ Write-Host "UWP应用清理完成"
                 
                 // NVMe 驱动注入（固定读取程序运行目录下的 drivers\nvme）
                 ui.vertical(|ui| {
-                    ui.checkbox(&mut self.win7_inject_nvme_driver, "注入NVMe驱动");
+                    ui.checkbox(&mut self.win7_inject_nvme_driver, tr!("注入NVMe驱动"));
                     if self.win7_inject_nvme_driver {
                         if let Some(dir) = &nvme_dir {
                             self.win7_nvme_driver_path = dir.to_string_lossy().to_string();
                             if !dir.exists() {
                                 ui.colored_label(
                                     egui::Color32::from_rgb(255, 165, 0),
-                                    "未找到该驱动目录，将跳过 NVMe 驱动注入",
+                                    tr!("未找到该驱动目录，将跳过 NVMe 驱动注入"),
                                 );
                             }
                         } else {
                             self.win7_nvme_driver_path.clear();
                             ui.colored_label(
                                 egui::Color32::from_rgb(255, 165, 0),
-                                "无法获取程序运行目录，将跳过 NVMe 驱动注入",
+                                tr!("无法获取程序运行目录，将跳过 NVMe 驱动注入"),
                             );
                         }
                     }
                 });
                 if self.win7_inject_nvme_driver {
                     ui.label(
-                        egui::RichText::new("Win7原生不支持NVMe SSD，需要注入驱动才能识别硬盘")
+                        egui::RichText::new(tr!("Win7原生不支持NVMe SSD，需要注入驱动才能识别硬盘"))
                             .small()
                             .color(egui::Color32::GRAY),
                     );
                 }
                 
                 // A5 蓝屏修复
-                ui.checkbox(&mut self.win7_fix_acpi_bsod, "修复ACPI_BIOS_ERROR蓝屏(0xA5)");
+                ui.checkbox(&mut self.win7_fix_acpi_bsod, tr!("修复ACPI_BIOS_ERROR蓝屏(0xA5)"));
                 if self.win7_fix_acpi_bsod {
                     ui.label(
-                        egui::RichText::new("禁用intelppm/amdppm服务，解决新平台ACPI兼容性问题")
+                        egui::RichText::new(tr!("禁用intelppm/amdppm服务，解决新平台ACPI兼容性问题"))
                             .small()
                             .color(egui::Color32::GRAY),
                     );
                 }
-                
+
                 // 7B 蓝屏修复 (存储控制器)
-                ui.checkbox(&mut self.win7_fix_storage_bsod, "修复INACCESSIBLE_BOOT_DEVICE蓝屏(0x7B)");
+                ui.checkbox(&mut self.win7_fix_storage_bsod, tr!("修复INACCESSIBLE_BOOT_DEVICE蓝屏(0x7B)"));
                 if self.win7_fix_storage_bsod {
                     ui.label(
                         egui::RichText::new(
-                            "启用AHCI/IDE/NVMe/SCSI等存储控制器驱动，解决硬盘无法识别问题\n\
-                             适用于：VMware NVMe、现代AHCI控制器、LSI SAS控制器等"
+                            tr!("启用AHCI/IDE/NVMe/SCSI等存储控制器驱动，解决硬盘无法识别问题\n适用于：VMware NVMe、现代AHCI控制器、LSI SAS控制器等")
                         )
                             .small()
                             .color(egui::Color32::GRAY),
@@ -1597,19 +1597,15 @@ Write-Host "UWP应用清理完成"
                     
                     ui.colored_label(
                         egui::Color32::from_rgb(100, 181, 246),
-                        "UEFI 启动修补 (UefiSeven)",
+                        tr!("UEFI 启动修补 (UefiSeven)"),
                     );
                     ui.add_space(5.0);
-                    
-                    ui.checkbox(&mut self.win7_uefi_patch, "应用Win7 UEFI启动修补");
-                    
+
+                    ui.checkbox(&mut self.win7_uefi_patch, tr!("应用Win7 UEFI启动修补"));
+
                     ui.label(
                         egui::RichText::new(
-                            "使用开源项目 UefiSeven 修补 Win7 UEFI 启动问题。\n\
-                             Win7 的引导程序不完全支持 UEFI Class 3 系统，可能导致：\n\
-                             • 启动时卡在 \"Starting Windows\" 界面\n\
-                             • 出现错误代码 0xc000000d\n\
-                             此选项会在安装完成后自动部署 UefiSeven 引导加载器。"
+                            tr!("使用开源项目 UefiSeven 修补 Win7 UEFI 启动问题。\nWin7 的引导程序不完全支持 UEFI Class 3 系统，可能导致：\n• 启动时卡在 \"Starting Windows\" 界面\n• 出现错误代码 0xc000000d\n此选项会在安装完成后自动部署 UefiSeven 引导加载器。")
                         )
                         .small()
                         .color(egui::Color32::GRAY),
@@ -1622,7 +1618,7 @@ Write-Host "UWP应用清理完成"
                             ui.add_space(3.0);
                             ui.colored_label(
                                 egui::Color32::from_rgb(255, 165, 0),
-                                "未找到 UefiSeven 文件，请将 UefiSeven 文件放置在程序目录的 uefiseven 文件夹中",
+                                tr!("未找到 UefiSeven 文件，请将 UefiSeven 文件放置在程序目录的 uefiseven 文件夹中"),
                             );
                         }
                     }
@@ -1636,12 +1632,12 @@ Write-Host "UWP应用清理完成"
                 // 进入面板时按「检测到 XP」应用一次默认勾选（用户可手动取消）
                 self.apply_xp_defaults_if_needed(true);
 
-                ui.heading("Windows XP 专用选项");
+                ui.heading(tr!("Windows XP 专用选项"));
                 ui.separator();
 
                 ui.colored_label(
                     egui::Color32::from_rgb(255, 165, 0),
-                    "以下选项仅适用于 Windows XP/2003 x64 安装（需使用 UEFI 化的 XP 映像）",
+                    tr!("以下选项仅适用于 Windows XP/2003 x64 安装（需使用 UEFI 化的 XP 映像）"),
                 );
                 ui.add_space(5.0);
 
@@ -1649,13 +1645,13 @@ Write-Host "UWP应用清理完成"
 
                 // USB3 驱动注入（默认勾选）
                 ui.vertical(|ui| {
-                    ui.checkbox(&mut self.xp_inject_usb3_driver, "注入USB3驱动");
+                    ui.checkbox(&mut self.xp_inject_usb3_driver, tr!("注入USB3驱动"));
                     if self.xp_inject_usb3_driver {
                         if let Some(dir) = &usb3_dir {
                             if !dir.exists() {
                                 ui.colored_label(
                                     egui::Color32::from_rgb(255, 165, 0),
-                                    "未找到 bin\\drivers\\xp\\usb3，将跳过 USB3 驱动注入",
+                                    tr!("未找到 bin\\drivers\\xp\\usb3，将跳过 USB3 驱动注入"),
                                 );
                             }
                         }
@@ -1663,7 +1659,7 @@ Write-Host "UWP应用清理完成"
                 });
                 if self.xp_inject_usb3_driver {
                     ui.label(
-                        egui::RichText::new("XP原生不支持USB3.0(xHCI)，注入后现代主板USB口键鼠可用")
+                        egui::RichText::new(tr!("XP原生不支持USB3.0(xHCI)，注入后现代主板USB口键鼠可用"))
                             .small()
                             .color(egui::Color32::GRAY),
                     );
@@ -1671,13 +1667,13 @@ Write-Host "UWP应用清理完成"
 
                 // NVMe 驱动注入（默认勾选）
                 ui.vertical(|ui| {
-                    ui.checkbox(&mut self.xp_inject_nvme_driver, "注入NVMe驱动");
+                    ui.checkbox(&mut self.xp_inject_nvme_driver, tr!("注入NVMe驱动"));
                     if self.xp_inject_nvme_driver {
                         if let Some(dir) = &nvme_dir {
                             if !dir.exists() {
                                 ui.colored_label(
                                     egui::Color32::from_rgb(255, 165, 0),
-                                    "未找到 bin\\drivers\\xp\\nvme，将跳过 NVMe 驱动注入",
+                                    tr!("未找到 bin\\drivers\\xp\\nvme，将跳过 NVMe 驱动注入"),
                                 );
                             }
                         }
@@ -1685,7 +1681,7 @@ Write-Host "UWP应用清理完成"
                 });
                 if self.xp_inject_nvme_driver {
                     ui.label(
-                        egui::RichText::new("XP原生不支持NVMe SSD，注入后(含改核storport+ntoskrn8)可从NVMe启动")
+                        egui::RichText::new(tr!("XP原生不支持NVMe SSD，注入后(含改核storport+ntoskrn8)可从NVMe启动"))
                             .small()
                             .color(egui::Color32::GRAY),
                     );
@@ -1695,18 +1691,18 @@ Write-Host "UWP应用清理完成"
                 let mut ahci_always_on = true;
                 ui.add_enabled(
                     false,
-                    egui::Checkbox::new(&mut ahci_always_on, "注入SATA(AHCI)驱动（始终注入）"),
+                    egui::Checkbox::new(&mut ahci_always_on, tr!("注入SATA(AHCI)驱动（始终注入）")),
                 );
                 {
                     let ahci_missing = ahci_dir.as_ref().map(|d| !d.exists()).unwrap_or(true);
                     if ahci_missing {
                         ui.colored_label(
                             egui::Color32::from_rgb(255, 165, 0),
-                            "未找到 bin\\drivers\\xp\\ahci，AHCI 注入将被跳过",
+                            tr!("未找到 bin\\drivers\\xp\\ahci，AHCI 注入将被跳过"),
                         );
                     } else {
                         ui.label(
-                            egui::RichText::new("通用AHCI(genahci)默认始终注入，保证SATA硬盘可识别")
+                            egui::RichText::new(tr!("通用AHCI(genahci)默认始终注入，保证SATA硬盘可识别"))
                                 .small()
                                 .color(egui::Color32::GRAY),
                         );
@@ -1717,12 +1713,11 @@ Write-Host "UWP应用清理完成"
                     ui.add_space(8.0);
                     ui.colored_label(
                         egui::Color32::from_rgb(100, 181, 246),
-                        "UEFI/GPT 启动：使用映像自带 bootxp64.efi + winload.efi 引导",
+                        tr!("UEFI/GPT 启动：使用映像自带 bootxp64.efi + winload.efi 引导"),
                     );
                     ui.label(
                         egui::RichText::new(
-                            "XP 不像 Win7 用 UefiSeven；UEFI 启动依赖映像内预置的 winload.efi/改核与 bootxp64.efi/BCC。\n\
-                             安装时会自动把这些引导文件释放到 ESP 并修正 BCC 分区指向。"
+                            tr!("XP 不像 Win7 用 UefiSeven；UEFI 启动依赖映像内预置的 winload.efi/改核与 bootxp64.efi/BCC。\n安装时会自动把这些引导文件释放到 ESP 并修正 BCC 分区指向。")
                         )
                         .small()
                         .color(egui::Color32::GRAY),
@@ -1732,11 +1727,11 @@ Write-Host "UWP应用清理完成"
                 ui.add_space(15.0);
             }
 
-            ui.heading("系统优化选项");
+            ui.heading(tr!("系统优化选项"));
             ui.separator();
 
-            ui.checkbox(&mut self.remove_shortcut_arrow, "移除快捷方式小箭头");
-            ui.checkbox(&mut self.restore_classic_context_menu, "Win11恢复经典右键菜单");
+            ui.checkbox(&mut self.remove_shortcut_arrow, tr!("移除快捷方式小箭头"));
+            ui.checkbox(&mut self.restore_classic_context_menu, tr!("Win11恢复经典右键菜单"));
             
             // OOBE绕过强制联网 - 依赖无人值守
             Self::show_unattend_dependent_checkbox(
@@ -1747,11 +1742,11 @@ Write-Host "UWP应用清理完成"
                 "此选项依赖无人值守配置，由于目标分区已存在配置文件而被禁用"
             );
             
-            ui.checkbox(&mut self.disable_windows_update, "禁用Windows更新");
-            ui.checkbox(&mut self.disable_windows_defender, "禁用Windows安全中心");
-            ui.checkbox(&mut self.disable_reserved_storage, "禁用系统保留空间");
-            ui.checkbox(&mut self.disable_uac, "禁用用户账户控制(UAC)");
-            ui.checkbox(&mut self.disable_device_encryption, "禁用自动设备加密");
+            ui.checkbox(&mut self.disable_windows_update, tr!("禁用Windows更新"));
+            ui.checkbox(&mut self.disable_windows_defender, tr!("禁用Windows安全中心"));
+            ui.checkbox(&mut self.disable_reserved_storage, tr!("禁用系统保留空间"));
+            ui.checkbox(&mut self.disable_uac, tr!("禁用用户账户控制(UAC)"));
+            ui.checkbox(&mut self.disable_device_encryption, tr!("禁用自动设备加密"));
             
             // 删除预装UWP应用 - 依赖无人值守
             Self::show_unattend_dependent_checkbox(
@@ -1766,7 +1761,7 @@ Write-Host "UWP应用清理完成"
             // 虚拟机/无无线网卡/未连接 WiFi 时直接隐藏该选项。
             let has_wifi = *self.wifi_detected.get_or_insert_with(Self::system_has_wifi);
             if has_wifi {
-                let wifi_resp = ui.checkbox(&mut self.migrate_wifi, "迁移当前 WiFi（重装后自动连接）");
+                let wifi_resp = ui.checkbox(&mut self.migrate_wifi, tr!("迁移当前 WiFi（重装后自动连接）"));
                 if wifi_resp.changed() && self.migrate_wifi {
                     self.capture_current_wifi();
                 }
@@ -1774,12 +1769,12 @@ Write-Host "UWP应用清理完成"
                     if self.wifi_ssid.is_empty() {
                         ui.colored_label(
                             egui::Color32::from_rgb(255, 165, 0),
-                            "  未检测到当前 WiFi（请确认已连 WiFi 且以管理员运行）",
+                            tr!("  未检测到当前 WiFi（请确认已连 WiFi 且以管理员运行）"),
                         );
                     } else {
                         ui.colored_label(
                             egui::Color32::from_rgb(100, 200, 100),
-                            format!("  将迁移：{}", self.wifi_ssid),
+                            tr!("  将迁移：{}", self.wifi_ssid),
                         );
                     }
                 }
@@ -1789,16 +1784,16 @@ Write-Host "UWP应用清理完成"
             }
 
             ui.add_space(15.0);
-            ui.heading("自定义脚本");
+            ui.heading(tr!("自定义脚本"));
             ui.separator();
 
             ui.horizontal(|ui| {
-                ui.checkbox(&mut self.run_script_during_deploy, "系统部署中运行脚本");
+                ui.checkbox(&mut self.run_script_during_deploy, tr!("系统部署中运行脚本"));
                 if self.run_script_during_deploy {
                     ui.text_edit_singleline(&mut self.deploy_script_path);
-                    if ui.button("浏览...").clicked() {
+                    if ui.button(tr!("浏览...")).clicked() {
                         if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("批处理文件", &["bat", "cmd"])
+                            .add_filter(tr!("批处理文件"), &["bat", "cmd"])
                             .pick_file()
                         {
                             self.deploy_script_path = path.to_string_lossy().to_string();
@@ -1808,12 +1803,12 @@ Write-Host "UWP应用清理完成"
             });
 
             ui.horizontal(|ui| {
-                ui.checkbox(&mut self.run_script_first_login, "首次登录运行脚本");
+                ui.checkbox(&mut self.run_script_first_login, tr!("首次登录运行脚本"));
                 if self.run_script_first_login {
                     ui.text_edit_singleline(&mut self.first_login_script_path);
-                    if ui.button("浏览...").clicked() {
+                    if ui.button(tr!("浏览...")).clicked() {
                         if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("批处理文件", &["bat", "cmd"])
+                            .add_filter(tr!("批处理文件"), &["bat", "cmd"])
                             .pick_file()
                         {
                             self.first_login_script_path = path.to_string_lossy().to_string();
@@ -1823,14 +1818,14 @@ Write-Host "UWP应用清理完成"
             });
 
             ui.add_space(15.0);
-            ui.heading("自定义内容");
+            ui.heading(tr!("自定义内容"));
             ui.separator();
 
             ui.horizontal(|ui| {
-                ui.checkbox(&mut self.import_custom_drivers, "导入自定义驱动");
+                ui.checkbox(&mut self.import_custom_drivers, tr!("导入自定义驱动"));
                 if self.import_custom_drivers {
                     ui.text_edit_singleline(&mut self.custom_drivers_path);
-                    if ui.button("浏览...").clicked() {
+                    if ui.button(tr!("浏览...")).clicked() {
                         if let Some(path) = rfd::FileDialog::new().pick_folder() {
                             self.custom_drivers_path = path.to_string_lossy().to_string();
                         }
@@ -1841,23 +1836,23 @@ Write-Host "UWP应用清理完成"
             ui.horizontal(|ui| {
                 ui.checkbox(
                     &mut self.import_storage_controller_drivers,
-                    "导入磁盘控制器驱动[Win11/Win10 X64]",
+                    tr!("导入磁盘控制器驱动[Win11/Win10 X64]"),
                 );
             });
             ui.label(
                 egui::RichText::new(
-                    "导入 Win10/Win11 的英特尔 VMD / 苹果 SSD / Visior 硬盘控制器驱动，如已集成无需勾选",
+                    tr!("导入 Win10/Win11 的英特尔 VMD / 苹果 SSD / Visior 硬盘控制器驱动，如已集成无需勾选"),
                 )
                 .small(),
             );
 
             ui.horizontal(|ui| {
-                ui.checkbox(&mut self.import_registry_file, "导入注册表文件");
+                ui.checkbox(&mut self.import_registry_file, tr!("导入注册表文件"));
                 if self.import_registry_file {
                     ui.text_edit_singleline(&mut self.registry_file_path);
-                    if ui.button("浏览...").clicked() {
+                    if ui.button(tr!("浏览...")).clicked() {
                         if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("注册表文件", &["reg"])
+                            .add_filter(tr!("注册表文件"), &["reg"])
                             .pick_file()
                         {
                             self.registry_file_path = path.to_string_lossy().to_string();
@@ -1867,10 +1862,10 @@ Write-Host "UWP应用清理完成"
             });
 
             ui.horizontal(|ui| {
-                ui.checkbox(&mut self.import_custom_files, "导入自定义文件");
+                ui.checkbox(&mut self.import_custom_files, tr!("导入自定义文件"));
                 if self.import_custom_files {
                     ui.text_edit_singleline(&mut self.custom_files_path);
-                    if ui.button("浏览...").clicked() {
+                    if ui.button(tr!("浏览...")).clicked() {
                         if let Some(path) = rfd::FileDialog::new().pick_folder() {
                             self.custom_files_path = path.to_string_lossy().to_string();
                         }
@@ -1879,7 +1874,7 @@ Write-Host "UWP应用清理完成"
             });
 
             ui.add_space(15.0);
-            ui.heading("用户设置");
+            ui.heading(tr!("用户设置"));
             ui.separator();
 
             ui.horizontal(|ui| {
@@ -1899,7 +1894,7 @@ Write-Host "UWP应用清理完成"
                     let model_name = detect_computer_model_name(hardware_info);
                     let button = ui.add_enabled(
                         model_name.is_some(),
-                        egui::Button::new("识别电脑型号"),
+                        egui::Button::new(tr!("识别电脑型号")),
                     );
                     if button.clicked() {
                         if let Some(name) = model_name {
@@ -1915,19 +1910,19 @@ Write-Host "UWP应用清理完成"
             });
 
             ui.add_space(15.0);
-            ui.heading("系统盘设置");
+            ui.heading(tr!("系统盘设置"));
             ui.separator();
 
             ui.horizontal(|ui| {
-                ui.checkbox(&mut self.custom_volume_label, "自定义系统盘卷标");
+                ui.checkbox(&mut self.custom_volume_label, tr!("自定义系统盘卷标"));
                 if self.custom_volume_label {
                     ui.add(egui::TextEdit::singleline(&mut self.volume_label)
                         .desired_width(150.0)
-                        .hint_text("例如: Windows"));
+                        .hint_text(tr!("例如: Windows")));
                 }
             });
             if self.custom_volume_label {
-                ui.label("提示: 卷标将在格式化分区时应用");
+                ui.label(tr!("提示: 卷标将在格式化分区时应用"));
             }
         });
     }
