@@ -647,8 +647,15 @@ impl App {
                 };
 
                 // 定期获取进度并发送，同时监听控制命令
+                // 连续查询失败计数：单次超时/网络抖动不再立即中断（aria2c 是独立进程仍在
+                // 后台下载，--continue 保证不丢进度），重试多次仍失败才报错退出，
+                // 避免“进度卡死且无法暂停”。
+                let mut consecutive_errors: u32 = 0;
+                const MAX_CONSECUTIVE_ERRORS: u32 = 8;
+
                 loop {
-                    // 处理控制命令（非阻塞）
+                    // 处理控制命令（非阻塞）。即使上一轮 get_status 超时，循环也会回到这里，
+                    // 从而保证暂停/恢复/取消命令能被及时消费（修复“暂停也暂停不了”）。
                     while let Ok(cmd) = cmd_rx.try_recv() {
                         match cmd {
                             DownloadCommand::Pause => {
@@ -669,6 +676,7 @@ impl App {
 
                     match aria2.get_status(&gid).await {
                         Ok(progress) => {
+                            consecutive_errors = 0;
                             let is_complete = progress.status == DownloadStatus::Complete;
                             let is_error = matches!(progress.status, DownloadStatus::Error(_));
 
@@ -681,15 +689,26 @@ impl App {
                             }
                         }
                         Err(e) => {
-                            let _ = progress_tx.send(DownloadProgress {
-                                gid: gid.clone(),
-                                completed_length: 0,
-                                total_length: 0,
-                                download_speed: 0,
-                                percentage: 0.0,
-                                status: DownloadStatus::Error(tr!("获取状态失败: {}", e)),
-                            });
-                            break;
+                            consecutive_errors += 1;
+                            log::warn!(
+                                "[DOWNLOAD] 获取下载状态失败({}/{})，将重试: {}",
+                                consecutive_errors,
+                                MAX_CONSECUTIVE_ERRORS,
+                                e
+                            );
+                            if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                                let _ = progress_tx.send(DownloadProgress {
+                                    gid: gid.clone(),
+                                    completed_length: 0,
+                                    total_length: 0,
+                                    download_speed: 0,
+                                    percentage: 0.0,
+                                    status: DownloadStatus::Error(tr!("获取状态失败: {}", e)),
+                                });
+                                break;
+                            }
+                            // 未达上限：继续轮询重试，不中断循环
+                            continue;
                         }
                     }
                 }

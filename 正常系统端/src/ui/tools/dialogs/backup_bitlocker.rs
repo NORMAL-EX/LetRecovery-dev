@@ -68,7 +68,7 @@ impl App {
                                     ui.label(label);
                                     ui.label(format!("{:.1} GB", partition.total_size_mb as f64 / 1024.0));
                                     ui.label(if partition.label.is_empty() { "-" } else { &partition.label });
-                                    ui.colored_label(status_color, partition.status.as_str());
+                                    ui.colored_label(status_color, tr!(partition.status.as_str()));
                                     ui.end_row();
                                 }
                             });

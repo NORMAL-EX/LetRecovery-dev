@@ -140,11 +140,11 @@ impl AdvancedOptions {
         if unattend_disabled {
             // 禁用状态：强制取消勾选并显示禁用的复选框
             *value = false;
-            ui.add_enabled(false, egui::Checkbox::new(value, label))
-                .on_disabled_hover_text(tooltip);
+            ui.add_enabled(false, egui::Checkbox::new(value, tr!(label)))
+                .on_disabled_hover_text(tr!(tooltip));
         } else {
             // 正常状态
-            ui.checkbox(value, label);
+            ui.checkbox(value, tr!(label));
         }
     }
 

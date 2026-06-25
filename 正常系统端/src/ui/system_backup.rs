@@ -87,7 +87,7 @@ impl App {
                                 crate::core::bitlocker::VolumeStatus::Decrypting => egui::Color32::YELLOW,
                                 _ => ui.visuals().text_color(),
                             };
-                            ui.colored_label(status_color, partition.bitlocker_status.as_str());
+                            ui.colored_label(status_color, tr!(partition.bitlocker_status.as_str()));
 
                             let status = if partition.has_windows {
                                 tr!("有系统")

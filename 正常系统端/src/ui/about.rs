@@ -54,6 +54,17 @@ impl App {
                                 if ui.selectable_label(is_selected, &lang.display_name).clicked() {
                                     if lang.code != current_language {
                                         self.app_config.set_language(&lang.code);
+                                        // 备份名/描述在启动时按当时语言生成并缓存，切换语言后需重新生成，
+                                        // 否则会停留在旧语言（其余界面文本每帧用 tr! 渲染会自动刷新）。
+                                        self.backup_name = tr!(
+                                            "系统备份_{}",
+                                            chrono::Local::now().format("%Y%m%d_%H%M%S")
+                                        );
+                                        self.backup_description =
+                                            tr!("使用 LetRecovery 创建的系统备份");
+                                        // 远程配置错误信息在加载时按当时语言生成并缓存于
+                                        // remote_config.error，切换语言后重新拉取，使其也用新语言显示。
+                                        self.start_remote_config_loading();
                                         // 立即重绘，使整个界面即时应用新语言（否则需下一次交互才刷新）
                                         ui.ctx().request_repaint();
                                     }

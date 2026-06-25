@@ -91,9 +91,9 @@ impl App {
                                                 VolumeStatus::Decrypting | VolumeStatus::Encrypting
                                             ) =>
                                             {
-                                                format!("{} ({}%)", partition.status.as_str(), p)
+                                                format!("{} ({}%)", tr!(partition.status.as_str()), p)
                                             }
-                                            _ => partition.status.as_str().to_string(),
+                                            _ => tr!(partition.status.as_str()),
                                         };
 
                                         ui.label(&partition.letter);

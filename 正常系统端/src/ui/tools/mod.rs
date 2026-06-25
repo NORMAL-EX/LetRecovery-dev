@@ -50,10 +50,10 @@ impl App {
         ui.label(tr!("常用工具"));
         ui.add_space(10.0);
 
-        egui::Grid::new("tools_grid")
-            .num_columns(4)
-            .spacing([15.0, 12.0])
-            .show(ui, |ui| {
+        // 工具按钮自适应换行：英文标签比中文宽，固定 4 列会被窗口右侧裁切，
+        // 改用 horizontal_wrapped，按钮按可用宽度自动换行（中英文都不溢出）。
+        ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing = egui::vec2(15.0, 12.0);
                 let button_size = egui::vec2(130.0, 50.0);
 
                 // ========== 第一行 ==========
@@ -98,7 +98,6 @@ impl App {
                     self.import_storage_driver_message.clear();
                 }
 
-                ui.end_row();
 
                 // ========== 第二行 ==========
                 if ui
@@ -147,7 +146,6 @@ impl App {
                     );
                 }
 
-                ui.end_row();
 
                 // ========== 第三行 ==========
 
@@ -187,7 +185,6 @@ impl App {
                     self.launch_ghost_tool();
                 }
 
-                ui.end_row();
 
                 // ========== 第四行 ==========
 
@@ -232,7 +229,6 @@ impl App {
                     self.image_verify_progress = None;
                 }
 
-                ui.end_row();
 
                 // ========== 第五行 ==========
 
@@ -291,7 +287,6 @@ impl App {
                     );
                 }
 
-                ui.end_row();
             });
 
         // ========== 对话框渲染 ==========

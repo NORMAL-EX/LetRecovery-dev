@@ -253,7 +253,7 @@ impl App {
                                 crate::core::bitlocker::VolumeStatus::Decrypting => egui::Color32::YELLOW,
                                 _ => ui.visuals().text_color(),
                             };
-                            ui.colored_label(status_color, partition.bitlocker_status.as_str());
+                            ui.colored_label(status_color, tr!(partition.bitlocker_status.as_str()));
 
                             let status = if partition.has_windows {
                                 tr!("已有系统")
@@ -338,10 +338,40 @@ impl App {
 
             // 运行 Diskpart 脚本（仅在「高级选项」开启时显示）
             if self.app_config.enable_advanced_options {
-                ui.checkbox(&mut self.run_diskpart_scripts, tr!("运行Diskpart脚本"))
-                    .on_hover_text(
-                        tr!("安装前运行 程序目录\\diskpart\\ 下的所有脚本(.cmd/.bat 走 cmd，.txt 走 diskpart)，\n在 PE 中、格式化/释放镜像之前执行，可用于自定义分区。"),
-                    );
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut self.run_diskpart_scripts, tr!("运行Diskpart脚本"))
+                        .on_hover_text(
+                            tr!("安装前运行 程序目录\\diskpart\\ 下的所有脚本(.cmd/.bat 走 cmd，.txt 走 diskpart)，\n在 PE 中、格式化/释放镜像之前执行，可用于自定义分区。"),
+                        );
+                    // 打开 diskpart 脚本目录（不存在则先创建，避免 explorer 打开失败）
+                    if ui
+                        .button(tr!("打开目录"))
+                        .on_hover_text(tr!("打开程序目录下的 diskpart 脚本文件夹"))
+                        .clicked()
+                    {
+                        let dir = crate::utils::path::get_exe_dir().join("diskpart");
+                        let _ = std::fs::create_dir_all(&dir);
+                        #[cfg(windows)]
+                        {
+                            let _ = std::process::Command::new("explorer").arg(&dir).spawn();
+                        }
+                    }
+                    // 用记事本编辑自定义引导修复命令（bin\repair_boot.txt）
+                    if ui
+                        .button(tr!("修改引导命令"))
+                        .on_hover_text(tr!("用记事本编辑自定义引导修复脚本 bin\\repair_boot.txt"))
+                        .clicked()
+                    {
+                        let file = crate::utils::path::get_bin_dir().join("repair_boot.txt");
+                        if let Some(parent) = file.parent() {
+                            let _ = std::fs::create_dir_all(parent);
+                        }
+                        #[cfg(windows)]
+                        {
+                            let _ = std::process::Command::new("notepad").arg(&file).spawn();
+                        }
+                    }
+                });
             }
         });
 
