@@ -348,12 +348,10 @@ impl App {
                 ctx_clone.request_repaint();
                 
                 // 通过静态变量传递结果
-                unsafe {
-                    LOGO_LOAD_RESULTS.push(LogoLoadResult {
-                        url,
-                        data: result,
-                    });
-                }
+                LOGO_LOAD_RESULTS.lock().unwrap().push(LogoLoadResult {
+                    url,
+                    data: result,
+                });
             });
         }
         
@@ -362,9 +360,7 @@ impl App {
     
     /// 处理Logo加载结果
     pub fn process_easy_mode_logo_results(&mut self, ctx: &egui::Context) {
-        let results: Vec<LogoLoadResult> = unsafe {
-            std::mem::take(&mut LOGO_LOAD_RESULTS)
-        };
+        let results: Vec<LogoLoadResult> = std::mem::take(&mut *LOGO_LOAD_RESULTS.lock().unwrap());
         
         for result in results {
             self.easy_mode_logo_loading.remove(&result.url);
@@ -625,4 +621,4 @@ fn load_logo_from_url(url: &str) -> Result<Vec<u8>, String> {
 }
 
 // 静态变量存储Logo加载结果
-static mut LOGO_LOAD_RESULTS: Vec<LogoLoadResult> = Vec::new();
+static LOGO_LOAD_RESULTS: std::sync::Mutex<Vec<LogoLoadResult>> = std::sync::Mutex::new(Vec::new());

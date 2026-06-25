@@ -661,10 +661,8 @@ impl App {
             self.selected_volume = None;
 
             let (tx, rx) = mpsc::channel::<ImageInfoResult>();
-            
-            unsafe {
-                IMAGE_INFO_RESULT_RX = Some(rx);
-            }
+
+            *IMAGE_INFO_RESULT_RX.lock().unwrap() = Some(rx);
 
             let path = image_path.to_string();
 
@@ -699,10 +697,8 @@ impl App {
         self.iso_mount_error = None;
 
         let (tx, rx) = mpsc::channel::<IsoMountResult>();
-        
-        unsafe {
-            ISO_MOUNT_RESULT_RX = Some(rx);
-        }
+
+        *ISO_MOUNT_RESULT_RX.lock().unwrap() = Some(rx);
 
         let iso_path = self.local_image_path.clone();
 
@@ -736,38 +732,50 @@ impl App {
     pub fn check_iso_mount_status(&mut self) {
         // 检查 ISO 挂载状态
         if self.iso_mounting {
-            unsafe {
-                if let Some(ref rx) = ISO_MOUNT_RESULT_RX {
-                    if let Ok(result) = rx.try_recv() {
-                        self.iso_mounting = false;
-                        ISO_MOUNT_RESULT_RX = None;
-
-                        match result {
-                            IsoMountResult::Success(image_path) => {
-                                println!("[ISO MOUNT] 挂载完成，镜像路径: {}", image_path);
-                                self.local_image_path = image_path.clone();
-                                self.iso_mount_error = None;
-                                self.xp_i386_source = None;
-                                // 开始后台加载镜像信息
-                                self.start_image_info_loading(&image_path);
-                            }
-                            IsoMountResult::XpI386(i386_dir) => {
-                                // XP/2003 i386 文本安装介质：无 WIM 可枚举，参照 GHO 的处理方式——
-                                // 不加载分卷信息，合成单一可安装项（selected_volume=Some(0)）。
-                                println!("[ISO MOUNT] 识别为 XP/2003 i386 介质，i386 源: {}", i386_dir);
-                                self.local_image_path = i386_dir.clone();
-                                self.xp_i386_source = Some(i386_dir);
-                                self.iso_mount_error = None;
-                                self.image_volumes.clear();
-                                self.selected_volume = Some(0);
-                                // i386 源自带 winnt.sif 时默认取消勾选无人值守
-                                self.refresh_source_unattend();
-                            }
-                            IsoMountResult::Error(error) => {
-                                println!("[ISO MOUNT] 挂载失败: {}", error);
-                                self.iso_mount_error = Some(error);
-                            }
+            // 仅在轮询该 static 时短暂持锁：try_recv 成功即取出结果并清空 static，随后立刻释放
+            // guard（作用域结束），再处理结果——避免在持锁期间调用 self 方法（如
+            // start_image_info_loading 会再锁 IMAGE_INFO_RESULT_RX）导致重入/死锁。
+            let received = {
+                let mut guard = ISO_MOUNT_RESULT_RX.lock().unwrap();
+                if let Some(rx) = guard.as_ref() {
+                    match rx.try_recv() {
+                        Ok(result) => {
+                            *guard = None;
+                            Some(result)
                         }
+                        Err(_) => None,
+                    }
+                } else {
+                    None
+                }
+            };
+            if let Some(result) = received {
+                self.iso_mounting = false;
+
+                match result {
+                    IsoMountResult::Success(image_path) => {
+                        println!("[ISO MOUNT] 挂载完成，镜像路径: {}", image_path);
+                        self.local_image_path = image_path.clone();
+                        self.iso_mount_error = None;
+                        self.xp_i386_source = None;
+                        // 开始后台加载镜像信息
+                        self.start_image_info_loading(&image_path);
+                    }
+                    IsoMountResult::XpI386(i386_dir) => {
+                        // XP/2003 i386 文本安装介质：无 WIM 可枚举，参照 GHO 的处理方式——
+                        // 不加载分卷信息，合成单一可安装项（selected_volume=Some(0)）。
+                        println!("[ISO MOUNT] 识别为 XP/2003 i386 介质，i386 源: {}", i386_dir);
+                        self.local_image_path = i386_dir.clone();
+                        self.xp_i386_source = Some(i386_dir);
+                        self.iso_mount_error = None;
+                        self.image_volumes.clear();
+                        self.selected_volume = Some(0);
+                        // i386 源自带 winnt.sif 时默认取消勾选无人值守
+                        self.refresh_source_unattend();
+                    }
+                    IsoMountResult::Error(error) => {
+                        println!("[ISO MOUNT] 挂载失败: {}", error);
+                        self.iso_mount_error = Some(error);
                     }
                 }
             }
@@ -775,66 +783,77 @@ impl App {
 
         // 检查镜像信息加载状态
         if self.image_info_loading {
-            unsafe {
-                if let Some(ref rx) = IMAGE_INFO_RESULT_RX {
-                    if let Ok(result) = rx.try_recv() {
-                        self.image_info_loading = false;
-                        IMAGE_INFO_RESULT_RX = None;
+            // 同上：只在 try_recv 期间短暂持锁，取出结果后立刻释放 guard 再处理，
+            // 因为下方分支会调用 self.refresh_source_unattend / self.start_installation 等方法。
+            let received = {
+                let mut guard = IMAGE_INFO_RESULT_RX.lock().unwrap();
+                if let Some(rx) = guard.as_ref() {
+                    match rx.try_recv() {
+                        Ok(result) => {
+                            *guard = None;
+                            Some(result)
+                        }
+                        Err(_) => None,
+                    }
+                } else {
+                    None
+                }
+            };
+            if let Some(result) = received {
+                self.image_info_loading = false;
 
-                        match result {
-                            ImageInfoResult::Success(volumes) => {
-                                println!("[IMAGE INFO] 加载完成，找到 {} 个卷", volumes.len());
-                                self.image_volumes = volumes;
-                                // 介质根/镜像目录自带应答文件时默认取消勾选无人值守
-                                self.refresh_source_unattend();
+                match result {
+                    ImageInfoResult::Success(volumes) => {
+                        println!("[IMAGE INFO] 加载完成，找到 {} 个卷", volumes.len());
+                        self.image_volumes = volumes;
+                        // 介质根/镜像目录自带应答文件时默认取消勾选无人值守
+                        self.refresh_source_unattend();
 
-                                // 检查是否需要小白模式自动安装
-                                if self.easy_mode_pending_auto_start {
-                                    log::info!("[EASY MODE] 镜像加载完成，准备自动安装");
-                                    
-                                    // 根据预设的 install_volume_index 找到对应的分卷索引
-                                    let target_volume_index = self.install_volume_index;
-                                    self.selected_volume = self.image_volumes
-                                        .iter()
-                                        .enumerate()
-                                        .find(|(_, vol)| vol.index == target_volume_index)
-                                        .map(|(i, _)| i);
-                                    
-                                    if self.selected_volume.is_some() {
-                                        log::info!("[EASY MODE] 找到目标分卷 {}，开始安装", target_volume_index);
-                                        
-                                        // 重置标志
-                                        self.easy_mode_pending_auto_start = false;
-                                        
-                                        // 开始安装
-                                        self.start_installation();
-                                    } else {
-                                        log::error!("[EASY MODE] 未找到目标分卷 {}，自动安装失败", target_volume_index);
-                                        self.easy_mode_pending_auto_start = false;
-                                        self.show_error(&tr!("未找到目标分卷 {}，请手动选择", target_volume_index));
-                                    }
-                                } else {
-                                    // 普通模式：自动选择第一个可安装的系统镜像
-                                    self.selected_volume = self.image_volumes
-                                        .iter()
-                                        .enumerate()
-                                        .find(|(_, vol)| Self::is_installable_image(vol))
-                                        .map(|(i, _)| i);
-                                    
-                                    if self.selected_volume.is_none() && !self.image_volumes.is_empty() {
-                                        // 如果没有可用的系统版本，仍然设为 None
-                                        log::warn!("镜像中没有可安装的系统版本（全部为 PE 环境或安装媒体）");
-                                    }
-                                }
+                        // 检查是否需要小白模式自动安装
+                        if self.easy_mode_pending_auto_start {
+                            log::info!("[EASY MODE] 镜像加载完成，准备自动安装");
+
+                            // 根据预设的 install_volume_index 找到对应的分卷索引
+                            let target_volume_index = self.install_volume_index;
+                            self.selected_volume = self.image_volumes
+                                .iter()
+                                .enumerate()
+                                .find(|(_, vol)| vol.index == target_volume_index)
+                                .map(|(i, _)| i);
+
+                            if self.selected_volume.is_some() {
+                                log::info!("[EASY MODE] 找到目标分卷 {}，开始安装", target_volume_index);
+
+                                // 重置标志
+                                self.easy_mode_pending_auto_start = false;
+
+                                // 开始安装
+                                self.start_installation();
+                            } else {
+                                log::error!("[EASY MODE] 未找到目标分卷 {}，自动安装失败", target_volume_index);
+                                self.easy_mode_pending_auto_start = false;
+                                self.show_error(&tr!("未找到目标分卷 {}，请手动选择", target_volume_index));
                             }
-                            ImageInfoResult::Error(error) => {
-                                println!("[IMAGE INFO] 加载失败: {}", error);
-                                self.image_volumes.clear();
-                                self.selected_volume = None;
-                                // 保存错误信息供UI显示
-                                self.iso_mount_error = Some(tr!("镜像信息加载失败: {}", error));
+                        } else {
+                            // 普通模式：自动选择第一个可安装的系统镜像
+                            self.selected_volume = self.image_volumes
+                                .iter()
+                                .enumerate()
+                                .find(|(_, vol)| Self::is_installable_image(vol))
+                                .map(|(i, _)| i);
+
+                            if self.selected_volume.is_none() && !self.image_volumes.is_empty() {
+                                // 如果没有可用的系统版本，仍然设为 None
+                                log::warn!("镜像中没有可安装的系统版本（全部为 PE 环境或安装媒体）");
                             }
                         }
+                    }
+                    ImageInfoResult::Error(error) => {
+                        println!("[IMAGE INFO] 加载失败: {}", error);
+                        self.image_volumes.clear();
+                        self.selected_volume = None;
+                        // 保存错误信息供UI显示
+                        self.iso_mount_error = Some(tr!("镜像信息加载失败: {}", error));
                     }
                 }
             }
@@ -1452,11 +1471,9 @@ impl App {
         self.last_unattend_check_partition = Some(partition_id.clone());
         
         let (tx, rx) = mpsc::channel::<UnattendCheckResult>();
-        
-        unsafe {
-            UNATTEND_CHECK_RESULT_RX = Some(rx);
-        }
-        
+
+        *UNATTEND_CHECK_RESULT_RX.lock().unwrap() = Some(rx);
+
         let partition_letter = partition_id;
         
         std::thread::spawn(move || {
@@ -1519,23 +1536,34 @@ impl App {
             return;
         }
         
-        unsafe {
-            if let Some(ref rx) = UNATTEND_CHECK_RESULT_RX {
-                if let Ok(result) = rx.try_recv() {
-                    self.unattend_check_loading = false;
-                    UNATTEND_CHECK_RESULT_RX = None;
-                    
-                    // 确保结果对应当前选中的分区
-                    let current_partition = self.selected_partition
-                        .and_then(|idx| self.partitions.get(idx))
-                        .map(|p| p.letter.clone());
-                    
-                    if current_partition.as_ref() == Some(&result.partition_letter) {
-                        self.partition_has_unattend = result.has_unattend;
-                        // 目标分区或源镜像任一自带无人值守 → 默认取消勾选。
-                        self.apply_unattend_default();
+        // 同上：只在 try_recv 期间短暂持锁，取出结果后释放 guard 再处理（下方会调用
+        // self.apply_unattend_default 等方法）。
+        let received = {
+            let mut guard = UNATTEND_CHECK_RESULT_RX.lock().unwrap();
+            if let Some(rx) = guard.as_ref() {
+                match rx.try_recv() {
+                    Ok(result) => {
+                        *guard = None;
+                        Some(result)
                     }
+                    Err(_) => None,
                 }
+            } else {
+                None
+            }
+        };
+        if let Some(result) = received {
+            self.unattend_check_loading = false;
+
+            // 确保结果对应当前选中的分区
+            let current_partition = self.selected_partition
+                .and_then(|idx| self.partitions.get(idx))
+                .map(|p| p.letter.clone());
+
+            if current_partition.as_ref() == Some(&result.partition_letter) {
+                self.partition_has_unattend = result.has_unattend;
+                // 目标分区或源镜像任一自带无人值守 → 默认取消勾选。
+                self.apply_unattend_default();
             }
         }
     }
@@ -1673,6 +1701,6 @@ impl App {
     }
 }
 
-static mut ISO_MOUNT_RESULT_RX: Option<mpsc::Receiver<IsoMountResult>> = None;
-static mut IMAGE_INFO_RESULT_RX: Option<mpsc::Receiver<ImageInfoResult>> = None;
-static mut UNATTEND_CHECK_RESULT_RX: Option<mpsc::Receiver<UnattendCheckResult>> = None;
+static ISO_MOUNT_RESULT_RX: std::sync::Mutex<Option<mpsc::Receiver<IsoMountResult>>> = std::sync::Mutex::new(None);
+static IMAGE_INFO_RESULT_RX: std::sync::Mutex<Option<mpsc::Receiver<ImageInfoResult>>> = std::sync::Mutex::new(None);
+static UNATTEND_CHECK_RESULT_RX: std::sync::Mutex<Option<mpsc::Receiver<UnattendCheckResult>>> = std::sync::Mutex::new(None);

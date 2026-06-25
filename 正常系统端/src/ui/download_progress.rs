@@ -29,10 +29,10 @@ pub enum Md5VerifyState {
 }
 
 /// 静态命令发送器（用于跨线程通信）
-static mut DOWNLOAD_CMD_SENDER: Option<mpsc::Sender<DownloadCommand>> = None;
+static DOWNLOAD_CMD_SENDER: std::sync::Mutex<Option<mpsc::Sender<DownloadCommand>>> = std::sync::Mutex::new(None);
 
 /// MD5校验结果接收器
-static mut MD5_VERIFY_RX: Option<mpsc::Receiver<Md5VerifyState>> = None;
+static MD5_VERIFY_RX: std::sync::Mutex<Option<mpsc::Receiver<Md5VerifyState>>> = std::sync::Mutex::new(None);
 
 impl App {
     pub fn show_download_progress(&mut self, ui: &mut egui::Ui) {
@@ -433,11 +433,9 @@ impl App {
         let expected_md5 = expected_md5.to_string();
         
         let (tx, rx) = mpsc::channel::<Md5VerifyState>();
-        
-        unsafe {
-            MD5_VERIFY_RX = Some(rx);
-        }
-        
+
+        *MD5_VERIFY_RX.lock().unwrap() = Some(rx);
+
         std::thread::spawn(move || {
             log::info!("[MD5] 开始计算文件MD5: {}", file_path);
             let start_time = std::time::Instant::now();
@@ -468,22 +466,21 @@ impl App {
 
     /// 检查MD5校验结果
     fn check_md5_verify_result(&mut self) {
-        unsafe {
-            if let Some(ref rx) = MD5_VERIFY_RX {
-                if let Ok(state) = rx.try_recv() {
-                    // 如果校验失败，在状态更新时删除文件（只执行一次）
-                    if let Md5VerifyState::Failed { .. } = &state {
-                        let filename = self.current_download_filename.clone().unwrap_or_default();
-                        let file_path = format!("{}\\{}", self.download_save_path, filename);
-                        if let Err(e) = std::fs::remove_file(&file_path) {
-                            log::warn!("[MD5] 删除校验失败的文件时出错: {} - {}", file_path, e);
-                        } else {
-                            log::info!("[MD5] 已删除校验失败的文件: {}", file_path);
-                        }
+        let mut guard = MD5_VERIFY_RX.lock().unwrap();
+        if let Some(ref rx) = *guard {
+            if let Ok(state) = rx.try_recv() {
+                // 如果校验失败，在状态更新时删除文件（只执行一次）
+                if let Md5VerifyState::Failed { .. } = &state {
+                    let filename = self.current_download_filename.clone().unwrap_or_default();
+                    let file_path = format!("{}\\{}", self.download_save_path, filename);
+                    if let Err(e) = std::fs::remove_file(&file_path) {
+                        log::warn!("[MD5] 删除校验失败的文件时出错: {} - {}", file_path, e);
+                    } else {
+                        log::info!("[MD5] 已删除校验失败的文件: {}", file_path);
                     }
-                    self.md5_verify_state = state;
-                    MD5_VERIFY_RX = None;
                 }
+                self.md5_verify_state = state;
+                *guard = None;
             }
         }
     }
@@ -707,35 +704,31 @@ impl App {
 
     /// 存储下载命令发送器
     fn store_download_command_sender(&mut self, _sender: mpsc::Sender<DownloadCommand>) {
-        unsafe {
-            DOWNLOAD_CMD_SENDER = Some(_sender);
-        }
+        *DOWNLOAD_CMD_SENDER.lock().unwrap() = Some(_sender);
     }
 
     fn pause_current_download(&mut self) {
-        unsafe {
-            if let Some(ref sender) = DOWNLOAD_CMD_SENDER {
-                let _ = sender.send(DownloadCommand::Pause);
-            }
+        if let Some(ref sender) = *DOWNLOAD_CMD_SENDER.lock().unwrap() {
+            let _ = sender.send(DownloadCommand::Pause);
         }
     }
 
     fn resume_current_download(&mut self) {
-        unsafe {
-            if let Some(ref sender) = DOWNLOAD_CMD_SENDER {
-                let _ = sender.send(DownloadCommand::Resume);
-            }
+        if let Some(ref sender) = *DOWNLOAD_CMD_SENDER.lock().unwrap() {
+            let _ = sender.send(DownloadCommand::Resume);
         }
     }
 
     fn cancel_current_download(&mut self) {
-        unsafe {
-            if let Some(ref sender) = DOWNLOAD_CMD_SENDER {
+        // 分别短暂加锁，避免同时持有两个 static 锁导致嵌套/重入死锁
+        {
+            let mut sender_guard = DOWNLOAD_CMD_SENDER.lock().unwrap();
+            if let Some(ref sender) = *sender_guard {
                 let _ = sender.send(DownloadCommand::Cancel);
             }
-            DOWNLOAD_CMD_SENDER = None;
-            MD5_VERIFY_RX = None;
+            *sender_guard = None;
         }
+        *MD5_VERIFY_RX.lock().unwrap() = None;
 
         // 先获取待执行操作
         let action = self.pe_download_then_action.take();
@@ -777,11 +770,10 @@ impl App {
         self.soft_download_then_run_path = None;
         self.pending_pe_md5 = None;
         self.md5_verify_state = Md5VerifyState::NotStarted;
-        
-        unsafe {
-            DOWNLOAD_CMD_SENDER = None;
-            MD5_VERIFY_RX = None;
-        }
+
+        // 分别短暂加锁，避免同时持有两个 static 锁导致嵌套/重入死锁
+        *DOWNLOAD_CMD_SENDER.lock().unwrap() = None;
+        *MD5_VERIFY_RX.lock().unwrap() = None;
     }
 
     /// 格式化字节数
