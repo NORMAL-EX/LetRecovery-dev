@@ -43,8 +43,9 @@ pub fn import_drivers_offline_dism_first(
     let dism_cmd = DismCmd::new()
         .map_err(|e| anyhow::anyhow!("{}", tr!("DISM 命令行初始化失败: {}", e)))?;
 
-    // 统计驱动文件数量
-    let inf_count = count_inf_files(source_dir);
+    // 统计驱动文件数量。与基线行为一致：源目录非法（不存在/非目录）时在此处
+    // 通过 ? 提前返回错误，不再继续尝试 dism（find_inf_files 对非目录会 bail!）。
+    let inf_count = DriverManager::find_inf_files(source_dir)?.len();
 
     // 使用智能导入（支持 INF 和 CAB）
     match dism_cmd.import_drivers_smart(&image_path, &driver_path, None) {
@@ -64,31 +65,6 @@ pub fn import_drivers_offline_dism_first(
             manager.import_drivers_offline(offline_root, source_dir)
         }
     }
-}
-
-/// 递归统计目录中的 INF 文件数量。
-///
-/// 与 lr-core `DriverManager::find_inf_files` 的遍历语义保持一致
-/// （跟随符号链接、忽略遍历错误、按扩展名小写匹配 "inf"），
-/// 仅用于 dism 成功路径的返回计数。
-fn count_inf_files(dir: &Path) -> usize {
-    if !dir.is_dir() {
-        return 0;
-    }
-
-    walkdir::WalkDir::new(dir)
-        .follow_links(true)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|entry| {
-            let path = entry.path();
-            path.is_file()
-                && path
-                    .extension()
-                    .map(|ext| ext.to_ascii_lowercase() == "inf")
-                    .unwrap_or(false)
-        })
-        .count()
 }
 
 /// 导入驱动到离线系统（正常系统端：dism 优先，失败回退）。

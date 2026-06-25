@@ -831,8 +831,9 @@ impl DriverManager {
         Ok(false)
     }
 
-    /// 递归查找目录中的所有 INF 文件
-    fn find_inf_files(dir: &Path) -> Result<Vec<PathBuf>> {
+    /// 递归查找目录中的所有 INF 文件（非目录会返回 Err）。
+    /// pub: 供正常系统端的 dism-first 封装做导入前计数（保持与基线一致的早失败语义）。
+    pub fn find_inf_files(dir: &Path) -> Result<Vec<PathBuf>> {
         let mut inf_files = Vec::new();
 
         if !dir.is_dir() {
