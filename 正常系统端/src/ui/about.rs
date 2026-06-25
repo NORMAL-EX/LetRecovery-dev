@@ -54,6 +54,8 @@ impl App {
                                 if ui.selectable_label(is_selected, &lang.display_name).clicked() {
                                     if lang.code != current_language {
                                         self.app_config.set_language(&lang.code);
+                                        // 立即重绘，使整个界面即时应用新语言（否则需下一次交互才刷新）
+                                        ui.ctx().request_repaint();
                                     }
                                 }
                             }

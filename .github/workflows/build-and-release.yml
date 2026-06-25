@@ -114,6 +114,14 @@ jobs:
           Write-Host "Using PE-side exe: $peExe"
           Copy-Item -Force $peExe $dst
           Write-Host "Replaced: $dst"
+          # 多语言文件随 PE exe 注入（PE 端 i18n 从 exe 同级 lang/ 目录加载）
+          $langSrc = "assets\release\lang\en-US.json"
+          if (Test-Path $langSrc) {
+            $langDir = Join-Path $mount "Program Files\LetRecoveryPE\lang"
+            New-Item -ItemType Directory -Force -Path $langDir | Out-Null
+            Copy-Item -Force $langSrc (Join-Path $langDir "en-US.json")
+            Write-Host "Injected PE lang: $langDir\en-US.json"
+          }
           dism /Unmount-Image /MountDir:"$mount" /Commit
           if ($LASTEXITCODE -ne 0) { throw "DISM unmount/commit failed" }
 
@@ -202,6 +210,12 @@ jobs:
           cp -f assets/release/repair_boot.txt pkg/bin/repair_boot.txt
           # diskpart 脚本目录（含说明；用户把分区脚本放这里）
           if [ -d assets/release/diskpart ]; then cp -rf assets/release/diskpart/. pkg/diskpart/; fi
+          # 多语言文件（exe 同级 lang/ 目录；i18n 运行时从这里加载 en-US 等外置语言）
+          if [ -d assets/release/lang ]; then
+            mkdir -p pkg/lang
+            cp -rf assets/release/lang/. pkg/lang/
+            echo '--- pkg/lang ---'; ls -la pkg/lang
+          fi
           # 用户驱动文件夹（按 Windows 版本）：随包提供目录 + README，供用户放驱动
           # （安装对应版本系统时自动 DISM 离线注入；XP 仍用 bin/drivers/xp 存储驱动机制）
           for v in win7 win8 win10 win11; do
