@@ -294,8 +294,8 @@ impl ConfigFileManager {
 
         let config_path = format!("{}\\{}", data_dir, Self::EXPAND_CONFIG);
         let content = format!(
-            "[Expand]\r\nTargetPartition={}\r\nTargetSizeMb={}\r\nWimEngine={}\r\n",
-            config.target_partition, config.target_size_mb, config.wim_engine
+            "[Expand]\r\nTargetPartition={}\r\nTargetSizeMb={}\r\nWimEngine={}\r\nLanguage={}\r\n",
+            config.target_partition, config.target_size_mb, config.wim_engine, crate::utils::i18n::current_language()
         );
         std::fs::write(&config_path, &content).context(tr!("写入扩容配置文件失败"))?;
 
@@ -422,6 +422,7 @@ IsGho={}
 WimEngine={}
 IsXp={}
 RunDiskpartScripts={}
+Language={}
 
 [Advanced]
 RemoveShortcutArrow={}
@@ -461,6 +462,7 @@ XpInjectNvmeDriver={}
             config.wim_engine,
             config.is_xp,
             config.run_diskpart_scripts,
+            crate::utils::i18n::current_language(),
             config.remove_shortcut_arrow,
             config.restore_classic_context_menu,
             config.bypass_nro,
@@ -496,6 +498,7 @@ Incremental={}
 Format={}
 SwmSplitSize={}
 WimEngine={}
+Language={}
 "#,
             config.save_path,
             config.name,
@@ -505,6 +508,7 @@ WimEngine={}
             config.format,
             config.swm_split_size,
             config.wim_engine,
+            crate::utils::i18n::current_language(),
         )
     }
 

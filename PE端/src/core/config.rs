@@ -112,6 +112,9 @@ pub struct InstallConfig {
 
     /// 是否在释放镜像前运行 diskpart 脚本（数据分区暂存的 diskpart 目录）。
     pub run_diskpart_scripts: bool,
+
+    /// 界面语言代码（如 "en-US"），由正常系统端随重启写入；空=简体中文。
+    pub language: String,
 }
 
 impl InstallConfig {
@@ -175,6 +178,9 @@ pub struct BackupConfig {
     pub swm_split_size: u32,
     /// WIM 镜像引擎：0=libwim（默认），1=wimgapi。由正常系统端随重启传入。
     pub wim_engine: u8,
+
+    /// 界面语言代码（如 "en-US"），由正常系统端随重启写入；空=简体中文。
+    pub language: String,
 }
 
 /// 配置文件管理器
@@ -328,6 +334,7 @@ impl ConfigFileManager {
                     "TargetPartition" => config.target_partition = value.to_string(),
                     "TargetSizeMb" => config.target_size_mb = value.parse().unwrap_or(0),
                     "WimEngine" => config.wim_engine = value.parse().unwrap_or(0),
+                    "Language" => config.language = value.to_string(),
                     _ => {}
                 }
             }
@@ -456,6 +463,7 @@ impl ConfigFileManager {
                     "WimEngine" => config.wim_engine = value.parse().unwrap_or(0),
                     "IsXp" => config.is_xp = value.parse().unwrap_or(false),
                     "RunDiskpartScripts" => config.run_diskpart_scripts = value.parse().unwrap_or(false),
+                    "Language" => config.language = value.to_string(),
                     "InstallCabPackages" => config.install_cab_packages = value.parse().unwrap_or(false),
                     "RemoveShortcutArrow" => {
                         config.remove_shortcut_arrow = value.parse().unwrap_or(false)
@@ -526,6 +534,7 @@ impl ConfigFileManager {
                     }
                     "SwmSplitSize" => config.swm_split_size = value.parse().unwrap_or(4096),
                     "WimEngine" => config.wim_engine = value.parse().unwrap_or(0),
+                    "Language" => config.language = value.to_string(),
                     _ => {}
                 }
             }
@@ -552,4 +561,6 @@ pub struct ExpandConfig {
     pub target_size_mb: u64,
     /// WIM 引擎选择（与其它流程一致）：0=libwim，1=wimgapi。
     pub wim_engine: u8,
+    /// 界面语言代码（如 "en-US"），由正常系统端随重启写入；空=简体中文。
+    pub language: String,
 }

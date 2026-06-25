@@ -93,6 +93,30 @@ fn install_panic_hook() {
     }));
 }
 
+/// 探测界面语言：从（正常系统端随重启写入的）配置文件读取 Language 字段。
+/// 找不到数据分区或配置时返回空串（即简体中文内置）。
+fn detect_ui_language() -> String {
+    use core::config::{ConfigFileManager, OperationType};
+
+    let data_partition = match ConfigFileManager::find_data_partition() {
+        Some(p) => p,
+        None => return String::new(),
+    };
+
+    match ConfigFileManager::detect_operation_type() {
+        Some(OperationType::Install) => ConfigFileManager::read_install_config(&data_partition)
+            .map(|c| c.language)
+            .unwrap_or_default(),
+        Some(OperationType::Backup) => ConfigFileManager::read_backup_config(&data_partition)
+            .map(|c| c.language)
+            .unwrap_or_default(),
+        Some(OperationType::Expand) => ConfigFileManager::read_expand_config(&data_partition)
+            .map(|c| c.language)
+            .unwrap_or_default(),
+        None => String::new(),
+    }
+}
+
 fn main() -> eframe::Result<()> {
     // 初始化日志：写入到 exe 同目录的 LetRecoveryPE.log。
     // PE 下 GUI 程序没有控制台，stderr 会被直接丢弃，必须落盘才能事后排查“怎么死的”。
@@ -116,6 +140,15 @@ fn main() -> eframe::Result<()> {
     // 的死锁。这里提前到 main 最前面统一解锁，GUI/自动/命令行所有模式都覆盖，
     // 且无论是否加密都会在日志里留下解锁尝试记录。无密钥文件=未启用=安全空操作。
     unlock_bitlocker_passthrough();
+
+    // 初始化多语言：从配置文件（正常系统端随重启写入 Language=）读取界面语言；空=简体中文（内置）。
+    // 必须在任何 GUI/CLI 分支之前，确保所有模式下文案都按所选语言显示。
+    let ui_language = detect_ui_language();
+    utils::i18n::init(&ui_language);
+    log::info!(
+        "界面语言: {}",
+        if ui_language.is_empty() { "zh-CN (默认)" } else { ui_language.as_str() }
+    );
 
     // 命令行模式（无GUI）
     if args.contains(&"/PEINSTALL".to_string()) || args.contains(&"--pe-install".to_string()) {
