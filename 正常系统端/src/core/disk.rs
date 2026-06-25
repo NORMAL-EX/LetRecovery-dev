@@ -389,7 +389,7 @@ impl DiskManager {
         std::fs::write(&script_path, &script_content)?;
 
         let output = create_command(&get_diskpart_path())
-            .args(["/s", script_path.to_str().unwrap()])
+            .args(["/s", script_path.to_str().ok_or_else(|| anyhow::anyhow!("script path is not valid UTF-8"))?])
             .output()?;
 
         let _ = std::fs::remove_file(&script_path);
@@ -409,7 +409,7 @@ impl DiskManager {
         std::fs::write(&script_path, &script_content)?;
 
         let output = create_command(&get_diskpart_path())
-            .args(["/s", script_path.to_str().unwrap()])
+            .args(["/s", script_path.to_str().ok_or_else(|| anyhow::anyhow!("script path is not valid UTF-8"))?])
             .output()?;
 
         let _ = std::fs::remove_file(&script_path);
@@ -614,7 +614,7 @@ impl DiskManager {
         // 首先尝试使用内置 diskpart，如果失败则使用系统 diskpart
         let diskpart_path = get_diskpart_path();
         let output = create_command(&diskpart_path)
-            .args(["/s", script_path.to_str().unwrap()])
+            .args(["/s", script_path.to_str().ok_or_else(|| anyhow::anyhow!("script path is not valid UTF-8"))?])
             .output()?;
 
         let output_text = gbk_to_utf8(&output.stdout);
@@ -632,7 +632,7 @@ impl DiskManager {
             log::warn!("[DISK] 内置 diskpart 输出异常，尝试使用系统 diskpart");
             
             let sys_output = create_command("diskpart.exe")
-                .args(["/s", script_path.to_str().unwrap()])
+                .args(["/s", script_path.to_str().ok_or_else(|| anyhow::anyhow!("script path is not valid UTF-8"))?])
                 .output()?;
             
             let sys_output_text = gbk_to_utf8(&sys_output.stdout);
@@ -863,7 +863,7 @@ impl DiskManager {
         log::info!("[DISK] Diskpart 脚本内容:\n{}", script_content);
 
         let output = create_command(&get_diskpart_path())
-            .args(["/s", script_path.to_str().unwrap()])
+            .args(["/s", script_path.to_str().ok_or_else(|| anyhow::anyhow!("script path is not valid UTF-8"))?])
             .output()?;
 
         let _ = std::fs::remove_file(&script_path);
@@ -957,7 +957,7 @@ impl DiskManager {
         std::fs::write(&script_path, &script_content)?;
 
         let output = create_command(&get_diskpart_path())
-            .args(["/s", script_path.to_str().unwrap()])
+            .args(["/s", script_path.to_str().ok_or_else(|| anyhow::anyhow!("script path is not valid UTF-8"))?])
             .output()?;
 
         let _ = std::fs::remove_file(&script_path);

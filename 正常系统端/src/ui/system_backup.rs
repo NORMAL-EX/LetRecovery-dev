@@ -405,9 +405,16 @@ impl App {
     }
 
     fn start_backup(&mut self) {
+        let source_index = match self.backup_source_partition {
+            Some(idx) => idx,
+            None => {
+                log::error!("[BACKUP] 未选择备份源分区，无法开始备份");
+                return;
+            }
+        };
         let source_partition = self
             .partitions
-            .get(self.backup_source_partition.unwrap())
+            .get(source_index)
             .cloned();
         if source_partition.is_none() {
             return;
@@ -435,9 +442,16 @@ impl App {
     
     /// BitLocker解锁完成后继续备份
     pub fn continue_backup_after_bitlocker(&mut self) {
+        let source_index = match self.backup_source_partition {
+            Some(idx) => idx,
+            None => {
+                log::error!("[BACKUP] 未选择备份源分区，无法继续备份");
+                return;
+            }
+        };
         let source_partition = self
             .partitions
-            .get(self.backup_source_partition.unwrap())
+            .get(source_index)
             .cloned();
         if source_partition.is_none() {
             return;
@@ -488,9 +502,16 @@ impl App {
     
     /// 内部备份函数，PE下载完成后调用
     pub fn start_backup_internal(&mut self) {
+        let source_index = match self.backup_source_partition {
+            Some(idx) => idx,
+            None => {
+                log::error!("[BACKUP] 未选择备份源分区，无法开始备份");
+                return;
+            }
+        };
         let source_partition = self
             .partitions
-            .get(self.backup_source_partition.unwrap())
+            .get(source_index)
             .cloned();
         if source_partition.is_none() {
             return;

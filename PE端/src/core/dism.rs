@@ -570,8 +570,8 @@ impl Dism {
         }
 
         // 从头部读取 XML 数据的偏移量和大小
-        let xml_offset = u64::from_le_bytes(header[48..56].try_into().unwrap());
-        let xml_size = u64::from_le_bytes(header[56..64].try_into().unwrap());
+        let xml_offset = u64::from_le_bytes(header[48..56].try_into()?);
+        let xml_size = u64::from_le_bytes(header[56..64].try_into()?);
 
         if xml_offset == 0 || xml_size == 0 || xml_size > 100_000_000 {
             anyhow::bail!("{}", tr!("XML 元数据位置无效"));

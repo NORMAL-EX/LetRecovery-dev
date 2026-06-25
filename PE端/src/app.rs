@@ -118,16 +118,16 @@ impl App {
                     "msyh".to_owned(),
                     std::sync::Arc::new(egui::FontData::from_owned(font_data)),
                 );
-                fonts
-                    .families
-                    .get_mut(&egui::FontFamily::Proportional)
-                    .unwrap()
-                    .insert(0, "msyh".to_owned());
-                fonts
-                    .families
-                    .get_mut(&egui::FontFamily::Monospace)
-                    .unwrap()
-                    .insert(0, "msyh".to_owned());
+                if let Some(family) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+                    family.insert(0, "msyh".to_owned());
+                } else {
+                    log::warn!("字体族 Proportional 不存在，无法插入中文字体");
+                }
+                if let Some(family) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
+                    family.insert(0, "msyh".to_owned());
+                } else {
+                    log::warn!("字体族 Monospace 不存在，无法插入中文字体");
+                }
                 log::info!("已加载中文字体: {}", font_path.display());
                 loaded = true;
                 break;

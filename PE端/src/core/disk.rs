@@ -190,8 +190,21 @@ impl DiskManager {
             };
         }
 
+        let script_path_str = match script_path.to_str() {
+            Some(s) => s,
+            None => {
+                log::error!("[disk] 临时脚本路径包含非 UTF-8 字符: {}", script_path.display());
+                let _ = std::fs::remove_file(&script_path);
+                return PartitionDetail {
+                    style: PartitionStyle::Unknown,
+                    disk_number: None,
+                    partition_number: None,
+                };
+            }
+        };
+
         let output = match new_command(&get_diskpart_path())
-            .args(["/s", script_path.to_str().unwrap()])
+            .args(["/s", script_path_str])
             .output()
         {
             Ok(o) => o,
@@ -257,8 +270,17 @@ impl DiskManager {
             return PartitionStyle::Unknown;
         }
 
+        let script_path_str = match script_path.to_str() {
+            Some(s) => s,
+            None => {
+                log::error!("[disk] 临时脚本路径包含非 UTF-8 字符: {}", script_path.display());
+                let _ = std::fs::remove_file(&script_path);
+                return PartitionStyle::Unknown;
+            }
+        };
+
         let output = match new_command(&get_diskpart_path())
-            .args(["/s", script_path.to_str().unwrap()])
+            .args(["/s", script_path_str])
             .output()
         {
             Ok(o) => o,
@@ -511,8 +533,11 @@ impl DiskManager {
         let script_path = temp_dir.join("lr_delete_part.txt");
         std::fs::write(&script_path, &script_content)?;
 
+        let script_path_str = script_path
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("临时脚本路径包含非 UTF-8 字符"))?;
         let output = new_command(&get_diskpart_path())
-            .args(["/s", script_path.to_str().unwrap()])
+            .args(["/s", script_path_str])
             .output()?;
 
         let _ = std::fs::remove_file(&script_path);
@@ -574,8 +599,11 @@ impl DiskManager {
         let script_path = temp_dir.join("lr_delete_part.txt");
         std::fs::write(&script_path, &delete_script)?;
 
+        let script_path_str = script_path
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("临时脚本路径包含非 UTF-8 字符"))?;
         let output = new_command(&get_diskpart_path())
-            .args(["/s", script_path.to_str().unwrap()])
+            .args(["/s", script_path_str])
             .output()?;
 
         let _ = std::fs::remove_file(&script_path);
@@ -675,12 +703,17 @@ impl DiskManager {
         let script_path = temp_dir.join("lr_rescan.txt");
         
         if std::fs::write(&script_path, script_content).is_ok() {
+            let Some(script_path_str) = script_path.to_str() else {
+                log::error!("[CLEANUP] 临时脚本路径包含非 UTF-8 字符: {}", script_path.display());
+                let _ = std::fs::remove_file(&script_path);
+                return;
+            };
             let output = new_command(&get_diskpart_path())
-                .args(["/s", script_path.to_str().unwrap()])
+                .args(["/s", script_path_str])
                 .output();
-            
+
             let _ = std::fs::remove_file(&script_path);
-            
+
             if let Ok(output) = output {
                 let output_text = gbk_to_utf8(&output.stdout);
                 log::info!("[CLEANUP] rescan 输出: {}", output_text);
@@ -698,8 +731,11 @@ impl DiskManager {
         let script_path = temp_dir.join("lr_extend.txt");
         std::fs::write(&script_path, &extend_script)?;
 
+        let script_path_str = script_path
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("临时脚本路径包含非 UTF-8 字符"))?;
         let output = new_command(&get_diskpart_path())
-            .args(["/s", script_path.to_str().unwrap()])
+            .args(["/s", script_path_str])
             .output()?;
 
         let _ = std::fs::remove_file(&script_path);
@@ -742,8 +778,11 @@ impl DiskManager {
             let script_path2 = temp_dir.join("lr_extend2.txt");
             std::fs::write(&script_path2, &extend_script2)?;
 
+            let script_path2_str = script_path2
+                .to_str()
+                .ok_or_else(|| anyhow::anyhow!("临时脚本路径包含非 UTF-8 字符"))?;
             let output2 = new_command(&get_diskpart_path())
-                .args(["/s", script_path2.to_str().unwrap()])
+                .args(["/s", script_path2_str])
                 .output()?;
 
             let _ = std::fs::remove_file(&script_path2);
@@ -806,8 +845,11 @@ impl DiskManager {
         let temp_dir = Self::reliable_temp_dir();
         let script_path = temp_dir.join("lr_expand.txt");
         std::fs::write(&script_path, &script)?;
+        let script_path_str = script_path
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("临时脚本路径包含非 UTF-8 字符"))?;
         let output = new_command(&get_diskpart_path())
-            .args(["/s", script_path.to_str().unwrap()])
+            .args(["/s", script_path_str])
             .output()?;
         let _ = std::fs::remove_file(&script_path);
 

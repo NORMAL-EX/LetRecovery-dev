@@ -887,7 +887,7 @@ fn execute_diskpart_script(script: &str) -> Result<String> {
     std::fs::write(&script_path, script)?;
 
     let output = create_command(&get_diskpart_path())
-        .args(["/s", script_path.to_str().unwrap()])
+        .args(["/s", script_path.to_str().ok_or_else(|| anyhow::anyhow!("script path is not valid UTF-8"))?])
         .output()?;
 
     let _ = std::fs::remove_file(&script_path);

@@ -1193,9 +1193,16 @@ impl App {
     }
 
     pub fn start_installation(&mut self) {
+        let selected_index = match self.selected_partition {
+            Some(idx) => idx,
+            None => {
+                log::error!("[INSTALL] 未选择目标分区，无法开始安装");
+                return;
+            }
+        };
         let partition = self
             .partitions
-            .get(self.selected_partition.unwrap())
+            .get(selected_index)
             .cloned();
         if partition.is_none() {
             return;
@@ -1382,9 +1389,16 @@ impl App {
 
     /// BitLocker解锁完成后继续安装
     pub fn continue_installation_after_bitlocker(&mut self) {
+        let selected_index = match self.selected_partition {
+            Some(idx) => idx,
+            None => {
+                log::error!("[INSTALL] 未选择目标分区，无法继续安装");
+                return;
+            }
+        };
         let partition = self
             .partitions
-            .get(self.selected_partition.unwrap())
+            .get(selected_index)
             .cloned();
         if partition.is_none() {
             return;

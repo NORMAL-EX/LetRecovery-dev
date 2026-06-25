@@ -198,7 +198,10 @@ impl IsoMounter {
             // 4. 如果轮询失败，使用后备方案：遍历所有 CDROM 盘符
             log::info!("[ISO] 轮询超时，尝试后备方案...");
             if let Some(drive) = Self::find_iso_drive() {
-                let letter = drive.chars().next().unwrap();
+                let letter = drive
+                    .chars()
+                    .next()
+                    .ok_or_else(|| anyhow::anyhow!("{}", tr!("ISO 挂载后无法找到盘符，请手动检查")))?;
                 log::info!("[ISO] 后备方案找到盘符: {}", drive);
                 return Ok(letter);
             }

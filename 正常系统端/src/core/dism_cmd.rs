@@ -892,7 +892,12 @@ impl DismCmd {
 
 impl Default for DismCmd {
     fn default() -> Self {
-        Self::new().expect("无法初始化 DISM 命令行执行器")
+        Self::new().unwrap_or_else(|e| {
+            log::error!("[DismCmd] 初始化 DISM 命令行执行器失败，回退到 PATH 中的 dism.exe: {}", e);
+            Self {
+                dism_path: PathBuf::from("dism.exe"),
+            }
+        })
     }
 }
 

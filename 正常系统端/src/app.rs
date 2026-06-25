@@ -1017,17 +1017,17 @@ impl App {
                 std::sync::Arc::new(egui::FontData::from_owned(font_data)),
             );
 
-            fonts
-                .families
-                .get_mut(&egui::FontFamily::Proportional)
-                .unwrap()
-                .insert(0, "msyh".to_owned());
+            if let Some(family) = fonts.families.get_mut(&egui::FontFamily::Proportional) {
+                family.insert(0, "msyh".to_owned());
+            } else {
+                log::warn!("[App] 未找到 Proportional 字体族，跳过中文字体注入");
+            }
 
-            fonts
-                .families
-                .get_mut(&egui::FontFamily::Monospace)
-                .unwrap()
-                .insert(0, "msyh".to_owned());
+            if let Some(family) = fonts.families.get_mut(&egui::FontFamily::Monospace) {
+                family.insert(0, "msyh".to_owned());
+            } else {
+                log::warn!("[App] 未找到 Monospace 字体族，跳过中文字体注入");
+            }
         }
 
         ctx.set_fonts(fonts);
