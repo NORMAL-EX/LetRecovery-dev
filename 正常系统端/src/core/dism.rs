@@ -497,7 +497,8 @@ impl Dism {
                 let manager = DriverManager::new()
                     .map_err(|e| anyhow::anyhow!("{}", tr!("驱动管理器初始化失败: {}", e)))?;
 
-                let (success, fail) = manager.import_drivers_offline(
+                let (success, fail) = crate::core::driver::import_drivers_offline_dism_first(
+                    &manager,
                     Path::new(image_path_clean),
                     Path::new(driver_path),
                 )?;

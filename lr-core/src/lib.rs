@@ -11,6 +11,7 @@ pub mod bl_passthrough;
 pub mod boot;
 pub mod command;
 pub mod diskpart;
+pub mod driver;
 pub mod encoding;
 pub mod fveapi;
 pub mod hash;
