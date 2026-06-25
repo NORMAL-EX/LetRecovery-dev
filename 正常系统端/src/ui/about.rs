@@ -65,6 +65,10 @@ impl App {
                                         // 远程配置错误信息在加载时按当时语言生成并缓存于
                                         // remote_config.error，切换语言后重新拉取，使其也用新语言显示。
                                         self.start_remote_config_loading();
+                                        // 窗口标题在启动时设定，切换语言时通过 viewport 命令同步更新。
+                                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Title(
+                                            tr!("LetRecovery - Windows系统一键重装工具"),
+                                        ));
                                         // 立即重绘，使整个界面即时应用新语言（否则需下一次交互才刷新）
                                         ui.ctx().request_repaint();
                                     }
@@ -186,9 +190,9 @@ impl App {
 
                 let current_engine = self.app_config.wim_engine;
                 let current_label = if current_engine == 1 {
-                    "wimgapi（系统原生 API）"
+                    tr!("wimgapi（系统原生 API）")
                 } else {
-                    "libwim（内置，默认）"
+                    tr!("libwim（内置，默认）")
                 };
                 ui.horizontal(|ui| {
                     ui.label(tr!("WIM 引擎:"));
@@ -197,14 +201,14 @@ impl App {
                         .width(280.0)
                         .show_ui(ui, |ui| {
                             if ui
-                                .selectable_label(current_engine == 0, "libwim（内置，默认）")
+                                .selectable_label(current_engine == 0, tr!("libwim（内置，默认）"))
                                 .clicked()
                                 && current_engine != 0
                             {
                                 self.app_config.set_wim_engine(0);
                             }
                             if ui
-                                .selectable_label(current_engine == 1, "wimgapi（系统原生 API）")
+                                .selectable_label(current_engine == 1, tr!("wimgapi（系统原生 API）"))
                                 .clicked()
                                 && current_engine != 1
                             {

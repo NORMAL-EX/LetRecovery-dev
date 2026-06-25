@@ -158,7 +158,7 @@ fn main() -> eframe::Result<()> {
     log::info!("启动 eframe 窗口...");
     let config_clone = preloaded_config.clone();
     eframe::run_native(
-        "LetRecovery - Windows系统一键重装工具",
+        &crate::tr!("LetRecovery - Windows系统一键重装工具"),
         options,
         Box::new(move |cc| {
             log::info!("eframe 回调开始创建 App...");
