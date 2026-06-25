@@ -271,11 +271,11 @@ impl App {
 
         // 在后台线程中执行校验
         std::thread::spawn(move || {
-            println!("[IMAGE VERIFY] 开始校验: {}", file_path);
+            log::info!("[IMAGE VERIFY] 开始校验: {}", file_path);
 
             let result = verifier.verify(&file_path, Some(progress_tx));
 
-            println!("[IMAGE VERIFY] 校验完成: {:?}", result.status);
+            log::info!("[IMAGE VERIFY] 校验完成: {:?}", result.status);
 
             // 转换为 UI 使用的结果类型
             let ui_result = ImageVerifyResult {
@@ -298,7 +298,7 @@ impl App {
     fn cancel_image_verify(&mut self) {
         if let Some(ref cancel_flag) = self.image_verify_cancel_flag {
             cancel_flag.store(true, Ordering::SeqCst);
-            println!("[IMAGE VERIFY] 已发送取消请求");
+            log::info!("[IMAGE VERIFY] 已发送取消请求");
         }
     }
 

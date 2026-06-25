@@ -75,7 +75,7 @@ impl Dism {
         index: u32,
         progress_tx: Option<Sender<DismProgress>>,
     ) -> Result<()> {
-        println!("[Dism] 使用 wimlib 应用镜像: {} -> {}", image_file, apply_dir);
+        log::info!("[Dism] 使用 wimlib 应用镜像: {} -> {}", image_file, apply_dir);
 
         let wim_manager = WimEngineManager::new_current()
             .map_err(|e| anyhow::anyhow!("{}", tr!("镜像引擎初始化失败: {}", e)))?;
@@ -104,7 +104,7 @@ impl Dism {
 
         match result {
             Ok(_) => {
-                println!("[Dism] 镜像应用成功");
+                log::info!("[Dism] 镜像应用成功");
                 Ok(())
             }
             Err(e) => {
@@ -123,7 +123,7 @@ impl Dism {
         description: &str,
         progress_tx: Option<Sender<DismProgress>>,
     ) -> Result<()> {
-        println!("[Dism] 使用 wimlib 捕获镜像: {} -> {}", capture_dir, image_file);
+        log::info!("[Dism] 使用 wimlib 捕获镜像: {} -> {}", capture_dir, image_file);
 
         let wim_manager = WimEngineManager::new_current()
             .map_err(|e| anyhow::anyhow!("{}", tr!("镜像引擎初始化失败: {}", e)))?;
@@ -155,7 +155,7 @@ impl Dism {
 
         match result {
             Ok(_) => {
-                println!("[Dism] 镜像捕获成功");
+                log::info!("[Dism] 镜像捕获成功");
                 Ok(())
             }
             Err(e) => {
@@ -174,7 +174,7 @@ impl Dism {
         description: &str,
         progress_tx: Option<Sender<DismProgress>>,
     ) -> Result<()> {
-        println!("[Dism] 使用 wimlib 追加镜像: {} -> {}", capture_dir, image_file);
+        log::info!("[Dism] 使用 wimlib 追加镜像: {} -> {}", capture_dir, image_file);
 
         // 对于追加操作，WimManager 的 capture_image 在文件存在时会自动追加
         self.capture_image(image_file, capture_dir, name, description, progress_tx)
@@ -190,7 +190,7 @@ impl Dism {
         description: &str,
         progress_tx: Option<Sender<DismProgress>>,
     ) -> Result<()> {
-        println!("[Dism] 捕获 ESD 镜像(LZMS): {} -> {}", capture_dir, image_file);
+        log::info!("[Dism] 捕获 ESD 镜像(LZMS): {} -> {}", capture_dir, image_file);
 
         let wim_manager = WimEngineManager::new_current()
             .map_err(|e| anyhow::anyhow!("{}", tr!("镜像引擎初始化失败: {}", e)))?;
@@ -220,7 +220,7 @@ impl Dism {
 
         match result {
             Ok(_) => {
-                println!("[Dism] ESD 镜像捕获成功");
+                log::info!("[Dism] ESD 镜像捕获成功");
                 Ok(())
             }
             Err(e) => anyhow::bail!("{}", tr!("ESD 镜像捕获失败: {}", e)),
@@ -236,7 +236,7 @@ impl Dism {
         description: &str,
         progress_tx: Option<Sender<DismProgress>>,
     ) -> Result<()> {
-        println!("[Dism] 追加 ESD 镜像: {} -> {}", capture_dir, image_file);
+        log::info!("[Dism] 追加 ESD 镜像: {} -> {}", capture_dir, image_file);
         self.capture_image_esd(image_file, capture_dir, name, description, progress_tx)
     }
 
@@ -251,7 +251,7 @@ impl Dism {
         split_size_mb: u32,
         progress_tx: Option<Sender<DismProgress>>,
     ) -> Result<()> {
-        println!(
+        log::info!(
             "[Dism] 捕获 SWM 分卷: {} -> {} (分卷 {}MB)",
             capture_dir, image_file, split_size_mb
         );
@@ -321,7 +321,7 @@ impl Dism {
                         status: tr!("分卷完成"),
                     });
                 }
-                println!("[Dism] SWM 分卷镜像创建成功");
+                log::info!("[Dism] SWM 分卷镜像创建成功");
                 Ok(())
             }
             Err(e) => anyhow::bail!("{}", tr!("分割镜像失败: {}", e)),
@@ -345,24 +345,24 @@ impl Dism {
         match crate::core::dismapi::DismApi::load() {
             Ok(api) => match api.export_drivers_online(Path::new(destination), None) {
                 Ok(count) => {
-                    println!("[Dism] DismExportDriver(在线) 成功导出 {} 个驱动 -> {}", count, destination);
+                    log::info!("[Dism] DismExportDriver(在线) 成功导出 {} 个驱动 -> {}", count, destination);
                     return Ok(());
                 }
                 Err(e) => {
-                    println!("[Dism] DismExportDriver(在线) 失败: {}，回退手工导出", e);
+                    log::warn!("[Dism] DismExportDriver(在线) 失败: {}，回退手工导出", e);
                 }
             },
             Err(e) => {
-                println!("[Dism] 加载 dismapi.dll 失败: {}，回退手工导出", e);
+                log::warn!("[Dism] 加载 dismapi.dll 失败: {}，回退手工导出", e);
             }
         }
 
         // 回退：SetupAPI 枚举 + 手工复制 DriverStore
-        println!("[Dism] 使用 Windows API(SetupAPI) 导出驱动到: {}", destination);
+        log::info!("[Dism] 使用 Windows API(SetupAPI) 导出驱动到: {}", destination);
         let manager = DriverManager::new()
             .map_err(|e| anyhow::anyhow!("{}", tr!("驱动管理器初始化失败: {}", e)))?;
         let count = manager.export_drivers(Path::new(destination), true)?;
-        println!("[Dism] 成功导出 {} 个驱动", count);
+        log::info!("[Dism] 成功导出 {} 个驱动", count);
         Ok(())
     }
 
@@ -387,10 +387,10 @@ impl Dism {
         match crate::core::dismapi::DismApi::load() {
             Ok(api) => {
                 let result = if is_online_target {
-                    println!("[Dism] DismExportDriver: 目标为当前运行系统，使用在线映像导出 -> {}", destination);
+                    log::info!("[Dism] DismExportDriver: 目标为当前运行系统，使用在线映像导出 -> {}", destination);
                     api.export_drivers_online(Path::new(destination), None)
                 } else {
-                    println!("[Dism] DismExportDriver: 离线映像 {} -> {}", system_partition, destination);
+                    log::info!("[Dism] DismExportDriver: 离线映像 {} -> {}", system_partition, destination);
                     api.export_drivers_offline(
                         Path::new(system_partition),
                         Path::new(destination),
@@ -399,28 +399,28 @@ impl Dism {
                 };
                 match result {
                     Ok(count) => {
-                        println!("[Dism] DismExportDriver 成功导出 {} 个驱动", count);
+                        log::info!("[Dism] DismExportDriver 成功导出 {} 个驱动", count);
                         return Ok(());
                     }
                     Err(e) => {
-                        println!("[Dism] DismExportDriver 失败: {}，回退手工导出", e);
+                        log::warn!("[Dism] DismExportDriver 失败: {}，回退手工导出", e);
                     }
                 }
             }
             Err(e) => {
-                println!("[Dism] 加载 dismapi.dll 失败: {}，回退手工导出", e);
+                log::warn!("[Dism] 加载 dismapi.dll 失败: {}，回退手工导出", e);
             }
         }
 
         // 回退：手工遍历 FileRepository
-        println!("[Dism] 使用 Windows API 从 {} 导出驱动到: {}", system_partition, destination);
+        log::info!("[Dism] 使用 Windows API 从 {} 导出驱动到: {}", system_partition, destination);
         let manager = DriverManager::new()
             .map_err(|e| anyhow::anyhow!("{}", tr!("驱动管理器初始化失败: {}", e)))?;
         let count = manager.export_drivers_from_system(
             Path::new(system_partition),
             Path::new(destination),
         )?;
-        println!("[Dism] 成功导出 {} 个驱动", count);
+        log::info!("[Dism] 成功导出 {} 个驱动", count);
         Ok(())
     }
 
@@ -441,7 +441,7 @@ impl Dism {
             anyhow::bail!("{}", tr!("PE环境下无法使用在线方式添加驱动，请使用 add_drivers_offline"));
         }
 
-        println!("[Dism] 使用 Windows API 导入驱动: {}", driver_path);
+        log::info!("[Dism] 使用 Windows API 导入驱动: {}", driver_path);
 
         let manager = DriverManager::new()
             .map_err(|e| anyhow::anyhow!("{}", tr!("驱动管理器初始化失败: {}", e)))?;
@@ -451,7 +451,7 @@ impl Dism {
             true, // force
         )?;
 
-        println!(
+        log::info!(
             "[Dism] 驱动导入完成: 成功 {}, 失败 {}, 需要重启: {}",
             success, fail, need_reboot
         );
@@ -470,14 +470,14 @@ impl Dism {
     /// 
     /// 优先使用 {程序目录}\bin\Dism\dism.exe
     pub fn add_drivers_offline(&self, image_path: &str, driver_path: &str) -> Result<()> {
-        println!("[Dism] 离线导入驱动: {} -> {}", driver_path, image_path);
+        log::info!("[Dism] 离线导入驱动: {} -> {}", driver_path, image_path);
 
         // 规范化路径：移除尾部的反斜杠
         let image_path_clean = image_path.trim_end_matches('\\').trim_end_matches('/');
         
         // 使用 dism.exe 命令行进行离线驱动注入
         // 这将使用 DISM 的 /Add-Driver 和 /Add-Package 功能
-        println!("[Dism] 使用 dism.exe 命令行进行离线驱动注入...");
+        log::info!("[Dism] 使用 dism.exe 命令行进行离线驱动注入...");
         
         let dism_cmd = DismCmd::new()
             .map_err(|e| anyhow::anyhow!("{}", tr!("DISM 命令行初始化失败: {}", e)))?;
@@ -485,14 +485,14 @@ impl Dism {
         // 智能导入：自动识别并处理驱动文件和 CAB 包
         match dism_cmd.import_drivers_smart(image_path_clean, driver_path, None) {
             Ok(_) => {
-                println!("[Dism] 离线驱动注入完成");
+                log::info!("[Dism] 离线驱动注入完成");
                 Ok(())
             }
             Err(e) => {
-                println!("[Dism] dism.exe 导入失败: {}", e);
-                
+                log::warn!("[Dism] dism.exe 导入失败: {}", e);
+
                 // 尝试回退到 DriverManager（仅当 DISM 完全失败时）
-                println!("[Dism] 尝试使用备用方法（DriverManager）...");
+                log::info!("[Dism] 尝试使用备用方法（DriverManager）...");
                 
                 let manager = DriverManager::new()
                     .map_err(|e| anyhow::anyhow!("{}", tr!("驱动管理器初始化失败: {}", e)))?;
@@ -502,7 +502,7 @@ impl Dism {
                     Path::new(driver_path),
                 )?;
 
-                println!(
+                log::info!(
                     "[Dism] 备用方法完成: 成功 {}, 失败 {}",
                     success, fail
                 );
@@ -522,15 +522,15 @@ impl Dism {
     /// 获取 WIM/ESD 镜像信息（所有分卷）
     /// 使用 wimlib 或直接解析 WIM XML 元数据
     pub fn get_image_info(&self, image_file: &str) -> Result<Vec<ImageInfo>> {
-        println!("[Dism] 开始获取镜像信息: {}", image_file);
-        
+        log::info!("[Dism] 开始获取镜像信息: {}", image_file);
+
         // 首先尝试使用 wimlib
         match WimlibManager::new() {
             Ok(wim_manager) => {
-                println!("[Dism] wimlib 加载成功");
+                log::info!("[Dism] wimlib 加载成功");
                 match wim_manager.get_image_info(image_file) {
                     Ok(images) => {
-                        println!("[Dism] 从 wimlib 成功获取 {} 个镜像信息", images.len());
+                        log::info!("[Dism] 从 wimlib 成功获取 {} 个镜像信息", images.len());
                         return Ok(images.into_iter().map(|img| ImageInfo {
                             index: img.index,
                             name: img.name,
@@ -543,28 +543,28 @@ impl Dism {
                         }).collect());
                     }
                     Err(e) => {
-                        println!("[Dism] wimlib 获取镜像信息失败: {}", e);
+                        log::warn!("[Dism] wimlib 获取镜像信息失败: {}", e);
                     }
                 }
             }
             Err(e) => {
-                println!("[Dism] wimlib (libwim-15.dll) 加载失败: {} (PE 环境会自动释放内置 DLL)", e);
+                log::warn!("[Dism] wimlib (libwim-15.dll) 加载失败: {} (PE 环境会自动释放内置 DLL)", e);
             }
         }
 
         // 尝试直接解析 WIM XML 元数据（仅对WIM有效，ESD的元数据是压缩的）
-        println!("[Dism] 尝试直接解析 WIM XML 元数据...");
+        log::info!("[Dism] 尝试直接解析 WIM XML 元数据...");
         match Self::parse_wim_xml_metadata(image_file) {
             Ok(images) => {
                 if !images.is_empty() {
-                    println!("[Dism] 从 WIM XML 元数据成功解析出 {} 个镜像", images.len());
+                    log::info!("[Dism] 从 WIM XML 元数据成功解析出 {} 个镜像", images.len());
                     return Ok(images);
                 } else {
-                    println!("[Dism] WIM XML 解析成功但未找到镜像信息");
+                    log::warn!("[Dism] WIM XML 解析成功但未找到镜像信息");
                 }
             }
             Err(e) => {
-                println!("[Dism] WIM XML 直接解析失败: {} (ESD 文件的元数据是压缩的，需要 wimlib)", e);
+                log::warn!("[Dism] WIM XML 直接解析失败: {} (ESD 文件的元数据是压缩的，需要 wimlib)", e);
             }
         }
 
@@ -660,7 +660,7 @@ impl Dism {
         use std::fs::File;
         use std::io::{Read, Seek, SeekFrom};
 
-        println!("[Dism] 尝试直接解析 WIM XML 元数据: {}", image_file);
+        log::debug!("[Dism] 尝试直接解析 WIM XML 元数据: {}", image_file);
 
         let mut file = File::open(image_file)?;
         let mut header = [0u8; 208];
@@ -678,7 +678,7 @@ impl Dism {
             anyhow::bail!("{}", tr!("XML 元数据位置无效"));
         }
 
-        println!("[Dism] XML 偏移: {}, 大小: {}", xml_offset, xml_size);
+        log::debug!("[Dism] XML 偏移: {}, 大小: {}", xml_offset, xml_size);
 
         file.seek(SeekFrom::Start(xml_offset))?;
         let mut xml_data = vec![0u8; xml_size as usize];

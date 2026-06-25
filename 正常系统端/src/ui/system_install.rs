@@ -654,7 +654,7 @@ impl App {
         let path_lower = image_path.to_lowercase();
         
         if path_lower.ends_with(".wim") || path_lower.ends_with(".esd") || path_lower.ends_with(".swm") {
-            println!("[IMAGE INFO] 开始后台加载镜像信息: {}", image_path);
+            log::info!("[IMAGE INFO] 开始后台加载镜像信息: {}", image_path);
             
             self.image_info_loading = true;
             self.image_volumes.clear();
@@ -667,16 +667,16 @@ impl App {
             let path = image_path.to_string();
 
             std::thread::spawn(move || {
-                println!("[IMAGE INFO THREAD] 线程启动，加载: {}", path);
+                log::info!("[IMAGE INFO THREAD] 线程启动，加载: {}", path);
                 
                 let dism = crate::core::dism::Dism::new();
                 match dism.get_image_info(&path) {
                     Ok(volumes) => {
-                        println!("[IMAGE INFO THREAD] 成功加载 {} 个卷", volumes.len());
+                        log::info!("[IMAGE INFO THREAD] 成功加载 {} 个卷", volumes.len());
                         let _ = tx.send(ImageInfoResult::Success(volumes));
                     }
                     Err(e) => {
-                        println!("[IMAGE INFO THREAD] 加载失败: {}", e);
+                        log::error!("[IMAGE INFO THREAD] 加载失败: {}", e);
                         let _ = tx.send(ImageInfoResult::Error(e.to_string()));
                     }
                 }
@@ -691,7 +691,7 @@ impl App {
     }
 
     fn start_iso_mount(&mut self) {
-        println!("[ISO MOUNT] 开始后台挂载 ISO: {}", self.local_image_path);
+        log::info!("[ISO MOUNT] 开始后台挂载 ISO: {}", self.local_image_path);
         
         self.iso_mounting = true;
         self.iso_mount_error = None;
@@ -703,26 +703,26 @@ impl App {
         let iso_path = self.local_image_path.clone();
 
         std::thread::spawn(move || {
-            println!("[ISO MOUNT THREAD] 线程启动，挂载: {}", iso_path);
+            log::info!("[ISO MOUNT THREAD] 线程启动，挂载: {}", iso_path);
             
             match crate::core::iso::IsoMounter::mount_iso(&iso_path) {
                 Ok(drive) => {
-                    println!("[ISO MOUNT THREAD] 挂载成功，盘符: {}，查找安装镜像...", drive);
+                    log::info!("[ISO MOUNT THREAD] 挂载成功，盘符: {}，查找安装镜像...", drive);
                     // 使用刚挂载的盘符查找镜像，而不是遍历所有盘符
                     if let Some(image_path) = crate::core::iso::IsoMounter::find_install_image_in_drive(&drive) {
-                        println!("[ISO MOUNT THREAD] 找到镜像: {}", image_path);
+                        log::info!("[ISO MOUNT THREAD] 找到镜像: {}", image_path);
                         let _ = tx.send(IsoMountResult::Success(image_path));
                     } else if let Some(i386_dir) = crate::core::iso::IsoMounter::xp_i386_dir(&drive) {
                         // 无 \sources\install.wim/esd，但有 \I386(\AMD64) 文本安装结构 → XP/2003 介质
-                        println!("[ISO MOUNT THREAD] 识别为 XP/2003 i386 文本安装介质: {}", i386_dir);
+                        log::info!("[ISO MOUNT THREAD] 识别为 XP/2003 i386 文本安装介质: {}", i386_dir);
                         let _ = tx.send(IsoMountResult::XpI386(i386_dir));
                     } else {
-                        println!("[ISO MOUNT THREAD] 未找到安装镜像");
+                        log::info!("[ISO MOUNT THREAD] 未找到安装镜像");
                         let _ = tx.send(IsoMountResult::Error(tr!("ISO 中未找到 install.wim/esd")));
                     }
                 }
                 Err(e) => {
-                    println!("[ISO MOUNT THREAD] 挂载失败: {}", e);
+                    log::error!("[ISO MOUNT THREAD] 挂载失败: {}", e);
                     let _ = tx.send(IsoMountResult::Error(e.to_string()));
                 }
             }
@@ -754,7 +754,7 @@ impl App {
 
                 match result {
                     IsoMountResult::Success(image_path) => {
-                        println!("[ISO MOUNT] 挂载完成，镜像路径: {}", image_path);
+                        log::info!("[ISO MOUNT] 挂载完成，镜像路径: {}", image_path);
                         self.local_image_path = image_path.clone();
                         self.iso_mount_error = None;
                         self.xp_i386_source = None;
@@ -764,7 +764,7 @@ impl App {
                     IsoMountResult::XpI386(i386_dir) => {
                         // XP/2003 i386 文本安装介质：无 WIM 可枚举，参照 GHO 的处理方式——
                         // 不加载分卷信息，合成单一可安装项（selected_volume=Some(0)）。
-                        println!("[ISO MOUNT] 识别为 XP/2003 i386 介质，i386 源: {}", i386_dir);
+                        log::info!("[ISO MOUNT] 识别为 XP/2003 i386 介质，i386 源: {}", i386_dir);
                         self.local_image_path = i386_dir.clone();
                         self.xp_i386_source = Some(i386_dir);
                         self.iso_mount_error = None;
@@ -774,7 +774,7 @@ impl App {
                         self.refresh_source_unattend();
                     }
                     IsoMountResult::Error(error) => {
-                        println!("[ISO MOUNT] 挂载失败: {}", error);
+                        log::error!("[ISO MOUNT] 挂载失败: {}", error);
                         self.iso_mount_error = Some(error);
                     }
                 }
@@ -804,7 +804,7 @@ impl App {
 
                 match result {
                     ImageInfoResult::Success(volumes) => {
-                        println!("[IMAGE INFO] 加载完成，找到 {} 个卷", volumes.len());
+                        log::info!("[IMAGE INFO] 加载完成，找到 {} 个卷", volumes.len());
                         self.image_volumes = volumes;
                         // 介质根/镜像目录自带应答文件时默认取消勾选无人值守
                         self.refresh_source_unattend();
@@ -849,7 +849,7 @@ impl App {
                         }
                     }
                     ImageInfoResult::Error(error) => {
-                        println!("[IMAGE INFO] 加载失败: {}", error);
+                        log::error!("[IMAGE INFO] 加载失败: {}", error);
                         self.image_volumes.clear();
                         self.selected_volume = None;
                         // 保存错误信息供UI显示
@@ -964,12 +964,12 @@ impl App {
             if let Some(idx) = self.selected_volume {
                 if let Some(vol) = self.image_volumes.get(idx) {
                     if let Some(v) = vol.major_version {
-                        println!(
+                        log::info!(
                             "[STORAGE DRIVER] 镜像版本: major_version={}, is_win10_or_11={}",
                             v, is_win10_or_11
                         );
                     } else {
-                        println!("[STORAGE DRIVER] 未检测到版本信息，不自动勾选磁盘控制器驱动");
+                        log::info!("[STORAGE DRIVER] 未检测到版本信息，不自动勾选磁盘控制器驱动");
                     }
                 }
             }
@@ -1128,14 +1128,14 @@ impl App {
 
         if !target_encrypted {
             // 目标盘未加密：无需任何 BitLocker 处理（数据盘若加密，由密钥注入一并处理）。
-            println!("[BITLOCKER] 目标盘 {} 未加密，无需预解密，正常继续", target_drive);
+            log::info!("[BITLOCKER] 目标盘 {} 未加密，无需预解密，正常继续", target_drive);
             self.decrypting_partitions.clear();
             return false;
         }
 
         match manager.get_recovery_key(&target_drive) {
             Ok(_) => {
-                println!(
+                log::info!(
                     "[BITLOCKER] 已成功获取目标盘 {} 恢复密钥 → 走密钥透传（不预解密，进 PE 解锁）",
                     target_drive
                 );
@@ -1143,7 +1143,7 @@ impl App {
                 return false;
             }
             Err(e) => {
-                println!(
+                log::warn!(
                     "[BITLOCKER] 获取目标盘 {} 恢复密钥失败（{}）→ 回退彻底解密 BitLocker 方案",
                     target_drive, e
                 );
@@ -1151,7 +1151,7 @@ impl App {
             }
         }
 
-        println!("[BITLOCKER] 开始检测并强制解密分区（透传回退方案）...");
+        log::info!("[BITLOCKER] 开始检测并强制解密分区（透传回退方案）...");
         self.decrypting_partitions.clear();
 
         // 回退：PE 无法用密钥解锁目标盘，必须在正常端预解密所有【已解锁】的加密分区
@@ -1167,23 +1167,23 @@ impl App {
 
             // 情况1: 已加密且已解锁 -> 发送解密指令并等待
             if current_status == crate::core::bitlocker::VolumeStatus::EncryptedUnlocked {
-                println!("[BITLOCKER] 检测到已解锁的加密分区 {}，正在尝试彻底解密...", drive_str);
+                log::info!("[BITLOCKER] 检测到已解锁的加密分区 {}，正在尝试彻底解密...", drive_str);
 
                 let result = manager.decrypt(&drive_str);
 
                 if result.success {
-                    println!("[BITLOCKER] 分区 {} 解密指令已发送: {}", drive_str, result.message);
+                    log::info!("[BITLOCKER] 分区 {} 解密指令已发送: {}", drive_str, result.message);
                     self.decrypting_partitions.push(drive_str);
                     decryption_started = true;
                 } else {
-                    println!("[BITLOCKER] 分区 {} 解密失败: {} (Code: {:?})",
+                    log::error!("[BITLOCKER] 分区 {} 解密失败: {} (Code: {:?})",
                         drive_str, result.message, result.error_code);
                     // 即使失败，如果是因为已经在解密中，也应该等待
                 }
             }
             // 情况2: 正在解密中 -> 直接加入等待列表
             else if current_status == crate::core::bitlocker::VolumeStatus::Decrypting {
-                println!("[BITLOCKER] 分区 {} 已经在解密过程中，加入等待列表", drive_str);
+                log::info!("[BITLOCKER] 分区 {} 已经在解密过程中，加入等待列表", drive_str);
                 self.decrypting_partitions.push(drive_str);
                 decryption_started = true;
             }
@@ -1231,7 +1231,7 @@ impl App {
         // 1. 检查是否有需要解锁的 BitLocker 分区 (优先级最高)
         let locked_partitions = self.check_bitlocker_for_install();
         if !locked_partitions.is_empty() {
-            println!("[INSTALL] 检测到 {} 个BitLocker锁定的分区，需要先解锁", locked_partitions.len());
+            log::info!("[INSTALL] 检测到 {} 个BitLocker锁定的分区，需要先解锁", locked_partitions.len());
             self.install_bitlocker_partitions = locked_partitions;
             self.install_bitlocker_current = self.install_bitlocker_partitions.first().map(|p| p.letter.clone());
             self.install_bitlocker_message.clear();
@@ -1246,7 +1246,7 @@ impl App {
         // 2. 尝试启动 BitLocker 解密
         // 如果有分区正在解密或开始解密，进入解密等待流程
         if self.initiate_bitlocker_decryption() {
-            println!("[INSTALL] 检测到 BitLocker 分区需要解密，进入解密等待流程");
+            log::info!("[INSTALL] 检测到 BitLocker 分区需要解密，进入解密等待流程");
             
             self.bitlocker_decryption_needed = true;
             
@@ -1330,7 +1330,7 @@ impl App {
         
         // 如果有正在解密的分区，启动监控线程
         if !self.decrypting_partitions.is_empty() {
-            println!("[INSTALL] 启动 BitLocker 解密监控线程...");
+            log::info!("[INSTALL] 启动 BitLocker 解密监控线程...");
             let partitions = self.decrypting_partitions.clone();
             
             std::thread::spawn(move || {
@@ -1394,7 +1394,7 @@ impl App {
         // 解锁完成后，再次尝试启动解密流程
         // 如果有分区需要解密，转入解密等待流程
         if self.initiate_bitlocker_decryption() {
-            println!("[INSTALL] 解锁后检测到 BitLocker 分区需要解密，进入解密等待流程");
+            log::info!("[INSTALL] 解锁后检测到 BitLocker 分区需要解密，进入解密等待流程");
             self.bitlocker_decryption_needed = true;
             self.initialize_install_state(&partition, self.local_image_path.clone());
             self.install_step = 0; // 解密阶段
@@ -1414,7 +1414,7 @@ impl App {
             if let Some(pe) = pe_info {
                 let (pe_exists, _) = crate::core::pe::PeManager::check_pe_exists(&pe.filename);
                 if !pe_exists {
-                    println!("[INSTALL] PE文件不存在，开始下载: {}", pe.filename);
+                    log::info!("[INSTALL] PE文件不存在，开始下载: {}", pe.filename);
                     self.pending_download_url = Some(pe.download_url.clone());
                     self.pending_download_filename = Some(pe.filename.clone());
                     self.pending_pe_md5 = pe.md5.clone();
@@ -1465,7 +1465,7 @@ impl App {
             return;
         }
         
-        println!("[UNATTEND CHECK] 开始检测分区 {} 的无人值守配置", partition_id);
+        log::info!("[UNATTEND CHECK] 开始检测分区 {} 的无人值守配置", partition_id);
         
         self.unattend_check_loading = true;
         self.last_unattend_check_partition = Some(partition_id.clone());
@@ -1509,7 +1509,7 @@ impl App {
         
         for location in &unattend_locations {
             if Path::new(location).exists() {
-                println!("[UNATTEND CHECK] 发现无人值守配置: {}", location);
+                log::info!("[UNATTEND CHECK] 发现无人值守配置: {}", location);
                 detected_paths.push(location.clone());
             }
         }
@@ -1517,10 +1517,10 @@ impl App {
         let has_unattend = !detected_paths.is_empty();
         
         if has_unattend {
-            println!("[UNATTEND CHECK] 分区 {} 存在 {} 个无人值守配置文件", 
+            log::info!("[UNATTEND CHECK] 分区 {} 存在 {} 个无人值守配置文件",
                 partition_letter, detected_paths.len());
         } else {
-            println!("[UNATTEND CHECK] 分区 {} 无无人值守配置文件", partition_letter);
+            log::info!("[UNATTEND CHECK] 分区 {} 无无人值守配置文件", partition_letter);
         }
         
         UnattendCheckResult {
@@ -1574,13 +1574,13 @@ impl App {
     fn apply_unattend_default(&mut self) {
         if self.partition_has_unattend || self.source_has_unattend {
             self.unattended_install = false;
-            println!(
+            log::info!(
                 "[UNATTEND CHECK] 检测到自带无人值守(分区={}, 源镜像={})，默认取消勾选",
                 self.partition_has_unattend, self.source_has_unattend
             );
         } else {
             self.unattended_install = true;
-            println!("[UNATTEND CHECK] 未检测到自带无人值守，默认勾选");
+            log::info!("[UNATTEND CHECK] 未检测到自带无人值守，默认勾选");
         }
     }
 
@@ -1622,17 +1622,17 @@ impl App {
             Ok(mgr) => match mgr.image_contains_any_path(image_file, index, &PATHS) {
                 Ok(found) => {
                     if found {
-                        println!("[UNATTEND CHECK] WIM 卷内置无人值守应答 (index={})", index);
+                        log::info!("[UNATTEND CHECK] WIM 卷内置无人值守应答 (index={})", index);
                     }
                     found
                 }
                 Err(e) => {
-                    println!("[UNATTEND CHECK] WIM 内置应答探测失败(忽略): {}", e);
+                    log::warn!("[UNATTEND CHECK] WIM 内置应答探测失败(忽略): {}", e);
                     false
                 }
             },
             Err(e) => {
-                println!("[UNATTEND CHECK] WIM 引擎初始化失败(忽略): {}", e);
+                log::warn!("[UNATTEND CHECK] WIM 引擎初始化失败(忽略): {}", e);
                 false
             }
         }
@@ -1654,7 +1654,7 @@ impl App {
                 .map(|root| root.join("winnt.sif").exists())
                 .unwrap_or(false);
             if in_i386 || at_media_root {
-                println!("[UNATTEND CHECK] 源 i386 自带 winnt.sif");
+                log::info!("[UNATTEND CHECK] 源 i386 自带 winnt.sif");
                 return true;
             }
             return false;
@@ -1679,7 +1679,7 @@ impl App {
         }
         for name in ["autounattend.xml", "Autounattend.xml", "AutoUnattend.xml", "unattend.xml", "Unattend.xml"] {
             if Path::new(&format!("{}\\{}", base.trim_end_matches('\\'), name)).exists() {
-                println!("[UNATTEND CHECK] 源介质根/镜像目录自带 {}", name);
+                log::info!("[UNATTEND CHECK] 源介质根/镜像目录自带 {}", name);
                 return true;
             }
         }

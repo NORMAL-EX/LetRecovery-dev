@@ -44,7 +44,7 @@ impl BootManager {
 
     /// 查找目标 Windows 分区所在磁盘的 ESP 分区
     pub fn find_esp_on_same_disk(&self, windows_partition: &str) -> Result<String> {
-        println!("[BOOT] 查找 {} 所在磁盘的 ESP 分区...", windows_partition);
+        log::info!("[BOOT] 查找 {} 所在磁盘的 ESP 分区...", windows_partition);
         
         // 提取盘符（去掉冒号）
         let drive_letter = windows_partition.trim_end_matches(':').trim_end_matches('\\');
@@ -62,7 +62,7 @@ detail volume
             .output()?;
         
         let stdout = gbk_to_utf8(&output.stdout);
-        println!("[BOOT] 查找磁盘号:\n{}", stdout);
+        log::info!("[BOOT] 查找磁盘号:\n{}", stdout);
         
         // 解析磁盘号
         let mut disk_num: Option<usize> = None;
@@ -85,7 +85,7 @@ detail volume
         }
         
         let disk_num = disk_num.ok_or_else(|| anyhow::anyhow!("{}", tr!("无法确定分区所在磁盘")))?;
-        println!("[BOOT] 目标分区在磁盘 {}", disk_num);
+        log::info!("[BOOT] 目标分区在磁盘 {}", disk_num);
         
         // Step 2: 查找该磁盘上的 ESP 分区（使用 GPT 类型）
         let script2 = format!(r#"select disk {}
@@ -100,7 +100,7 @@ list partition
             .output()?;
         
         let stdout = gbk_to_utf8(&output.stdout);
-        println!("[BOOT] 分区列表:\n{}", stdout);
+        log::info!("[BOOT] 分区列表:\n{}", stdout);
         
         // 查找 System/系统 类型的分区（ESP）
         let mut esp_partition: Option<usize> = None;
@@ -115,7 +115,7 @@ list partition
                         if let Some(num_str) = parts.get(i + 1) {
                             if let Ok(num) = num_str.parse::<usize>() {
                                 esp_partition = Some(num);
-                                println!("[BOOT] 找到 ESP: 分区 {}", num);
+                                log::info!("[BOOT] 找到 ESP: 分区 {}", num);
                                 break;
                             }
                         }
@@ -147,14 +147,14 @@ assign letter=S
             .output()?;
         
         let stdout = gbk_to_utf8(&output.stdout);
-        println!("[BOOT] 分配 ESP 盘符:\n{}", stdout);
+        log::info!("[BOOT] 分配 ESP 盘符:\n{}", stdout);
         
         // 等待盘符生效
         std::thread::sleep(std::time::Duration::from_millis(500));
         
         // 验证
         if Path::new("S:\\").exists() {
-            println!("[BOOT] ESP 已挂载到 S:");
+            log::info!("[BOOT] ESP 已挂载到 S:");
             Ok("S:".to_string())
         } else {
             anyhow::bail!("{}", tr!("ESP 盘符分配失败"))
@@ -163,21 +163,21 @@ assign letter=S
 
     /// 查找并挂载 EFI 系统分区（旧方法，作为备选）
     pub fn find_and_mount_esp(&self) -> Result<String> {
-        println!("[BOOT] 查找 EFI 系统分区...");
+        log::info!("[BOOT] 查找 EFI 系统分区...");
         
         // 方法1: 检查 S: 是否已经是 ESP
         if Path::new("S:\\EFI").exists() {
-            println!("[BOOT] S: 已经是 ESP");
+            log::info!("[BOOT] S: 已经是 ESP");
             return Ok("S:".to_string());
         }
         
         // 方法2: 使用 mountvol /s 挂载 ESP 到 S:
-        println!("[BOOT] 尝试使用 mountvol /s 挂载 ESP");
+        log::info!("[BOOT] 尝试使用 mountvol /s 挂载 ESP");
         let output = create_command("mountvol").args(["S:", "/s"]).output();
         if output.is_ok() {
             std::thread::sleep(std::time::Duration::from_millis(500));
             if Path::new("S:\\").exists() {
-                println!("[BOOT] ESP 已通过 mountvol 挂载到 S:");
+                log::info!("[BOOT] ESP 已通过 mountvol 挂载到 S:");
                 return Ok("S:".to_string());
             }
         }
@@ -188,7 +188,7 @@ assign letter=S
 
     /// 使用 diskpart 查找任意磁盘上的 ESP
     fn find_esp_with_diskpart(&self) -> Result<String> {
-        println!("[BOOT] 使用 diskpart 查找 ESP");
+        log::info!("[BOOT] 使用 diskpart 查找 ESP");
         
         // 遍历磁盘0-3
         for disk in 0..4 {
@@ -231,7 +231,7 @@ assign letter=S
                                     std::thread::sleep(std::time::Duration::from_millis(500));
                                     
                                     if Path::new("S:\\").exists() {
-                                        println!("[BOOT] 找到 ESP: 磁盘 {} 分区 {}", disk, part_num);
+                                        log::info!("[BOOT] 找到 ESP: 磁盘 {} 分区 {}", disk, part_num);
                                         return Ok("S:".to_string());
                                     }
                                 }
@@ -290,9 +290,9 @@ assign letter=S
     pub fn repair_boot_advanced(&self, windows_partition: &str, use_uefi: bool) -> Result<()> {
         let windows_path = format!("{}\\Windows", windows_partition);
         
-        println!("[BOOT] ========== 修复引导 ==========");
-        println!("[BOOT] Windows 路径: {}", windows_path);
-        println!("[BOOT] 引导模式: {}", if use_uefi { "UEFI" } else { "Legacy/BIOS" });
+        log::info!("[BOOT] ========== 修复引导 ==========");
+        log::info!("[BOOT] Windows 路径: {}", windows_path);
+        log::info!("[BOOT] 引导模式: {}", if use_uefi { "UEFI" } else { "Legacy/BIOS" });
 
         // 验证 Windows 目录存在
         if !Path::new(&windows_path).exists() {
@@ -305,7 +305,7 @@ assign letter=S
             crate::core::app_config::AppConfig::load().enable_advanced_options;
         let repair_script = get_bin_dir().join("repair_boot.txt");
         if allow_custom_repair && repair_script.exists() {
-            println!("[BOOT] 检测到自定义修复引导脚本: {}", repair_script.display());
+            log::info!("[BOOT] 检测到自定义修复引导脚本: {}", repair_script.display());
             let esp = if use_uefi {
                 self.find_esp_on_same_disk(windows_partition)
                     .or_else(|_| self.find_and_mount_esp())
@@ -321,16 +321,16 @@ assign letter=S
                 esp.as_deref(),
             ) {
                 Ok(out) => {
-                    println!("[BOOT] 自定义修复引导脚本执行完成:\n{}", out);
+                    log::info!("[BOOT] 自定义修复引导脚本执行完成:\n{}", out);
                     return Ok(());
                 }
-                Err(e) => println!("[BOOT] 自定义修复引导脚本失败，回退默认逻辑: {}", e),
+                Err(e) => log::warn!("[BOOT] 自定义修复引导脚本失败，回退默认逻辑: {}", e),
             }
         }
 
         if use_uefi {
             // UEFI 模式：需要找到并挂载 ESP 分区
-            println!("[BOOT] UEFI 模式：查找 ESP 分区");
+            log::info!("[BOOT] UEFI 模式：查找 ESP 分区");
             
             // 首先尝试在同一磁盘上查找 ESP
             let esp_result = self.find_esp_on_same_disk(windows_partition)
@@ -338,7 +338,7 @@ assign letter=S
             
             match esp_result {
                 Ok(esp_letter) => {
-                    println!("[BOOT] ESP 分区: {}", esp_letter);
+                    log::info!("[BOOT] ESP 分区: {}", esp_letter);
                     
                     // 确保 EFI 目录存在
                     let efi_ms_dir = format!("{}\\EFI\\Microsoft", esp_letter);
@@ -350,7 +350,7 @@ assign letter=S
                     
                     // 使用 bcdboot 写入 UEFI 引导文件
                     // bcdboot C:\Windows /s S: /f UEFI /l zh-cn
-                    println!("[BOOT] 执行: bcdboot {} /s {} /f UEFI /l zh-cn", windows_path, esp_letter);
+                    log::info!("[BOOT] 执行: bcdboot {} /s {} /f UEFI /l zh-cn", windows_path, esp_letter);
                     let output = create_command(&self.bcdboot_path)
                         .args([
                             &windows_path,
@@ -363,12 +363,12 @@ assign letter=S
                     let stdout = gbk_to_utf8(&output.stdout);
                     let stderr = gbk_to_utf8(&output.stderr);
                     
-                    println!("[BOOT] bcdboot stdout: {}", stdout);
-                    println!("[BOOT] bcdboot stderr: {}", stderr);
-                    
+                    log::info!("[BOOT] bcdboot stdout: {}", stdout);
+                    log::info!("[BOOT] bcdboot stderr: {}", stderr);
+
                     if !output.status.success() {
                         // 尝试使用 ALL 参数（同时创建 UEFI 和 BIOS 引导）
-                        println!("[BOOT] 重试：使用 ALL 模式");
+                        log::info!("[BOOT] 重试：使用 ALL 模式");
                         let output = create_command(&self.bcdboot_path)
                             .args([
                                 &windows_path,
@@ -380,12 +380,12 @@ assign letter=S
                         
                         let stdout = gbk_to_utf8(&output.stdout);
                         let stderr = gbk_to_utf8(&output.stderr);
-                        println!("[BOOT] bcdboot (ALL) stdout: {}", stdout);
-                        println!("[BOOT] bcdboot (ALL) stderr: {}", stderr);
-                        
+                        log::info!("[BOOT] bcdboot (ALL) stdout: {}", stdout);
+                        log::info!("[BOOT] bcdboot (ALL) stderr: {}", stderr);
+
                         if !output.status.success() {
                             // 最后尝试不指定 /f 参数
-                            println!("[BOOT] 重试：不指定引导类型");
+                            log::info!("[BOOT] 重试：不指定引导类型");
                             let output = create_command(&self.bcdboot_path)
                                 .args([
                                     &windows_path,
@@ -406,25 +406,25 @@ assign letter=S
                     let bootx64 = format!("{}\\EFI\\Boot\\bootx64.efi", esp_letter);
                     
                     if Path::new(&bootmgfw).exists() {
-                        println!("[BOOT] 引导文件已创建: {}", bootmgfw);
+                        log::info!("[BOOT] 引导文件已创建: {}", bootmgfw);
                     } else {
-                        println!("[BOOT] 警告: 未找到 bootmgfw.efi");
+                        log::warn!("[BOOT] 警告: 未找到 bootmgfw.efi");
                     }
                     
                     if Path::new(&bootx64).exists() {
-                        println!("[BOOT] 引导文件已创建: {}", bootx64);
+                        log::info!("[BOOT] 引导文件已创建: {}", bootx64);
                     } else {
                         // 复制 bootmgfw.efi 到 bootx64.efi
                         if Path::new(&bootmgfw).exists() {
                             let _ = std::fs::copy(&bootmgfw, &bootx64);
-                            println!("[BOOT] 已复制 bootmgfw.efi -> bootx64.efi");
+                            log::info!("[BOOT] 已复制 bootmgfw.efi -> bootx64.efi");
                         }
                     }
                     
-                    println!("[BOOT] UEFI 引导修复成功");
+                    log::info!("[BOOT] UEFI 引导修复成功");
                 }
                 Err(e) => {
-                    println!("[BOOT] 查找 ESP 失败: {}，尝试默认方式", e);
+                    log::warn!("[BOOT] 查找 ESP 失败: {}，尝试默认方式", e);
                     
                     // 尝试默认方式（让 bcdboot 自动处理）
                     let output = create_command(&self.bcdboot_path)
@@ -433,8 +433,8 @@ assign letter=S
                     
                     let stdout = gbk_to_utf8(&output.stdout);
                     let stderr = gbk_to_utf8(&output.stderr);
-                    println!("[BOOT] bcdboot (auto) stdout: {}", stdout);
-                    println!("[BOOT] bcdboot (auto) stderr: {}", stderr);
+                    log::info!("[BOOT] bcdboot (auto) stdout: {}", stdout);
+                    log::info!("[BOOT] bcdboot (auto) stderr: {}", stderr);
                     
                     if !output.status.success() {
                         anyhow::bail!("{}", tr!("引导修复失败: {}", stderr));
@@ -443,20 +443,20 @@ assign letter=S
             }
         } else {
             // Legacy/BIOS 模式
-            println!("[BOOT] Legacy 模式：写入 MBR 引导");
+            log::info!("[BOOT] Legacy 模式：写入 MBR 引导");
             
             // 使用 bootsect 写入引导扇区
             let bootsect_path = get_bin_dir().join("bootsect.exe");
             if bootsect_path.exists() {
-                println!("[BOOT] 使用 bootsect 写入引导扇区");
+                log::info!("[BOOT] 使用 bootsect 写入引导扇区");
                 let output = create_command(&bootsect_path)
                     .args(["/nt60", windows_partition, "/mbr"])
                     .output()?;
                 
                 let stdout = gbk_to_utf8(&output.stdout);
                 let stderr = gbk_to_utf8(&output.stderr);
-                println!("[BOOT] bootsect stdout: {}", stdout);
-                println!("[BOOT] bootsect stderr: {}", stderr);
+                log::info!("[BOOT] bootsect stdout: {}", stdout);
+                log::info!("[BOOT] bootsect stderr: {}", stderr);
             }
             
             // bcdboot C:\Windows /f BIOS /l zh-cn
@@ -471,9 +471,9 @@ assign letter=S
             let stdout = gbk_to_utf8(&output.stdout);
             let stderr = gbk_to_utf8(&output.stderr);
             
-            println!("[BOOT] bcdboot stdout: {}", stdout);
-            println!("[BOOT] bcdboot stderr: {}", stderr);
-            
+            log::info!("[BOOT] bcdboot stdout: {}", stdout);
+            log::info!("[BOOT] bcdboot stderr: {}", stderr);
+
             if !output.status.success() {
                 // 尝试不指定 /f 参数
                 let output = create_command(&self.bcdboot_path)
@@ -486,10 +486,10 @@ assign letter=S
                 }
             }
             
-            println!("[BOOT] Legacy 引导修复成功");
+            log::info!("[BOOT] Legacy 引导修复成功");
         }
 
-        println!("[BOOT] ========== 引导修复完成 ==========");
+        log::info!("[BOOT] ========== 引导修复完成 ==========");
         Ok(())
     }
 
@@ -500,10 +500,10 @@ assign letter=S
 
     /// 为已释放的 XP/2003 系统写入引导（ntldr/boot.ini + MBR，仅 Legacy）。
     pub fn write_xp_boot(&self, windows_partition: &str) -> Result<()> {
-        println!("[BOOT] ========== 写入 XP 引导 ==========");
+        log::info!("[BOOT] ========== 写入 XP 引导 ==========");
         match lr_core::boot::write_xp_boot(&get_bin_dir(), windows_partition) {
             Ok(out) => {
-                println!("[BOOT] XP 引导写入完成:\n{}", out);
+                log::info!("[BOOT] XP 引导写入完成:\n{}", out);
                 Ok(())
             }
             Err(e) => anyhow::bail!("{}", tr!("XP 引导写入失败: {}", e)),
@@ -515,19 +515,19 @@ assign letter=S
     /// 查找同盘 ESP 并挂载，再复刻社区方案写 UEFI 引导。映像若不含 UEFI 引导文件，返回 Err
     /// 让调用方回退 Legacy。
     pub fn write_xp_uefi_gpt_boot(&self, windows_partition: &str) -> Result<()> {
-        println!("[BOOT] ========== 写入 XP UEFI/GPT 引导 ==========");
+        log::info!("[BOOT] ========== 写入 XP UEFI/GPT 引导 ==========");
         let esp = self
             .find_esp_on_same_disk(windows_partition)
             .or_else(|_| self.find_and_mount_esp())
             .map_err(|e| anyhow::anyhow!("{}", tr!("未找到 ESP，无法写 UEFI 引导: {}", e)))?;
-        println!("[BOOT] 使用 ESP: {}", esp);
+        log::info!("[BOOT] 使用 ESP: {}", esp);
         match lr_core::xp::write_xp_uefi_gpt_boot(
             windows_partition,
             &esp,
             Path::new(&self.bcdedit_path),
         ) {
             Ok(out) => {
-                println!("[BOOT] XP UEFI 引导写入完成:\n{}", out);
+                log::info!("[BOOT] XP UEFI 引导写入完成:\n{}", out);
                 Ok(())
             }
             Err(e) => anyhow::bail!("{}", tr!("XP UEFI 引导写入失败: {}", e)),

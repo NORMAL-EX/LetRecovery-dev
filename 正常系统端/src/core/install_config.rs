@@ -248,7 +248,7 @@ impl ConfigFileManager {
             std::fs::copy(&config.custom_unattend_path, &dst)
                 .with_context(|| tr!("复制自定义无人值守文件失败: {}", config.custom_unattend_path))?;
             config.custom_unattend_path = CUSTOM_UNATTEND_NAME.to_string();
-            println!("[CONFIG] 已复制自定义无人值守文件 -> {}", dst);
+            log::info!("[CONFIG] 已复制自定义无人值守文件 -> {}", dst);
         }
 
         // 暂存 diskpart 脚本到数据目录，供重启进 PE 后执行（程序目录\diskpart\ -> 数据目录\diskpart\）
@@ -257,12 +257,12 @@ impl ConfigFileManager {
             let dst = format!("{}\\diskpart", data_dir);
             if src.exists() {
                 if let Err(e) = copy_dir_recursive(&src, std::path::Path::new(&dst)) {
-                    println!("[CONFIG] 暂存 diskpart 脚本失败: {}", e);
+                    log::warn!("[CONFIG] 暂存 diskpart 脚本失败: {}", e);
                 } else {
-                    println!("[CONFIG] 已暂存 diskpart 脚本 -> {}", dst);
+                    log::info!("[CONFIG] 已暂存 diskpart 脚本 -> {}", dst);
                 }
             } else {
-                println!("[CONFIG] 程序目录无 diskpart 文件夹，跳过暂存: {}", src.display());
+                log::info!("[CONFIG] 程序目录无 diskpart 文件夹，跳过暂存: {}", src.display());
             }
         }
 
@@ -272,8 +272,8 @@ impl ConfigFileManager {
         std::fs::write(&config_path, &content)
             .context(tr!("写入安装配置文件失败"))?;
 
-        println!("[CONFIG] 安装配置已写入: {}", config_path);
-        println!("[CONFIG] 安装标记已写入: {}", marker_path);
+        log::info!("[CONFIG] 安装配置已写入: {}", config_path);
+        log::info!("[CONFIG] 安装标记已写入: {}", marker_path);
 
         Ok(())
     }
@@ -299,8 +299,8 @@ impl ConfigFileManager {
         );
         std::fs::write(&config_path, &content).context(tr!("写入扩容配置文件失败"))?;
 
-        println!("[CONFIG] 扩容配置已写入: {}", config_path);
-        println!("[CONFIG] 扩容标记已写入: {}", marker_path);
+        log::info!("[CONFIG] 扩容配置已写入: {}", config_path);
+        log::info!("[CONFIG] 扩容标记已写入: {}", marker_path);
         Ok(())
     }
 
@@ -326,8 +326,8 @@ impl ConfigFileManager {
         std::fs::write(&config_path, &content)
             .context(tr!("写入备份配置文件失败"))?;
 
-        println!("[CONFIG] 备份配置已写入: {}", config_path);
-        println!("[CONFIG] 备份标记已写入: {}", marker_path);
+        log::info!("[CONFIG] 备份配置已写入: {}", config_path);
+        log::info!("[CONFIG] 备份标记已写入: {}", marker_path);
 
         Ok(())
     }
@@ -374,14 +374,14 @@ impl ConfigFileManager {
             let marker_path = format!("{}:\\{}", c, Self::AUTO_CREATED_PARTITION_MARKER);
             
             if Path::new(&marker_path).exists() {
-                println!("[CONFIG] 发现自动创建的分区: {}:", c);
+                log::info!("[CONFIG] 发现自动创建的分区: {}:", c);
                 
                 // 尝试删除分区
                 if let Ok(_) = crate::core::disk::DiskManager::delete_auto_created_partition(c) {
                     cleaned.push(c);
-                    println!("[CONFIG] 已清理自动创建的分区: {}:", c);
+                    log::info!("[CONFIG] 已清理自动创建的分区: {}:", c);
                 } else {
-                    println!("[CONFIG] 清理自动创建的分区失败: {}:", c);
+                    log::warn!("[CONFIG] 清理自动创建的分区失败: {}:", c);
                 }
             }
         }

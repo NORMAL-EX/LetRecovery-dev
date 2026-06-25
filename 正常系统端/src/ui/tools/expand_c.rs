@@ -430,7 +430,7 @@ impl App {
             let (pe_exists, _) = crate::core::pe::PeManager::check_pe_exists(&pe.filename);
             if !pe_exists {
                 // PE 不存在，先下载 PE，下载完成后继续扩容交接
-                println!("[EXPAND] PE文件不存在，开始下载: {}", pe.filename);
+                log::info!("[EXPAND] PE文件不存在，开始下载: {}", pe.filename);
                 self.pending_download_url = Some(pe.download_url.clone());
                 self.pending_download_filename = Some(pe.filename.clone());
                 self.pending_pe_md5 = pe.md5.clone();
@@ -452,7 +452,7 @@ impl App {
 
     /// 执行扩容交接：写配置 + 安装 PE 引导 + 重启进入 PE
     pub fn start_expand_pe_handoff(&mut self) {
-        println!("[EXPAND PE] ========== 开始扩容PE准备 ==========");
+        log::info!("[EXPAND PE] ========== 开始扩容PE准备 ==========");
 
         // 取消下载页面残留状态（如果是下载后进来的）
         self.show_expand_c_dialog = true;
@@ -497,15 +497,15 @@ impl App {
             wim_engine: lr_core::active_engine().as_u8(),
         };
 
-        println!(
+        log::info!(
             "[EXPAND PE] 写入扩容配置: target=C:, target_size_mb={}, wim_engine={}",
             cfg.target_size_mb, cfg.wim_engine
         );
 
         match ConfigFileManager::write_expand_config("C:", &data_partition, &cfg) {
-            Ok(_) => println!("[EXPAND PE] 扩容配置写入成功"),
+            Ok(_) => log::info!("[EXPAND PE] 扩容配置写入成功"),
             Err(e) => {
-                println!("[EXPAND PE] 扩容配置写入失败: {}", e);
+                log::error!("[EXPAND PE] 扩容配置写入失败: {}", e);
                 self.expand_c_state.executing = false;
                 self.expand_c_state.message = tr!("写入扩容配置失败: {}", e);
                 return;
@@ -513,12 +513,12 @@ impl App {
         }
 
         // 安装 PE 引导
-        println!("[EXPAND PE] 安装PE引导: {}", pe_path);
+        log::info!("[EXPAND PE] 安装PE引导: {}", pe_path);
         let pe_manager = crate::core::pe::PeManager::new();
         match pe_manager.boot_to_pe(&pe_path, "LetRecovery PE") {
-            Ok(_) => println!("[EXPAND PE] PE引导安装成功"),
+            Ok(_) => log::info!("[EXPAND PE] PE引导安装成功"),
             Err(e) => {
-                println!("[EXPAND PE] PE引导安装失败: {}", e);
+                log::error!("[EXPAND PE] PE引导安装失败: {}", e);
                 self.expand_c_state.executing = false;
                 self.expand_c_state.message = tr!("安装 PE 引导失败: {}", e);
                 return;
@@ -526,7 +526,7 @@ impl App {
         }
 
         // 重启进入 PE
-        println!("[EXPAND PE] 执行重启命令");
+        log::info!("[EXPAND PE] 执行重启命令");
         let _ = crate::utils::cmd::create_command("shutdown")
             .args([
                 "/r",
@@ -538,7 +538,7 @@ impl App {
             .spawn();
 
         self.expand_c_state.message = tr!("准备完成，即将重启进入 WinPE...");
-        println!("[EXPAND PE] ========== 扩容PE准备结束 ==========");
+        log::info!("[EXPAND PE] ========== 扩容PE准备结束 ==========");
     }
 }
 
@@ -614,7 +614,7 @@ fn compute_expand_c_info() -> ExpandCLoadResult {
             if let Some(letter) = next.drive_letter {
                 if let Ok(mb) = query_shrink_max(letter) {
                     next_shrinkable_mb = mb;
-                    println!("[EXPAND] 后方分区 {}: 可让出 {} MB（需移动数据，Case 2）", letter, mb);
+                    log::info!("[EXPAND] 后方分区 {}: 可让出 {} MB（需移动数据，Case 2）", letter, mb);
                 }
             }
         }

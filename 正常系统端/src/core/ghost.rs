@@ -264,12 +264,12 @@ impl Ghost {
 
         let target_partition = format!("{}:{}", disk_number, partition_number);
         
-        println!("[GHOST] ========================================");
-        println!("[GHOST] 开始恢复 GHO 镜像");
-        println!("[GHOST] 镜像文件: {}", gho_file);
-        println!("[GHOST] 目标分区: {} (磁盘 {} 分区 {})", target_partition, disk_number, partition_number);
-        println!("[GHOST] Ghost 路径: {}", self.ghost_path);
-        println!("[GHOST] ========================================");
+        log::info!("[GHOST] ========================================");
+        log::info!("[GHOST] 开始恢复 GHO 镜像");
+        log::info!("[GHOST] 镜像文件: {}", gho_file);
+        log::info!("[GHOST] 目标分区: {} (磁盘 {} 分区 {})", target_partition, disk_number, partition_number);
+        log::info!("[GHOST] Ghost 路径: {}", self.ghost_path);
+        log::info!("[GHOST] ========================================");
 
         let image_info = self.get_image_info(gho_file).ok();
         let estimated_size = image_info.as_ref().map(|i| i.original_size).unwrap_or(0);
@@ -286,7 +286,7 @@ impl Ghost {
             gho_file, target_partition
         );
 
-        println!("[GHOST] 执行命令: {} {} -sure -fx -batch", self.ghost_path, clone_param);
+        log::info!("[GHOST] 执行命令: {} {} -sure -fx -batch", self.ghost_path, clone_param);
 
         let mut child = create_command(&self.ghost_path)
             .args([&clone_param, "-sure", "-fx", "-batch"])
@@ -318,7 +318,7 @@ impl Ghost {
             format!("{}:", letter)
         };
 
-        println!("[GHOST] 解析目标盘符: {}", letter);
+        log::info!("[GHOST] 解析目标盘符: {}", letter);
 
         let partition = partitions
             .iter()
@@ -327,7 +327,7 @@ impl Ghost {
                 tr!("找不到分区 {}", letter)
             ))?;
 
-        println!("[GHOST] 找到分区信息: letter={}, disk={:?}, partition={:?}",
+        log::info!("[GHOST] 找到分区信息: letter={}, disk={:?}, partition={:?}",
             partition.letter, partition.disk_number, partition.partition_number);
 
         let disk_number = partition.disk_number.ok_or_else(|| {
@@ -341,9 +341,9 @@ impl Ghost {
         let ghost_disk = disk_number + 1;
         let ghost_partition = partition_number;
 
-        println!("[GHOST] 转换分区格式:");
-        println!("[GHOST]   Windows: Disk {} Partition {}", disk_number, partition_number);
-        println!("[GHOST]   Ghost:   {}:{}", ghost_disk, ghost_partition);
+        log::info!("[GHOST] 转换分区格式:");
+        log::info!("[GHOST]   Windows: Disk {} Partition {}", disk_number, partition_number);
+        log::info!("[GHOST]   Ghost:   {}:{}", ghost_disk, ghost_partition);
 
         self.restore_image(gho_file, ghost_disk, ghost_partition, progress_tx)
     }
@@ -377,7 +377,7 @@ impl Ghost {
                 let reader = BufReader::new(stderr);
                 for line in reader.lines().map_while(Result::ok) {
                     let line_utf8 = gbk_to_utf8(line.as_bytes());
-                    println!("[GHOST STDERR] {}", line_utf8);
+                    log::debug!("[GHOST STDERR] {}", line_utf8);
                     if let Ok(mut content) = stderr_content_clone.lock() {
                         content.push_str(&line_utf8);
                         content.push('\n');
@@ -397,20 +397,20 @@ impl Ghost {
         };
         let estimated_duration = Duration::from_secs(estimated_seconds);
         
-        println!("[GHOST] 预计恢复时间: {} 秒", estimated_seconds);
+        log::info!("[GHOST] 预计恢复时间: {} 秒", estimated_seconds);
         
         let mut last_progress: u8 = 0;
 
         loop {
             if cancel_flag.load(Ordering::SeqCst) {
-                println!("[GHOST] 收到取消请求，终止进程");
+                log::info!("[GHOST] 收到取消请求，终止进程");
                 let _ = child.kill();
                 return Err(GhostError::Cancelled.into());
             }
 
             match child.try_wait() {
                 Ok(Some(status)) => {
-                    println!("[GHOST] 进程退出，状态码: {:?}", status.code());
+                    log::info!("[GHOST] 进程退出，状态码: {:?}", status.code());
                     
                     if let Some(handle) = stdout_handle {
                         let _ = handle.join();
@@ -432,9 +432,9 @@ impl Ghost {
                     }
 
                     if status.success() || status.code() == Some(0) {
-                        println!("[GHOST] ========================================");
-                        println!("[GHOST] 镜像恢复成功!");
-                        println!("[GHOST] ========================================");
+                        log::info!("[GHOST] ========================================");
+                        log::info!("[GHOST] 镜像恢复成功!");
+                        log::info!("[GHOST] ========================================");
                         return Ok(());
                     } else {
                         let error_msg = if stderr_output.trim().is_empty() {
@@ -442,7 +442,7 @@ impl Ghost {
                         } else {
                             tr!("Ghost 错误: {}", stderr_output.trim())
                         };
-                        println!("[GHOST] 恢复失败: {}", error_msg);
+                        log::error!("[GHOST] 恢复失败: {}", error_msg);
                         return Err(GhostError::ExecutionFailed(error_msg).into());
                     }
                 }
@@ -453,7 +453,7 @@ impl Ghost {
                     
                     if progress > last_progress {
                         last_progress = progress;
-                        println!("[GHOST] 进度: {}% (已运行 {:.0} 秒)", progress, elapsed.as_secs_f64());
+                        log::info!("[GHOST] 进度: {}% (已运行 {:.0} 秒)", progress, elapsed.as_secs_f64());
                         
                         if let Some(ref tx) = progress_tx {
                             let _ = tx.send(DismProgress {
@@ -486,7 +486,7 @@ impl Ghost {
 
             if let Ok(line) = line {
                 let line_utf8 = gbk_to_utf8(line.as_bytes());
-                println!("[GHOST STDOUT] {}", line_utf8);
+                log::debug!("[GHOST STDOUT] {}", line_utf8);
                 lines.push(line_utf8);
             }
         }
@@ -522,12 +522,12 @@ impl Ghost {
 
         let source_partition = format!("{}:{}", disk_number, partition_number);
         
-        println!("[GHOST] ========================================");
-        println!("[GHOST] 开始创建 GHO 镜像");
-        println!("[GHOST] 源分区: {} (磁盘 {} 分区 {})", source_partition, disk_number, partition_number);
-        println!("[GHOST] 输出文件: {}", gho_file);
-        println!("[GHOST] 压缩级别: {}", compression);
-        println!("[GHOST] ========================================");
+        log::info!("[GHOST] ========================================");
+        log::info!("[GHOST] 开始创建 GHO 镜像");
+        log::info!("[GHOST] 源分区: {} (磁盘 {} 分区 {})", source_partition, disk_number, partition_number);
+        log::info!("[GHOST] 输出文件: {}", gho_file);
+        log::info!("[GHOST] 压缩级别: {}", compression);
+        log::info!("[GHOST] ========================================");
 
         if let Some(ref tx) = progress_tx {
             let _ = tx.send(DismProgress {

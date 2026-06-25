@@ -69,7 +69,7 @@ struct CliInstallSpec {
 
 /// 入口：`--install --config <json> [--advanced <json>]`。
 pub fn run_cli_install(config_path: &str, advanced_path: Option<&str>) -> Result<()> {
-    println!("[CLI INSTALL] ========== 命令行无人值守安装 ==========");
+    log::info!("[CLI INSTALL] ========== 命令行无人值守安装 ==========");
 
     // 1) 安装配置
     let spec: CliInstallSpec = {
@@ -106,9 +106,9 @@ pub fn run_cli_install(config_path: &str, advanced_path: Option<&str>) -> Result
         l.ends_with(".gho") || l.ends_with(".ghs")
     });
 
-    println!("[CLI INSTALL] 目标分区: {}", spec.target_partition);
-    println!("[CLI INSTALL] 镜像: {}", spec.image_path);
-    println!("[CLI INSTALL] PE: {}", spec.pe_path);
+    log::info!("[CLI INSTALL] 目标分区: {}", spec.target_partition);
+    log::info!("[CLI INSTALL] 镜像: {}", spec.image_path);
+    log::info!("[CLI INSTALL] PE: {}", spec.pe_path);
 
     // 4) 数据分区（暂存配置 + 镜像）
     let image_size = std::fs::metadata(&spec.image_path).map(|m| m.len()).unwrap_or(0);
@@ -128,7 +128,7 @@ pub fn run_cli_install(config_path: &str, advanced_path: Option<&str>) -> Result
             Err(e) => return Err(anyhow!("{}", tr!("查找数据分区失败: {}", e))),
         },
     };
-    println!("[CLI INSTALL] 数据分区: {}", data_partition);
+    log::info!("[CLI INSTALL] 数据分区: {}", data_partition);
 
     // 5) 把镜像放进数据目录（InstallConfig.image_path 存相对文件名）
     let data_dir = ConfigFileManager::get_data_dir(&data_partition);
@@ -140,9 +140,9 @@ pub fn run_cli_install(config_path: &str, advanced_path: Option<&str>) -> Result
         .ok_or_else(|| anyhow!("{}", tr!("无法取得镜像文件名: {}", spec.image_path)))?;
     let staged_image = format!("{}\\{}", data_dir, image_filename);
     if same_file(&staged_image, &spec.image_path) {
-        println!("[CLI INSTALL] 镜像已在数据目录，跳过拷贝");
+        log::info!("[CLI INSTALL] 镜像已在数据目录，跳过拷贝");
     } else {
-        println!(
+        log::info!(
             "[CLI INSTALL] 拷贝镜像到数据目录: {} -> {}",
             spec.image_path, staged_image
         );
@@ -209,16 +209,16 @@ pub fn run_cli_install(config_path: &str, advanced_path: Option<&str>) -> Result
         .boot_to_pe(&spec.pe_path, &display_name)
         .map_err(|e| anyhow!("{}", tr!("设置 PE 引导失败: {}", e)))?;
 
-    println!("[CLI INSTALL] 准备完成。");
+    log::info!("[CLI INSTALL] 准备完成。");
 
     // 9) 重启（如启用）
     if spec.auto_reboot {
-        println!("[CLI INSTALL] 即将重启进入 PE 完成安装...");
+        log::info!("[CLI INSTALL] 即将重启进入 PE 完成安装...");
         let _ = crate::utils::cmd::create_command("shutdown")
             .args(["/r", "/t", "5", "/c", "LetRecovery 即将重启进入 PE 完成系统安装..."])
             .spawn();
     } else {
-        println!("[CLI INSTALL] 未启用自动重启，请手动重启进入 PE 完成安装。");
+        log::info!("[CLI INSTALL] 未启用自动重启，请手动重启进入 PE 完成安装。");
     }
 
     Ok(())

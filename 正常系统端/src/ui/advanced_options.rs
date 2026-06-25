@@ -157,21 +157,21 @@ impl AdvancedOptions {
     /// 参考: https://github.com/manatails/uefiseven
     pub fn apply_uefiseven_patch(&self, _target_partition: &str) -> anyhow::Result<()> {
         if !self.win7_uefi_patch {
-            println!("[UEFISEVEN] Win7 UEFI补丁未启用，跳过");
+            log::info!("[UEFISEVEN] Win7 UEFI补丁未启用，跳过");
             return Ok(());
         }
-        
-        println!("[UEFISEVEN] 开始应用 UefiSeven 补丁");
-        
+
+        log::info!("[UEFISEVEN] 开始应用 UefiSeven 补丁");
+
         // 获取 UefiSeven 源文件目录
         let uefiseven_dir = match Self::get_uefiseven_dir() {
             Some(dir) if dir.exists() => dir,
             Some(dir) => {
-                println!("[UEFISEVEN] UefiSeven 目录不存在: {}", dir.display());
+                log::error!("[UEFISEVEN] UefiSeven 目录不存在: {}", dir.display());
                 return Err(anyhow::anyhow!("UefiSeven 目录不存在: {}", dir.display()));
             }
             None => {
-                println!("[UEFISEVEN] 无法获取程序运行目录");
+                log::error!("[UEFISEVEN] 无法获取程序运行目录");
                 return Err(anyhow::anyhow!("无法获取程序运行目录"));
             }
         };
@@ -181,17 +181,17 @@ impl AdvancedOptions {
         let uefiseven_ini = uefiseven_dir.join("UefiSeven.ini");
         
         if !uefiseven_efi.exists() {
-            println!("[UEFISEVEN] UefiSeven bootx64.efi 不存在: {}", uefiseven_efi.display());
+            log::error!("[UEFISEVEN] UefiSeven bootx64.efi 不存在: {}", uefiseven_efi.display());
             return Err(anyhow::anyhow!("UefiSeven bootx64.efi 不存在"));
         }
         
         // 查找 EFI 系统分区
         let efi_partition = Self::find_efi_partition()?;
-        println!("[UEFISEVEN] 找到 EFI 分区: {}", efi_partition);
+        log::info!("[UEFISEVEN] 找到 EFI 分区: {}", efi_partition);
         
         // 确保 EFI 分区已挂载
         let efi_mount_point = Self::ensure_efi_mounted(&efi_partition)?;
-        println!("[UEFISEVEN] EFI 分区挂载点: {}", efi_mount_point);
+        log::info!("[UEFISEVEN] EFI 分区挂载点: {}", efi_mount_point);
         
         // Microsoft Boot 目录
         let ms_boot_dir = format!("{}\\EFI\\Microsoft\\Boot", efi_mount_point);
@@ -202,29 +202,29 @@ impl AdvancedOptions {
         
         // 检查原始 bootmgfw.efi 是否存在
         if !std::path::Path::new(&bootmgfw_path).exists() {
-            println!("[UEFISEVEN] bootmgfw.efi 不存在: {}", bootmgfw_path);
+            log::error!("[UEFISEVEN] bootmgfw.efi 不存在: {}", bootmgfw_path);
             return Err(anyhow::anyhow!("bootmgfw.efi 不存在，请确保引导修复已完成"));
         }
         
         // 备份原始 bootmgfw.efi（如果尚未备份）
         if !std::path::Path::new(&bootmgfw_original).exists() {
-            println!("[UEFISEVEN] 备份原始 bootmgfw.efi 到 bootmgfw.original.efi");
+            log::info!("[UEFISEVEN] 备份原始 bootmgfw.efi 到 bootmgfw.original.efi");
             std::fs::copy(&bootmgfw_path, &bootmgfw_original)?;
         } else {
-            println!("[UEFISEVEN] bootmgfw.original.efi 已存在，跳过备份");
+            log::info!("[UEFISEVEN] bootmgfw.original.efi 已存在，跳过备份");
         }
         
         // 复制 UefiSeven 到 bootmgfw.efi（替换原来的）
-        println!("[UEFISEVEN] 部署 UefiSeven bootx64.efi -> bootmgfw.efi");
+        log::info!("[UEFISEVEN] 部署 UefiSeven bootx64.efi -> bootmgfw.efi");
         std::fs::copy(&uefiseven_efi, &uefiseven_target)?;
         
         // 复制配置文件（如果存在）
         if uefiseven_ini.exists() {
-            println!("[UEFISEVEN] 部署 UefiSeven.ini 配置文件");
+            log::info!("[UEFISEVEN] 部署 UefiSeven.ini 配置文件");
             std::fs::copy(&uefiseven_ini, &uefiseven_ini_target)?;
         } else {
             // 创建默认配置文件
-            println!("[UEFISEVEN] 创建默认 UefiSeven.ini 配置");
+            log::info!("[UEFISEVEN] 创建默认 UefiSeven.ini 配置");
             let default_config = r#"[uefiseven]
 ; Skip any warnings and errors during boot
 skiperrors=0
@@ -236,8 +236,8 @@ log=0
             std::fs::write(&uefiseven_ini_target, default_config)?;
         }
         
-        println!("[UEFISEVEN] UefiSeven 补丁应用成功");
-        println!("[UEFISEVEN] 启动流程: UEFI -> UefiSeven -> bootmgfw.original.efi -> Windows 7");
+        log::info!("[UEFISEVEN] UefiSeven 补丁应用成功");
+        log::info!("[UEFISEVEN] 启动流程: UEFI -> UefiSeven -> bootmgfw.original.efi -> Windows 7");
         
         Ok(())
     }
@@ -487,7 +487,7 @@ log=0
     }
 
     pub fn apply_to_system(&self, target_partition: &str, is_xp: bool) -> anyhow::Result<()> {
-        println!("[ADVANCED] 开始应用高级选项到: {} (is_xp={})", target_partition, is_xp);
+        log::info!("[ADVANCED] 开始应用高级选项到: {} (is_xp={})", target_partition, is_xp);
         
         let windows_path = format!("{}\\Windows", target_partition);
         let software_hive = format!("{}\\System32\\config\\SOFTWARE", windows_path);
@@ -495,7 +495,7 @@ log=0
         let default_hive = format!("{}\\System32\\config\\DEFAULT", windows_path);
 
         // 加载离线注册表
-        println!("[ADVANCED] 加载离线注册表...");
+        log::info!("[ADVANCED] 加载离线注册表...");
         OfflineRegistry::load_hive("pc-soft", &software_hive)?;
         OfflineRegistry::load_hive("pc-sys", &system_hive)?;
         // DEFAULT 用于设置默认用户配置（如经典右键菜单）
@@ -504,13 +504,13 @@ log=0
         // 创建脚本目录（用于存放自定义脚本）
         let scripts_dir = format!("{}\\{}", target_partition, Self::SCRIPTS_DIR);
         std::fs::create_dir_all(&scripts_dir)?;
-        println!("[ADVANCED] 脚本目录: {}", scripts_dir);
+        log::info!("[ADVANCED] 脚本目录: {}", scripts_dir);
 
         // ============ 系统优化选项 ============
 
         // 1. 移除快捷方式小箭头
         if self.remove_shortcut_arrow {
-            println!("[ADVANCED] 移除快捷方式小箭头");
+            log::info!("[ADVANCED] 移除快捷方式小箭头");
             let _ = OfflineRegistry::set_string(
                 "HKLM\\pc-soft\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Shell Icons",
                 "29",
@@ -520,7 +520,7 @@ log=0
 
         // 2. Win11恢复经典右键菜单
         if self.restore_classic_context_menu {
-            println!("[ADVANCED] 恢复经典右键菜单");
+            log::info!("[ADVANCED] 恢复经典右键菜单");
             // 在 DEFAULT hive 中设置（影响所有新用户）
             if default_loaded {
                 // 创建空的 InprocServer32 键，这会禁用新式右键菜单
@@ -547,7 +547,7 @@ log=0
 
         // 3. OOBE绕过强制联网
         if self.bypass_nro {
-            println!("[ADVANCED] 设置OOBE绕过联网");
+            log::info!("[ADVANCED] 设置OOBE绕过联网");
             let _ = OfflineRegistry::set_dword(
                 "HKLM\\pc-soft\\Microsoft\\Windows\\CurrentVersion\\OOBE",
                 "BypassNRO",
@@ -557,7 +557,7 @@ log=0
 
         // 4. 禁用Windows更新
         if self.disable_windows_update {
-            println!("[ADVANCED] 禁用Windows更新服务");
+            log::info!("[ADVANCED] 禁用Windows更新服务");
             // 禁用 Windows Update 服务
             let _ = OfflineRegistry::set_dword(
                 "HKLM\\pc-sys\\ControlSet001\\Services\\wuauserv",
@@ -580,7 +580,7 @@ log=0
 
         // 5. 禁用Windows安全中心/Defender
         if self.disable_windows_defender {
-            println!("[ADVANCED] 禁用Windows Defender");
+            log::info!("[ADVANCED] 禁用Windows Defender");
             // 禁用实时保护
             let _ = OfflineRegistry::set_dword(
                 "HKLM\\pc-soft\\Policies\\Microsoft\\Windows Defender",
@@ -612,7 +612,7 @@ log=0
 
         // 6. 禁用系统保留空间
         if self.disable_reserved_storage {
-            println!("[ADVANCED] 禁用系统保留空间");
+            log::info!("[ADVANCED] 禁用系统保留空间");
             let _ = OfflineRegistry::set_dword(
                 "HKLM\\pc-soft\\Microsoft\\Windows\\CurrentVersion\\ReserveManager",
                 "ShippedWithReserves",
@@ -627,7 +627,7 @@ log=0
 
         // 7. 禁用UAC
         if self.disable_uac {
-            println!("[ADVANCED] 禁用UAC");
+            log::info!("[ADVANCED] 禁用UAC");
             let _ = OfflineRegistry::set_dword(
                 "HKLM\\pc-soft\\Microsoft\\Windows\\CurrentVersion\\Policies\\System",
                 "EnableLUA",
@@ -642,7 +642,7 @@ log=0
 
         // 8. 禁用自动设备加密 (BitLocker)
         if self.disable_device_encryption {
-            println!("[ADVANCED] 禁用自动设备加密");
+            log::info!("[ADVANCED] 禁用自动设备加密");
             // 禁用 BitLocker 自动加密
             let _ = OfflineRegistry::set_dword(
                 "HKLM\\pc-sys\\ControlSet001\\Control\\BitLocker",
@@ -665,12 +665,12 @@ log=0
 
         // 9. 删除预装UWP应用 - 通过删除 AppxProvisioned 配置
         if self.remove_uwp_apps {
-            println!("[ADVANCED] 配置删除预装UWP应用");
+            log::info!("[ADVANCED] 配置删除预装UWP应用");
             // 创建首次登录脚本来删除UWP应用
             let remove_uwp_script = Self::generate_remove_uwp_script();
             let uwp_script_path = format!("{}\\remove_uwp.ps1", scripts_dir);
             std::fs::write(&uwp_script_path, &remove_uwp_script)?;
-            println!("[ADVANCED] UWP删除脚本已写入: {}", uwp_script_path);
+            log::info!("[ADVANCED] UWP删除脚本已写入: {}", uwp_script_path);
         }
 
         // WiFi 迁移：把抓到的 profile XML + SetupComplete.cmd 写到目标系统。
@@ -683,7 +683,7 @@ log=0
                     let xml_path = format!("{}\\LR_WiFi.xml", setup_scripts);
                     let cmd_path = format!("{}\\SetupComplete.cmd", setup_scripts);
                     if let Err(e) = std::fs::write(&xml_path, self.wifi_profile_xml.as_bytes()) {
-                        println!("[ADVANCED] 写入 WiFi 配置失败: {}", e);
+                        log::error!("[ADVANCED] 写入 WiFi 配置失败: {}", e);
                     } else {
                         use std::io::Write;
                         // 追加，避免覆盖可能已存在的 SetupComplete.cmd
@@ -696,13 +696,13 @@ log=0
                             .and_then(|mut f| f.write_all(line.as_bytes()));
                         match res {
                             Ok(_) => {
-                                println!("[ADVANCED] 已配置 WiFi 自动迁移: {}", self.wifi_ssid)
+                                log::info!("[ADVANCED] 已配置 WiFi 自动迁移: {}", self.wifi_ssid)
                             }
-                            Err(e) => println!("[ADVANCED] 写入 SetupComplete.cmd 失败: {}", e),
+                            Err(e) => log::error!("[ADVANCED] 写入 SetupComplete.cmd 失败: {}", e),
                         }
                     }
                 }
-                Err(e) => println!("[ADVANCED] 创建 Setup\\Scripts 目录失败: {}", e),
+                Err(e) => log::error!("[ADVANCED] 创建 Setup\\Scripts 目录失败: {}", e),
             }
         }
 
@@ -710,25 +710,25 @@ log=0
 
         // 10. 系统部署中运行脚本
         if self.run_script_during_deploy && !self.deploy_script_path.is_empty() {
-            println!("[ADVANCED] 复制部署脚本: {}", self.deploy_script_path);
+            log::info!("[ADVANCED] 复制部署脚本: {}", self.deploy_script_path);
             let target_path = format!("{}\\deploy.bat", scripts_dir);
             std::fs::copy(&self.deploy_script_path, &target_path)?;
-            println!("[ADVANCED] 部署脚本已复制到: {}", target_path);
+            log::info!("[ADVANCED] 部署脚本已复制到: {}", target_path);
         }
 
         // 11. 首次登录运行脚本
         if self.run_script_first_login && !self.first_login_script_path.is_empty() {
-            println!("[ADVANCED] 复制首次登录脚本: {}", self.first_login_script_path);
+            log::info!("[ADVANCED] 复制首次登录脚本: {}", self.first_login_script_path);
             let target_path = format!("{}\\firstlogon.bat", scripts_dir);
             std::fs::copy(&self.first_login_script_path, &target_path)?;
-            println!("[ADVANCED] 首次登录脚本已复制到: {}", target_path);
+            log::info!("[ADVANCED] 首次登录脚本已复制到: {}", target_path);
         }
 
         // ============ 自定义内容 ============
 
         // 12. 导入自定义驱动 - 使用 DISM 实际安装
         if self.import_custom_drivers && !self.custom_drivers_path.is_empty() {
-            println!("[ADVANCED] 导入自定义驱动: {}", self.custom_drivers_path);
+            log::info!("[ADVANCED] 导入自定义驱动: {}", self.custom_drivers_path);
             
             // 先卸载注册表，因为 DISM 可能需要独占访问
             let _ = OfflineRegistry::unload_hive("pc-soft");
@@ -741,8 +741,8 @@ log=0
             let dism = crate::core::dism::Dism::new();
             let image_path = format!("{}\\", target_partition);
             match dism.add_drivers_offline(&image_path, &self.custom_drivers_path) {
-                Ok(_) => println!("[ADVANCED] 自定义驱动导入成功"),
-                Err(e) => println!("[ADVANCED] 自定义驱动导入失败: {} (继续执行)", e),
+                Ok(_) => log::info!("[ADVANCED] 自定义驱动导入成功"),
+                Err(e) => log::error!("[ADVANCED] 自定义驱动导入失败: {} (继续执行)", e),
             }
             
             // 重新加载注册表
@@ -755,7 +755,7 @@ log=0
             let storage_drivers_dir = crate::utils::path::get_drivers_dir()
                 .join("storage_controller");
             if storage_drivers_dir.is_dir() {
-                println!(
+                log::info!(
                     "[ADVANCED] 导入磁盘控制器驱动: {}",
                     storage_drivers_dir.display()
                 );
@@ -771,15 +771,15 @@ log=0
                 let image_path = format!("{}\\", target_partition);
                 let storage_drivers_path = storage_drivers_dir.to_string_lossy().to_string();
                 match dism.add_drivers_offline(&image_path, &storage_drivers_path) {
-                    Ok(_) => println!("[ADVANCED] 磁盘控制器驱动导入成功"),
-                    Err(e) => println!("[ADVANCED] 磁盘控制器驱动导入失败: {} (继续执行)", e),
+                    Ok(_) => log::info!("[ADVANCED] 磁盘控制器驱动导入成功"),
+                    Err(e) => log::error!("[ADVANCED] 磁盘控制器驱动导入失败: {} (继续执行)", e),
                 }
 
                 // 重新加载注册表
                 let _ = OfflineRegistry::load_hive("pc-soft", &software_hive);
                 let _ = OfflineRegistry::load_hive("pc-sys", &system_hive);
             } else {
-                println!(
+                log::warn!(
                     "[ADVANCED] 未找到磁盘控制器驱动目录: {}",
                     storage_drivers_dir.display()
                 );
@@ -788,7 +788,7 @@ log=0
 
         // 14. 导入注册表文件 - 实际导入到离线注册表
         if self.import_registry_file && !self.registry_file_path.is_empty() {
-            println!("[ADVANCED] 导入注册表文件: {}", self.registry_file_path);
+            log::info!("[ADVANCED] 导入注册表文件: {}", self.registry_file_path);
             
             // 读取原始 .reg 文件
             if let Ok(reg_content) = std::fs::read_to_string(&self.registry_file_path) {
@@ -802,8 +802,8 @@ log=0
                 
                 // 导入注册表
                 match OfflineRegistry::import_reg_file(&temp_reg) {
-                    Ok(_) => println!("[ADVANCED] 注册表文件导入成功"),
-                    Err(e) => println!("[ADVANCED] 注册表文件导入失败: {} (继续执行)", e),
+                    Ok(_) => log::info!("[ADVANCED] 注册表文件导入成功"),
+                    Err(e) => log::error!("[ADVANCED] 注册表文件导入失败: {} (继续执行)", e),
                 }
                 
                 // 删除临时文件
@@ -813,23 +813,23 @@ log=0
 
         // 15. 导入自定义文件
         if self.import_custom_files && !self.custom_files_path.is_empty() {
-            println!("[ADVANCED] 导入自定义文件: {}", self.custom_files_path);
+            log::info!("[ADVANCED] 导入自定义文件: {}", self.custom_files_path);
             match Self::copy_dir_all(&self.custom_files_path, target_partition) {
-                Ok(_) => println!("[ADVANCED] 自定义文件导入成功"),
-                Err(e) => println!("[ADVANCED] 自定义文件导入失败: {} (继续执行)", e),
+                Ok(_) => log::info!("[ADVANCED] 自定义文件导入成功"),
+                Err(e) => log::error!("[ADVANCED] 自定义文件导入失败: {} (继续执行)", e),
             }
         }
 
         // 16. 自定义用户名 - 写入标记文件供无人值守使用
         if self.custom_username && !self.username.is_empty() {
-            println!("[ADVANCED] 设置自定义用户名: {}", self.username);
+            log::info!("[ADVANCED] 设置自定义用户名: {}", self.username);
             let username_file = format!("{}\\username.txt", scripts_dir);
             std::fs::write(&username_file, &self.username)?;
         }
 
         // 17. 自定义系统盘卷标 - 写入标记文件供格式化时使用
         if self.custom_volume_label && !self.volume_label.is_empty() {
-            println!("[ADVANCED] 设置系统盘卷标: {}", self.volume_label);
+            log::info!("[ADVANCED] 设置系统盘卷标: {}", self.volume_label);
             let volume_label_file = format!("{}\\volume_label.txt", scripts_dir);
             std::fs::write(&volume_label_file, &self.volume_label)?;
         }
@@ -849,11 +849,11 @@ log=0
             let usb3_path = match usb3_path {
                 Some(p) if p.exists() => p,
                 Some(p) => {
-                    println!("[ADVANCED] Win7 USB3驱动目录不存在，跳过: {}", p.to_string_lossy());
+                    log::warn!("[ADVANCED] Win7 USB3驱动目录不存在，跳过: {}", p.to_string_lossy());
                     PathBuf::new()
                 }
                 None => {
-                    println!("[ADVANCED] 无法获取 Win7 USB3驱动目录，跳过");
+                    log::warn!("[ADVANCED] 无法获取 Win7 USB3驱动目录，跳过");
                     PathBuf::new()
                 }
             };
@@ -861,7 +861,7 @@ log=0
             if usb3_path.as_os_str().is_empty() {
                 // 目录不可用，直接跳过
             } else {
-                println!("[ADVANCED] Win7: 处理USB3驱动目录: {}", usb3_path.to_string_lossy());
+                log::info!("[ADVANCED] Win7: 处理USB3驱动目录: {}", usb3_path.to_string_lossy());
                 
                 // 先卸载注册表
                 let _ = OfflineRegistry::unload_hive("pc-soft");
@@ -876,8 +876,8 @@ log=0
                 let dism = crate::core::dism::Dism::new();
                 let image_path = format!("{}\\", target_partition);
                 match dism.add_drivers_offline(&image_path, &processed_path.to_string_lossy()) {
-                    Ok(_) => println!("[ADVANCED] Win7 USB3驱动注入成功"),
-                    Err(e) => println!("[ADVANCED] Win7 USB3驱动注入失败: {} (继续执行)", e),
+                    Ok(_) => log::info!("[ADVANCED] Win7 USB3驱动注入成功"),
+                    Err(e) => log::error!("[ADVANCED] Win7 USB3驱动注入失败: {} (继续执行)", e),
                 }
                 
                 // 清理临时目录（如果使用了临时目录）
@@ -904,11 +904,11 @@ log=0
             let nvme_path = match nvme_path {
                 Some(p) if p.exists() => p,
                 Some(p) => {
-                    println!("[ADVANCED] Win7 NVMe驱动目录不存在，跳过: {}", p.to_string_lossy());
+                    log::warn!("[ADVANCED] Win7 NVMe驱动目录不存在，跳过: {}", p.to_string_lossy());
                     PathBuf::new()
                 }
                 None => {
-                    println!("[ADVANCED] 无法获取 Win7 NVMe驱动目录，跳过");
+                    log::warn!("[ADVANCED] 无法获取 Win7 NVMe驱动目录，跳过");
                     PathBuf::new()
                 }
             };
@@ -916,7 +916,7 @@ log=0
             if nvme_path.as_os_str().is_empty() {
                 // 目录不可用，直接跳过
             } else {
-                println!("[ADVANCED] Win7: 处理NVMe驱动目录: {}", nvme_path.to_string_lossy());
+                log::info!("[ADVANCED] Win7: 处理NVMe驱动目录: {}", nvme_path.to_string_lossy());
                 
                 // 先卸载注册表
                 let _ = OfflineRegistry::unload_hive("pc-soft");
@@ -931,8 +931,8 @@ log=0
                 let dism = crate::core::dism::Dism::new();
                 let image_path = format!("{}\\", target_partition);
                 match dism.add_drivers_offline(&image_path, &processed_path.to_string_lossy()) {
-                    Ok(_) => println!("[ADVANCED] Win7 NVMe驱动注入成功"),
-                    Err(e) => println!("[ADVANCED] Win7 NVMe驱动注入失败: {} (继续执行)", e),
+                    Ok(_) => log::info!("[ADVANCED] Win7 NVMe驱动注入成功"),
+                    Err(e) => log::error!("[ADVANCED] Win7 NVMe驱动注入失败: {} (继续执行)", e),
                 }
                 
                 // 清理临时目录（如果使用了临时目录）
@@ -948,7 +948,7 @@ log=0
         
         // 20. Win7 修复 ACPI_BIOS_ERROR (0xA5) 蓝屏
         if self.win7_fix_acpi_bsod {
-            println!("[ADVANCED] Win7: 修复ACPI蓝屏问题");
+            log::info!("[ADVANCED] Win7: 修复ACPI蓝屏问题");
             
             // 禁用 intelppm 服务 (Intel 电源管理)
             let _ = OfflineRegistry::set_dword(
@@ -988,13 +988,13 @@ log=0
                 4,
             );
             
-            println!("[ADVANCED] Win7 ACPI蓝屏修复设置完成");
+            log::info!("[ADVANCED] Win7 ACPI蓝屏修复设置完成");
         }
 
         // 21. Win7 修复 INACCESSIBLE_BOOT_DEVICE (0x7B) 蓝屏
         // 这是Win7在现代硬件上最常见的蓝屏问题，原因是存储控制器驱动未启用
         if self.win7_fix_storage_bsod {
-            println!("[ADVANCED] Win7: 修复存储控制器蓝屏问题 (0x7B)");
+            log::info!("[ADVANCED] Win7: 修复存储控制器蓝屏问题 (0x7B)");
             
             // ========== AHCI 相关驱动 ==========
             // msahci - Microsoft AHCI 驱动 (Win7原版自带但默认禁用)
@@ -1208,8 +1208,8 @@ log=0
                 0,
             );
             
-            println!("[ADVANCED] Win7 存储控制器蓝屏修复设置完成");
-            println!("[ADVANCED] 已启用: msahci, storahci, pciide, intelide, atapi, iaStorV, iaStorAV, iaStor, stornvme, amd_sata, amd_xata, amdsata, LSI_SAS, LSI_SAS2, LSI_SCSI, megasas, vhdmp");
+            log::info!("[ADVANCED] Win7 存储控制器蓝屏修复设置完成");
+            log::info!("[ADVANCED] 已启用: msahci, storahci, pciide, intelide, atapi, iaStorV, iaStorAV, iaStor, stornvme, amd_sata, amd_xata, amdsata, LSI_SAS, LSI_SAS2, LSI_SCSI, megasas, vhdmp");
         }
 
         // ============ Windows XP 专用：离线注入存储/USB3 驱动 ============
@@ -1219,7 +1219,7 @@ log=0
                 .map(|b| b.join("bin").join("drivers").join("xp"));
             match xp_dir {
                 Some(dir) if dir.is_dir() => {
-                    println!(
+                    log::info!(
                         "[ADVANCED] XP: 离线注入驱动 (AHCI 始终, NVMe={}, USB3={}) 源: {}",
                         self.xp_inject_nvme_driver,
                         self.xp_inject_usb3_driver,
@@ -1232,23 +1232,23 @@ log=0
                         self.xp_inject_nvme_driver,
                         self.xp_inject_usb3_driver,
                     ) {
-                        Ok(out) => println!("[ADVANCED] XP 驱动注入完成:\n{}", out),
-                        Err(e) => println!("[ADVANCED] XP 驱动注入失败: {} (继续执行)", e),
+                        Ok(out) => log::info!("[ADVANCED] XP 驱动注入完成:\n{}", out),
+                        Err(e) => log::error!("[ADVANCED] XP 驱动注入失败: {} (继续执行)", e),
                     }
                 }
-                _ => println!("[ADVANCED] 未找到 bin\\drivers\\xp 目录，跳过 XP 驱动注入"),
+                _ => log::warn!("[ADVANCED] 未找到 bin\\drivers\\xp 目录，跳过 XP 驱动注入"),
             }
         }
 
         // 卸载注册表
-        println!("[ADVANCED] 卸载离线注册表...");
+        log::info!("[ADVANCED] 卸载离线注册表...");
         let _ = OfflineRegistry::unload_hive("pc-soft");
         let _ = OfflineRegistry::unload_hive("pc-sys");
         if default_loaded {
             let _ = OfflineRegistry::unload_hive("pc-default");
         }
 
-        println!("[ADVANCED] 高级选项应用完成");
+        log::info!("[ADVANCED] 高级选项应用完成");
         Ok(())
     }
 
@@ -1381,17 +1381,17 @@ Write-Host "UWP应用清理完成"
         
         // 如果没有 .cab 文件，直接返回原目录
         if cab_files.is_empty() {
-            println!("[ADVANCED] 目录中没有 .cab 文件，直接使用原目录");
+            log::info!("[ADVANCED] 目录中没有 .cab 文件，直接使用原目录");
             return Ok(driver_dir.clone());
         }
         
-        println!("[ADVANCED] 发现 {} 个 .cab 文件，开始解压", cab_files.len());
+        log::info!("[ADVANCED] 发现 {} 个 .cab 文件，开始解压", cab_files.len());
         
         // 尝试创建 Cabinet 解压器
         let extractor = match CabinetExtractor::new() {
             Ok(e) => e,
             Err(e) => {
-                println!("[ADVANCED] 无法创建 Cabinet 解压器: {} (将使用原目录)", e);
+                log::warn!("[ADVANCED] 无法创建 Cabinet 解压器: {} (将使用原目录)", e);
                 return Ok(driver_dir.clone());
             }
         };
@@ -1412,30 +1412,30 @@ Write-Host "UWP应用清理完成"
             
             let extract_dir = temp_dir.join(cab_name);
             
-            println!("[ADVANCED] 解压: {} -> {}", 
+            log::info!("[ADVANCED] 解压: {} -> {}",
                 cab_path.display(), extract_dir.display());
             
             match extractor.extract(cab_path, &extract_dir) {
                 Ok(files) => {
-                    println!("[ADVANCED] 成功解压 {} 个文件", files.len());
+                    log::info!("[ADVANCED] 成功解压 {} 个文件", files.len());
                     extract_success_count += 1;
                 }
                 Err(e) => {
-                    println!("[ADVANCED] 解压 {} 失败: {} (跳过)", cab_path.display(), e);
+                    log::warn!("[ADVANCED] 解压 {} 失败: {} (跳过)", cab_path.display(), e);
                 }
             }
         }
         
         // 如果所有 cab 文件都解压失败，清理临时目录并返回原目录
         if extract_success_count == 0 {
-            println!("[ADVANCED] 所有 .cab 文件解压失败，使用原目录");
+            log::warn!("[ADVANCED] 所有 .cab 文件解压失败，使用原目录");
             let _ = std::fs::remove_dir_all(&temp_dir);
             return Ok(driver_dir.clone());
         }
         
         // 如果原目录有普通驱动文件或子目录，也复制到临时目录
         if has_inf_files || has_subdirs {
-            println!("[ADVANCED] 复制原目录中的其他驱动文件");
+            log::info!("[ADVANCED] 复制原目录中的其他驱动文件");
             
             for entry in std::fs::read_dir(driver_dir)? {
                 let entry = entry?;
@@ -1463,7 +1463,7 @@ Write-Host "UWP应用清理完成"
             }
         }
         
-        println!("[ADVANCED] Win7 驱动准备完成: {}", temp_dir.display());
+        log::info!("[ADVANCED] Win7 驱动准备完成: {}", temp_dir.display());
         
         Ok(temp_dir)
     }

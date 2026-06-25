@@ -379,26 +379,26 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
     }
 
     if is_install {
-        println!("[PE INSTALL] ========== PE自动安装模式 ==========");
+        log::info!("[PE INSTALL] ========== PE自动安装模式 ==========");
         // 注：BitLocker 透传解锁已在 main() 最前面统一执行，这里不再重复。
 
         // 查找配置文件所在分区
         let data_partition = match ConfigFileManager::find_data_partition() {
             Some(p) => p,
             None => {
-                eprintln!("[PE INSTALL] 错误: 未找到安装配置文件");
+                log::error!("[PE INSTALL] 错误: 未找到安装配置文件");
                 show_error_message(&tr!("未找到安装配置文件，无法继续安装。"));
                 return Ok(());
             }
         };
 
-        println!("[PE INSTALL] 数据分区: {}", data_partition);
+        log::info!("[PE INSTALL] 数据分区: {}", data_partition);
 
         // 读取安装配置
         let config = match ConfigFileManager::read_install_config(&data_partition) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("[PE INSTALL] 错误: 读取配置失败: {}", e);
+                log::error!("[PE INSTALL] 错误: 读取配置失败: {}", e);
                 show_error_message(&tr!("读取安装配置失败: {}", e));
                 return Ok(());
             }
@@ -407,8 +407,8 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
         // 切换到正常系统端选定的镜像引擎（随重启传入）
         lr_core::set_active_engine(lr_core::WimEngine::from_u8(config.wim_engine));
 
-        println!("[PE INSTALL] 目标分区: {}", config.target_partition);
-        println!("[PE INSTALL] 镜像文件: {}", config.image_path);
+        log::info!("[PE INSTALL] 目标分区: {}", config.target_partition);
+        log::info!("[PE INSTALL] 镜像文件: {}", config.image_path);
 
         // 查找安装标记分区
         let target_partition = ConfigFileManager::find_install_marker_partition()
@@ -419,20 +419,20 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
         let image_path = format!("{}\\{}", data_dir, config.image_path);
 
         if !std::path::Path::new(&image_path).exists() {
-            eprintln!("[PE INSTALL] 错误: 镜像文件不存在: {}", image_path);
+            log::error!("[PE INSTALL] 错误: 镜像文件不存在: {}", image_path);
             show_error_message(&tr!("镜像文件不存在: {}", image_path));
             return Ok(());
         }
 
-        println!("[PE INSTALL] 完整镜像路径: {}", image_path);
+        log::info!("[PE INSTALL] 完整镜像路径: {}", image_path);
 
         // Step 0: 校验镜像完整性（WIM/ESD；GHO 跳过）——放在格式化之前，坏镜像不糟蹋目标盘
         if !config.is_gho {
-            println!("[PE INSTALL] Step 0: 校验镜像完整性");
+            log::info!("[PE INSTALL] Step 0: 校验镜像完整性");
             log::info!("[PE安装/CLI] 开始校验镜像: {}", image_path);
             let dism = Dism::new();
             if let Err(e) = dism.verify_image(&image_path, None) {
-                eprintln!("[PE INSTALL] 镜像校验失败: {}", e);
+                log::error!("[PE INSTALL] 镜像校验失败: {}", e);
                 log::error!("[PE安装/CLI] 镜像校验失败: {}", e);
                 show_error_message(&tr!(
                     "镜像校验失败：镜像可能已损坏或不完整（{}）。请重新获取镜像后重试。",
@@ -444,15 +444,15 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
         }
 
         // Step 1: 格式化分区
-        println!("[PE INSTALL] Step 1: 格式化分区");
+        log::info!("[PE INSTALL] Step 1: 格式化分区");
         if let Err(e) = DiskManager::format_partition(&target_partition) {
-            eprintln!("[PE INSTALL] 格式化失败: {}", e);
+            log::error!("[PE INSTALL] 格式化失败: {}", e);
             show_error_message(&tr!("格式化分区失败: {}", e));
             return Ok(());
         }
 
         // Step 2: 释放镜像
-        println!("[PE INSTALL] Step 2: 释放镜像");
+        log::info!("[PE INSTALL] Step 2: 释放镜像");
         let apply_dir = format!("{}\\", target_partition);
 
         let apply_result = if config.is_gho {
@@ -469,22 +469,22 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
         };
 
         if let Err(e) = apply_result {
-            eprintln!("[PE INSTALL] 释放镜像失败: {}", e);
+            log::error!("[PE INSTALL] 释放镜像失败: {}", e);
             show_error_message(&tr!("释放镜像失败: {}", e));
             return Ok(());
         }
 
         // Step 3: 导入驱动
-        println!("[PE INSTALL] Step 3: 导入驱动");
+        log::info!("[PE INSTALL] Step 3: 导入驱动");
         let driver_path = format!("{}\\drivers", data_dir);
         let driver_path_exists = std::path::Path::new(&driver_path).exists();
         
         if config.should_import_drivers() && driver_path_exists {
             let dism = Dism::new();
             match dism.add_drivers_offline_with_progress(&apply_dir, &driver_path, None) {
-                Ok(_) => println!("[PE INSTALL] 驱动导入成功"),
+                Ok(_) => log::info!("[PE INSTALL] 驱动导入成功"),
                 Err(e) => {
-                    eprintln!("[PE INSTALL] 警告: 驱动导入失败: {} (继续安装)", e);
+                    log::warn!("[PE INSTALL] 警告: 驱动导入失败: {} (继续安装)", e);
                     log::warn!("驱动导入失败: {}", e);
                 }
             }
@@ -492,47 +492,47 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
             // 同时检查驱动目录中是否有 CAB 文件并安装
             let cab_files = find_cab_files_in_dir(&driver_path);
             if !cab_files.is_empty() {
-                println!("[PE INSTALL] 在驱动目录中发现 {} 个 CAB 文件，一并安装", cab_files.len());
+                log::info!("[PE INSTALL] 在驱动目录中发现 {} 个 CAB 文件，一并安装", cab_files.len());
                 match dism.add_packages_offline_from_dir(&apply_dir, &driver_path, None) {
                     Ok((success, fail)) => {
-                        println!("[PE INSTALL] 驱动目录中的CAB安装完成: {} 成功, {} 失败", success, fail);
+                        log::info!("[PE INSTALL] 驱动目录中的CAB安装完成: {} 成功, {} 失败", success, fail);
                     }
                     Err(e) => {
-                        eprintln!("[PE INSTALL] 警告: 驱动目录中的CAB安装失败: {} (继续安装)", e);
+                        log::warn!("[PE INSTALL] 警告: 驱动目录中的CAB安装失败: {} (继续安装)", e);
                         log::warn!("驱动目录中的CAB安装失败: {}", e);
                     }
                 }
             }
         } else if config.should_import_drivers() && !driver_path_exists {
-            println!("[PE INSTALL] 驱动目录不存在，跳过驱动导入");
+            log::info!("[PE INSTALL] 驱动目录不存在，跳过驱动导入");
         } else {
-            println!("[PE INSTALL] 跳过驱动导入");
+            log::info!("[PE INSTALL] 跳过驱动导入");
         }
 
         // Step 4: 安装CAB更新包
-        println!("[PE INSTALL] Step 4: 安装CAB更新包");
+        log::info!("[PE INSTALL] Step 4: 安装CAB更新包");
         if config.install_cab_packages {
             let cab_path = format!("{}\\updates", data_dir);
             if std::path::Path::new(&cab_path).exists() {
                 let dism = Dism::new();
                 match dism.add_packages_offline_from_dir(&apply_dir, &cab_path, None) {
                     Ok((success, fail)) => {
-                        println!("[PE INSTALL] CAB更新包安装完成: {} 成功, {} 失败", success, fail);
+                        log::info!("[PE INSTALL] CAB更新包安装完成: {} 成功, {} 失败", success, fail);
                     }
                     Err(e) => {
-                        eprintln!("[PE INSTALL] 警告: CAB更新包安装失败: {} (继续安装)", e);
+                        log::warn!("[PE INSTALL] 警告: CAB更新包安装失败: {} (继续安装)", e);
                         log::warn!("CAB更新包安装失败: {}", e);
                     }
                 }
             } else {
-                println!("[PE INSTALL] 更新包目录不存在，跳过CAB安装");
+                log::info!("[PE INSTALL] 更新包目录不存在，跳过CAB安装");
             }
         } else {
-            println!("[PE INSTALL] 跳过CAB更新包安装");
+            log::info!("[PE INSTALL] 跳过CAB更新包安装");
         }
 
         // Step 5: 修复引导
-        println!("[PE INSTALL] Step 5: 修复引导");
+        log::info!("[PE INSTALL] Step 5: 修复引导");
         let boot_manager = BootManager::new();
         let use_uefi = DiskManager::detect_uefi_mode();
 
@@ -541,49 +541,49 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
         let is_xp = config.is_xp || !std::path::Path::new(&win_boot_dir).exists();
         let boot_result = if is_xp {
             if use_uefi {
-                println!("[PE INSTALL] 识别为 XP/2003 + UEFI，写入 XP UEFI/GPT 引导");
+                log::info!("[PE INSTALL] 识别为 XP/2003 + UEFI，写入 XP UEFI/GPT 引导");
                 match boot_manager.write_xp_uefi_gpt_boot(&target_partition) {
                     Ok(()) => Ok(()),
                     Err(e) => {
-                        eprintln!("[PE INSTALL] XP UEFI 引导失败({})，回退 Legacy(ntldr)", e);
+                        log::error!("[PE INSTALL] XP UEFI 引导失败({})，回退 Legacy(ntldr)", e);
                         boot_manager.write_xp_boot(&target_partition)
                     }
                 }
             } else {
-                println!("[PE INSTALL] 识别为 XP/2003(Legacy)，写入 XP 引导(ntldr/boot.ini)");
+                log::info!("[PE INSTALL] 识别为 XP/2003(Legacy)，写入 XP 引导(ntldr/boot.ini)");
                 boot_manager.write_xp_boot(&target_partition)
             }
         } else {
             boot_manager.repair_boot_advanced(&target_partition, use_uefi)
         };
         if let Err(e) = boot_result {
-            eprintln!("[PE INSTALL] 修复引导失败: {}", e);
+            log::error!("[PE INSTALL] 修复引导失败: {}", e);
             show_error_message(&tr!("修复引导失败: {}", e));
             return Ok(());
         }
 
         // Step 5.5: 如果启用了 Win7 UEFI 补丁，应用 UefiSeven
         if use_uefi && config.win7_uefi_patch {
-            println!("[PE INSTALL] Step 5.5: 应用 Win7 UEFI 补丁 (UefiSeven)");
+            log::info!("[PE INSTALL] Step 5.5: 应用 Win7 UEFI 补丁 (UefiSeven)");
             match ui::advanced_options::apply_uefiseven_patch(&data_partition, &target_partition) {
-                Ok(_) => println!("[PE INSTALL] UefiSeven 补丁应用成功"),
+                Ok(_) => log::info!("[PE INSTALL] UefiSeven 补丁应用成功"),
                 Err(e) => {
                     // UefiSeven 补丁失败不中断安装，只记录警告
-                    eprintln!("[PE INSTALL] 警告: UefiSeven 补丁应用失败: {} (继续安装)", e);
+                    log::warn!("[PE INSTALL] 警告: UefiSeven 补丁应用失败: {} (继续安装)", e);
                     log::warn!("UefiSeven 补丁应用失败: {}", e);
                 }
             }
         }
 
         // Step 6: 应用高级选项
-        println!("[PE INSTALL] Step 6: 应用高级选项");
+        log::info!("[PE INSTALL] Step 6: 应用高级选项");
         let _ = apply_advanced_options(&target_partition, &config);
         // 注入数据分区上的用户驱动（bin/drivers/<版本> 由正常端复制而来）
         ui::advanced_options::inject_user_drivers_from_data(&target_partition, &data_dir);
 
         // Step 7: 生成无人值守配置
         if config.unattended {
-            println!("[PE INSTALL] Step 7: 生成无人值守配置");
+            log::info!("[PE INSTALL] Step 7: 生成无人值守配置");
             if !config.custom_unattend_file.is_empty() {
                 // 用户自定义无人值守文件：直接复制到目标系统
                 let data_dir = ConfigFileManager::get_data_dir(&data_partition);
@@ -598,9 +598,9 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
                         if std::path::Path::new(&sysprep_dir).exists() {
                             let _ = std::fs::write(format!("{}\\unattend.xml", sysprep_dir), &content);
                         }
-                        println!("[PE INSTALL] 已应用自定义无人值守文件: {}", src);
+                        log::info!("[PE INSTALL] 已应用自定义无人值守文件: {}", src);
                     }
-                    Err(e) => eprintln!("[PE INSTALL] 读取自定义无人值守文件失败: {}", e),
+                    Err(e) => log::error!("[PE INSTALL] 读取自定义无人值守文件失败: {}", e),
                 }
             } else {
                 let _ = generate_unattend_xml(&target_partition, &config.custom_username);
@@ -611,30 +611,30 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
         if let Err(e) =
             core::account_fix::ensure_offline_login(&target_partition, &config.custom_username)
         {
-            eprintln!("[PE INSTALL] 离线登录兜底设置失败（不影响安装）: {}", e);
+            log::warn!("[PE INSTALL] 离线登录兜底设置失败（不影响安装）: {}", e);
         } else {
-            println!("[PE INSTALL] 已应用离线登录兜底设置");
+            log::info!("[PE INSTALL] 已应用离线登录兜底设置");
         }
 
         // Step 8: 清理
-        println!("[PE INSTALL] Step 8: 清理临时文件");
+        log::info!("[PE INSTALL] Step 8: 清理临时文件");
         ConfigFileManager::cleanup_all(&data_partition, &target_partition);
 
         // Step 9: 清理自动创建的数据分区并扩展目标分区
-        println!("[PE INSTALL] Step 9: 清理自动创建的分区");
+        log::info!("[PE INSTALL] Step 9: 清理自动创建的分区");
         match DiskManager::cleanup_auto_created_partition_and_extend(&target_partition) {
-            Ok(_) => println!("[PE INSTALL] 自动创建分区清理完成"),
+            Ok(_) => log::info!("[PE INSTALL] 自动创建分区清理完成"),
             Err(e) => {
                 // 不中断安装流程，只记录警告
-                eprintln!("[PE INSTALL] 警告: 清理自动创建分区失败: {}", e);
+                log::warn!("[PE INSTALL] 警告: 清理自动创建分区失败: {}", e);
                 log::warn!("清理自动创建分区失败: {}", e);
             }
         }
 
-        println!("[PE INSTALL] 安装完成!");
+        log::info!("[PE INSTALL] 安装完成!");
 
         if config.auto_reboot {
-            println!("[PE INSTALL] 即将重启...");
+            log::info!("[PE INSTALL] 即将重启...");
             let _ = utils::command::new_command("shutdown")
                 .args(["/r", "/t", "10", "/c", "LetRecovery 系统安装完成，即将重启..."])
                 .spawn();
@@ -643,25 +643,25 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
         }
     } else {
         // 备份模式
-        println!("[PE BACKUP] ========== PE自动备份模式 ==========");
+        log::info!("[PE BACKUP] ========== PE自动备份模式 ==========");
 
         // 查找配置文件所在分区
         let data_partition = match ConfigFileManager::find_data_partition() {
             Some(p) => p,
             None => {
-                eprintln!("[PE BACKUP] 错误: 未找到备份配置文件");
+                log::error!("[PE BACKUP] 错误: 未找到备份配置文件");
                 show_error_message(&tr!("未找到备份配置文件，无法继续备份。"));
                 return Ok(());
             }
         };
 
-        println!("[PE BACKUP] 数据分区: {}", data_partition);
+        log::info!("[PE BACKUP] 数据分区: {}", data_partition);
 
         // 读取备份配置
         let config = match ConfigFileManager::read_backup_config(&data_partition) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("[PE BACKUP] 错误: 读取配置失败: {}", e);
+                log::error!("[PE BACKUP] 错误: 读取配置失败: {}", e);
                 show_error_message(&tr!("读取备份配置失败: {}", e));
                 return Ok(());
             }
@@ -670,8 +670,8 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
         // 切换到正常系统端选定的镜像引擎（随重启传入）
         lr_core::set_active_engine(lr_core::WimEngine::from_u8(config.wim_engine));
 
-        println!("[PE BACKUP] 源分区: {}", config.source_partition);
-        println!("[PE BACKUP] 保存路径: {}", config.save_path);
+        log::info!("[PE BACKUP] 源分区: {}", config.source_partition);
+        log::info!("[PE BACKUP] 保存路径: {}", config.save_path);
 
         // 查找备份标记分区
         let source_partition = ConfigFileManager::find_backup_marker_partition()
@@ -687,7 +687,7 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
             BackupFormat::Gho => {
                 let ghost = core::ghost::Ghost::new();
                 if !ghost.is_available() {
-                    eprintln!("[PE BACKUP] Ghost 工具不可用");
+                    log::error!("[PE BACKUP] Ghost 工具不可用");
                     show_error_message(&tr!("系统备份失败: Ghost 工具不可用"));
                     return Ok(());
                 }
@@ -713,7 +713,7 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
         };
 
         if let Err(e) = backup_result {
-            eprintln!("[PE BACKUP] 备份失败: {}", e);
+            log::error!("[PE BACKUP] 备份失败: {}", e);
             show_error_message(&tr!("系统备份失败: {}", e));
             return Ok(());
         }
@@ -727,7 +727,7 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
         ConfigFileManager::cleanup_data_dir(&data_partition);
         ConfigFileManager::cleanup_pe_dir(&data_partition);
 
-        println!("[PE BACKUP] 备份完成!");
+        log::info!("[PE BACKUP] 备份完成!");
         show_success_message(&tr!(
             "系统备份完成！\n保存位置: {}",
             config.save_path
@@ -850,7 +850,7 @@ fn show_error_message(message: &str) {
 
     #[cfg(not(windows))]
     {
-        eprintln!("错误: {}", message);
+        log::error!("错误: {}", message);
     }
 }
 
@@ -892,6 +892,6 @@ fn show_success_message(message: &str) {
 
     #[cfg(not(windows))]
     {
-        println!("成功: {}", message);
+        log::info!("成功: {}", message);
     }
 }

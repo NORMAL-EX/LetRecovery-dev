@@ -59,7 +59,7 @@ impl IsoMounter {
         let after_mask = Self::get_logical_drives_mask();
         let new_drives = after_mask & !before_mask; // 找出新增的盘符
         
-        println!("[ISO] 挂载前盘符掩码: 0x{:08X}, 挂载后: 0x{:08X}, 新增: 0x{:08X}", 
+        log::info!("[ISO] 挂载前盘符掩码: 0x{:08X}, 挂载后: 0x{:08X}, 新增: 0x{:08X}",
                  before_mask, after_mask, new_drives);
         
         // 从 D 到 Z 检查新增的盘符
@@ -72,7 +72,7 @@ impl IsoMounter {
                 
                 unsafe {
                     let drive_type = GetDriveTypeW(PCWSTR::from_raw(wide_path.as_ptr()));
-                    println!("[ISO] 检查新盘符 {}: 类型={}", letter, drive_type);
+                    log::info!("[ISO] 检查新盘符 {}: 类型={}", letter, drive_type);
                     
                     if drive_type == DRIVE_CDROM {
                         return Some(letter);
@@ -93,11 +93,11 @@ impl IsoMounter {
             ATTACH_VIRTUAL_DISK_PARAMETERS, ATTACH_VIRTUAL_DISK_VERSION_1,
         };
 
-        println!("[ISO] 使用 Windows API 挂载 ISO: {}", iso_path);
+        log::info!("[ISO] 使用 Windows API 挂载 ISO: {}", iso_path);
 
         // 1. 记录挂载前的盘符掩码
         let before_mask = Self::get_logical_drives_mask();
-        println!("[ISO] 挂载前盘符掩码: 0x{:08X}", before_mask);
+        log::info!("[ISO] 挂载前盘符掩码: 0x{:08X}", before_mask);
 
         // 转换路径为宽字符
         let wide_path: Vec<u16> = OsStr::new(iso_path)
@@ -128,11 +128,11 @@ impl IsoMounter {
             );
 
             if result != WIN32_ERROR(0) {
-                println!("[ISO] OpenVirtualDisk 失败: {:?}", result);
+                log::error!("[ISO] OpenVirtualDisk 失败: {:?}", result);
                 anyhow::bail!("{}", tr!("OpenVirtualDisk 失败: {}", format!("{:?}", result)));
             }
 
-            println!("[ISO] OpenVirtualDisk 成功, handle: {:?}", handle);
+            log::info!("[ISO] OpenVirtualDisk 成功, handle: {:?}", handle);
 
             // 设置挂载参数
             let mut attach_params: ATTACH_VIRTUAL_DISK_PARAMETERS = std::mem::zeroed();
@@ -154,12 +154,12 @@ impl IsoMounter {
             );
 
             if result != WIN32_ERROR(0) {
-                println!("[ISO] AttachVirtualDisk 失败: {:?}", result);
+                log::error!("[ISO] AttachVirtualDisk 失败: {:?}", result);
                 let _ = CloseHandle(handle);
                 anyhow::bail!("{}", tr!("AttachVirtualDisk 失败: {}", format!("{:?}", result)));
             }
 
-            println!("[ISO] AttachVirtualDisk 成功");
+            log::info!("[ISO] AttachVirtualDisk 成功");
 
             // 获取挂载的物理路径 (可选，用于调试)
             let mut path_buffer = [0u16; 260];
@@ -172,7 +172,7 @@ impl IsoMounter {
 
             if result == WIN32_ERROR(0) {
                 let path = String::from_utf16_lossy(&path_buffer[..path_size as usize / 2]);
-                println!("[ISO] 物理路径: {}", path.trim_end_matches('\0'));
+                log::info!("[ISO] 物理路径: {}", path.trim_end_matches('\0'));
             }
 
             // 关闭句柄 (因为使用了 PERMANENT_LIFETIME，ISO 会保持挂载)
@@ -185,21 +185,21 @@ impl IsoMounter {
                 if let Some(letter) = Self::find_new_cdrom_drive(before_mask) {
                     // 3. 验证是否为 Windows 安装介质（Vista+ 的 \sources 或 XP/2003 的 \I386）
                     if Self::is_windows_install_media(&format!("{}:", letter)) {
-                        println!("[ISO] 挂载成功，盘符: {}:，第 {} 次检测", letter, i + 1);
+                        log::info!("[ISO] 挂载成功，盘符: {}:，第 {} 次检测", letter, i + 1);
                         return Ok(letter);
                     } else {
-                        println!("[ISO] 找到新 CDROM 盘符 {}: 但不含 \\sources 或 \\I386", letter);
+                        log::info!("[ISO] 找到新 CDROM 盘符 {}: 但不含 \\sources 或 \\I386", letter);
                     }
                 }
-                
-                println!("[ISO] 等待盘符分配... ({}/10)", i + 1);
+
+                log::info!("[ISO] 等待盘符分配... ({}/10)", i + 1);
             }
 
             // 4. 如果轮询失败，使用后备方案：遍历所有 CDROM 盘符
-            println!("[ISO] 轮询超时，尝试后备方案...");
+            log::info!("[ISO] 轮询超时，尝试后备方案...");
             if let Some(drive) = Self::find_iso_drive() {
                 let letter = drive.chars().next().unwrap();
-                println!("[ISO] 后备方案找到盘符: {}", drive);
+                log::info!("[ISO] 后备方案找到盘符: {}", drive);
                 return Ok(letter);
             }
 
@@ -213,7 +213,7 @@ impl IsoMounter {
         use std::ffi::OsStr;
         use std::os::windows::ffi::OsStrExt;
 
-        println!("[ISO] 使用 Windows API 卸载 ISO: {}", iso_path);
+        log::info!("[ISO] 使用 Windows API 卸载 ISO: {}", iso_path);
 
         let wide_path: Vec<u16> = OsStr::new(iso_path)
             .encode_wide()
@@ -250,7 +250,7 @@ impl IsoMounter {
                 anyhow::bail!("{}", tr!("DetachVirtualDisk 失败: {}", format!("{:?}", result)));
             }
 
-            println!("[ISO] 卸载成功: {}", iso_path);
+            log::info!("[ISO] 卸载成功: {}", iso_path);
             Ok(())
         }
     }
@@ -298,7 +298,7 @@ impl IsoMounter {
                 anyhow::bail!("弹出驱动器 {} 失败", letter);
             }
 
-            println!("[ISO] 已弹出驱动器: {}:", letter);
+            log::info!("[ISO] 已弹出驱动器: {}:", letter);
             Ok(())
         }
     }
@@ -306,7 +306,7 @@ impl IsoMounter {
     /// 使用 Windows API 卸载所有挂载的 ISO
     #[cfg(windows)]
     pub fn unmount_all_iso() -> Result<()> {
-        println!("[ISO] 使用 Windows API 卸载所有挂载的 ISO");
+        log::info!("[ISO] 使用 Windows API 卸载所有挂载的 ISO");
 
         // 遍历所有盘符 D-Z，查找 CDROM 类型的驱动器并弹出
         for letter in b'D'..=b'Z' {
@@ -321,10 +321,10 @@ impl IsoMounter {
                     // 检查是否包含 Windows 安装文件（确认是挂载的 ISO）
                     let sources_path = format!("{}:\\sources", letter);
                     if Path::new(&sources_path).exists() {
-                        println!("[ISO] 发现挂载的 ISO: {}:", letter);
+                        log::info!("[ISO] 发现挂载的 ISO: {}:", letter);
                         match Self::eject_cdrom_drive(letter) {
-                            Ok(_) => println!("[ISO] 成功弹出: {}:", letter),
-                            Err(e) => println!("[ISO] 弹出失败 {}: {} (将继续执行)", letter, e),
+                            Ok(_) => log::info!("[ISO] 成功弹出: {}:", letter),
+                            Err(e) => log::warn!("[ISO] 弹出失败 {}: {} (将继续执行)", letter, e),
                         }
                     }
                 }
@@ -336,27 +336,27 @@ impl IsoMounter {
 
     /// 挂载 ISO 并返回盘符 (如 "F:")
     pub fn mount_iso(iso_path: &str) -> Result<String> {
-        println!("[ISO] ========== 挂载 ISO ==========");
-        println!("[ISO] 路径: {}", iso_path);
+        log::info!("[ISO] ========== 挂载 ISO ==========");
+        log::info!("[ISO] 路径: {}", iso_path);
 
         // 先尝试卸载已存在的挂载
         let _ = Self::unmount();
         std::thread::sleep(std::time::Duration::from_millis(300));
 
         let is_pe = Self::is_pe_environment();
-        println!("[ISO] PE 环境: {}", is_pe);
+        log::info!("[ISO] PE 环境: {}", is_pe);
 
         #[cfg(windows)]
         {
-            println!("[ISO] 使用 Windows Virtual Disk API");
+            log::info!("[ISO] 使用 Windows Virtual Disk API");
             match Self::mount_iso_winapi(iso_path) {
                 Ok(letter) => {
                     let drive = format!("{}:", letter);
-                    println!("[ISO] 挂载成功，盘符: {}", drive);
+                    log::info!("[ISO] 挂载成功，盘符: {}", drive);
                     return Ok(drive);
                 }
                 Err(e) => {
-                    println!("[ISO] Windows API 挂载失败: {}", e);
+                    log::error!("[ISO] Windows API 挂载失败: {}", e);
                     return Err(e);
                 }
             }
@@ -370,7 +370,7 @@ impl IsoMounter {
 
     /// 卸载 ISO
     pub fn unmount() -> Result<()> {
-        println!("[ISO] ========== 卸载 ISO ==========");
+        log::info!("[ISO] ========== 卸载 ISO ==========");
 
         #[cfg(windows)]
         {
@@ -437,7 +437,7 @@ impl IsoMounter {
             let drive = format!("{}:", letter);
             // Vista+ 或 XP/2003 安装介质都接受
             if Self::is_windows_install_media(&drive) {
-                println!("[ISO] find_iso_drive 找到: {}", drive);
+                log::info!("[ISO] find_iso_drive 找到: {}", drive);
                 return Some(drive);
             }
         }
@@ -456,12 +456,12 @@ impl IsoMounter {
 
         for path in &paths {
             if Path::new(path).exists() {
-                println!("[ISO] 在 {} 找到安装镜像: {}", drive, path);
+                log::info!("[ISO] 在 {} 找到安装镜像: {}", drive, path);
                 return Some(path.clone());
             }
         }
 
-        println!("[ISO] 在 {} 未找到安装镜像", drive);
+        log::info!("[ISO] 在 {} 未找到安装镜像", drive);
         None
     }
 
@@ -472,7 +472,7 @@ impl IsoMounter {
             return Self::find_install_image_in_drive(&drive);
         }
 
-        println!("[ISO] 未找到安装镜像");
+        log::info!("[ISO] 未找到安装镜像");
         None
     }
 

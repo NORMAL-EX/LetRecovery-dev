@@ -645,7 +645,7 @@ impl DriverManager {
             self.enumerate_all_drivers()?
         };
 
-        println!("[DriverManager] 找到 {} 个驱动需要导出", drivers.len());
+        log::info!("[DriverManager] 找到 {} 个驱动需要导出", drivers.len());
 
         // 去重 INF 路径
         let mut exported_infs = std::collections::HashSet::new();
@@ -669,7 +669,7 @@ impl DriverManager {
             };
 
             if !driver_store_path.exists() {
-                println!(
+                log::warn!(
                     "[DriverManager] 警告: 驱动文件不存在: {:?}",
                     driver_store_path
                 );
@@ -688,14 +688,14 @@ impl DriverManager {
             // 复制驱动包
             match self.copy_driver_package(&driver_store_path, &dest_dir) {
                 Ok(_) => {
-                    println!(
+                    log::info!(
                         "[DriverManager] 已导出: {} -> {:?}",
                         driver.description, dest_dir
                     );
                     success_count += 1;
                 }
                 Err(e) => {
-                    println!(
+                    log::error!(
                         "[DriverManager] 导出失败: {} - {}",
                         driver.description, e
                     );
@@ -703,7 +703,7 @@ impl DriverManager {
             }
         }
 
-        println!("[DriverManager] 成功导出 {} 个驱动", success_count);
+        log::info!("[DriverManager] 成功导出 {} 个驱动", success_count);
         Ok(success_count)
     }
 
@@ -790,25 +790,25 @@ impl DriverManager {
 
         // 递归查找所有 INF 文件
         let inf_files = Self::find_inf_files(source_dir)?;
-        println!("[DriverManager] 找到 {} 个 INF 文件", inf_files.len());
+        log::info!("[DriverManager] 找到 {} 个 INF 文件", inf_files.len());
 
         for inf_path in inf_files {
-            println!("[DriverManager] 正在安装: {:?}", inf_path);
+            log::info!("[DriverManager] 正在安装: {:?}", inf_path);
 
             match self.install_single_driver(&inf_path, force) {
                 Ok(reboot) => {
                     success_count += 1;
                     need_reboot = need_reboot || reboot;
-                    println!("[DriverManager] 安装成功: {:?}", inf_path);
+                    log::info!("[DriverManager] 安装成功: {:?}", inf_path);
                 }
                 Err(e) => {
                     fail_count += 1;
-                    println!("[DriverManager] 安装失败: {:?} - {}", inf_path, e);
+                    log::error!("[DriverManager] 安装失败: {:?} - {}", inf_path, e);
                 }
             }
         }
 
-        println!(
+        log::info!(
             "[DriverManager] 驱动导入完成: 成功 {}, 失败 {}, 需要重启: {}",
             success_count, fail_count, need_reboot
         );
@@ -823,7 +823,7 @@ impl DriverManager {
             match newdev.install_driver(inf_path, force) {
                 Ok(reboot) => return Ok(reboot),
                 Err(e) => {
-                    println!("[DriverManager] DiInstallDriver 失败: {}, 尝试 SetupCopyOEMInf", e);
+                    log::warn!("[DriverManager] DiInstallDriver 失败: {}, 尝试 SetupCopyOEMInf", e);
                 }
             }
         }
@@ -904,7 +904,7 @@ impl DriverManager {
 
         // 递归查找所有 INF 文件
         let inf_files = Self::find_inf_files(source_dir)?;
-        println!(
+        log::info!(
             "[DriverManager] 离线安装: 找到 {} 个 INF 文件",
             inf_files.len()
         );
@@ -924,14 +924,14 @@ impl DriverManager {
             // 1. 复制到 DriverStore\FileRepository
             let target_store_dir = driver_store.join(format!("{}.inf_amd64_offline{:08x}", inf_name, oem_index));
             if let Err(e) = Self::copy_dir_recursive(inf_source_dir, &target_store_dir) {
-                println!("[DriverManager] 复制到DriverStore失败: {:?} - {}", inf_path, e);
+                log::error!("[DriverManager] 复制到DriverStore失败: {:?} - {}", inf_path, e);
                 fail_count += 1;
                 continue;
             }
 
             // 2. 解析 INF 文件并复制 .sys 文件到 System32\drivers
             if let Err(e) = Self::process_driver_files(&target_store_dir, &system_drivers) {
-                println!("[DriverManager] 处理驱动文件失败: {:?} - {}", inf_path, e);
+                log::warn!("[DriverManager] 处理驱动文件失败: {:?} - {}", inf_path, e);
                 // 继续，不算失败
             }
 
@@ -941,7 +941,7 @@ impl DriverManager {
             let source_inf = target_store_dir.join(inf_filename);
             if source_inf.exists() {
                 if let Err(e) = std::fs::copy(&source_inf, &oem_inf_path) {
-                    println!("[DriverManager] 复制INF到Windows\\INF失败: {} - {}", oem_inf_name, e);
+                    log::warn!("[DriverManager] 复制INF到Windows\\INF失败: {} - {}", oem_inf_name, e);
                 }
             }
 
@@ -952,16 +952,16 @@ impl DriverManager {
                 inf_filename,
                 &oem_inf_name,
             ) {
-                println!("[DriverManager] 注册驱动服务失败: {:?} - {}", inf_path, e);
+                log::warn!("[DriverManager] 注册驱动服务失败: {:?} - {}", inf_path, e);
                 // 继续，不算失败（文件已复制，可能在启动时自动识别）
             }
 
             success_count += 1;
             oem_index += 1;
-            println!("[DriverManager] 离线安装成功: {:?} -> {}", inf_path, oem_inf_name);
+            log::info!("[DriverManager] 离线安装成功: {:?} -> {}", inf_path, oem_inf_name);
         }
 
-        println!(
+        log::info!(
             "[DriverManager] 离线驱动导入完成: 成功 {}, 失败 {}",
             success_count, fail_count
         );
@@ -1008,9 +1008,9 @@ impl DriverManager {
                             let dest = system_drivers.join(filename);
                             if !dest.exists() {
                                 if let Err(e) = std::fs::copy(&path, &dest) {
-                                    println!("[DriverManager] 复制sys文件失败: {:?} - {}", filename, e);
+                                    log::warn!("[DriverManager] 复制sys文件失败: {:?} - {}", filename, e);
                                 } else {
-                                    println!("[DriverManager] 已复制: {:?} -> {:?}", filename, dest);
+                                    log::info!("[DriverManager] 已复制: {:?} -> {:?}", filename, dest);
                                 }
                             }
                         }
@@ -1044,7 +1044,7 @@ impl DriverManager {
         let service_info = Self::parse_inf_service_info(&inf_content);
         
         if service_info.is_empty() {
-            println!("[DriverManager] INF 中未找到服务定义: {}", inf_filename);
+            log::info!("[DriverManager] INF 中未找到服务定义: {}", inf_filename);
             return Ok(());
         }
 
@@ -1056,7 +1056,7 @@ impl DriverManager {
             .join("SYSTEM");
         
         if !system_hive.exists() {
-            println!("[DriverManager] SYSTEM hive 不存在: {:?}", system_hive);
+            log::warn!("[DriverManager] SYSTEM hive 不存在: {:?}", system_hive);
             return Ok(());
         }
 
@@ -1064,7 +1064,7 @@ impl DriverManager {
         
         // 尝试加载注册表
         if let Err(e) = OfflineRegistry::load_hive(&hive_key, &system_hive.to_string_lossy()) {
-            println!("[DriverManager] 加载SYSTEM hive失败: {}", e);
+            log::warn!("[DriverManager] 加载SYSTEM hive失败: {}", e);
             return Ok(());
         }
 
@@ -1102,7 +1102,7 @@ impl DriverManager {
             let _ = OfflineRegistry::set_dword(&service_key2, "ErrorControl", *error_control);
             let _ = OfflineRegistry::set_expand_string(&service_key2, "ImagePath", &image_path);
             
-            println!(
+            log::info!(
                 "[DriverManager] 已注册服务: {} (Type={}, Start={}, ImagePath={})",
                 service_name, service_type, start_type, image_path
             );
@@ -1305,17 +1305,17 @@ impl DriverManager {
                     match Self::copy_dir_recursive(&path, &dest_dir) {
                         Ok(_) => {
                             success_count += 1;
-                            println!("[DriverManager] 已导出: {}", dir_name);
+                            log::info!("[DriverManager] 已导出: {}", dir_name);
                         }
                         Err(e) => {
-                            println!("[DriverManager] 导出失败: {} - {}", dir_name, e);
+                            log::error!("[DriverManager] 导出失败: {} - {}", dir_name, e);
                         }
                     }
                 }
             }
         }
 
-        println!("[DriverManager] 从系统导出 {} 个驱动", success_count);
+        log::info!("[DriverManager] 从系统导出 {} 个驱动", success_count);
         Ok(success_count)
     }
 

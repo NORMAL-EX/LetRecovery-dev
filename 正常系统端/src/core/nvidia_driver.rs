@@ -481,7 +481,7 @@ pub fn uninstall_nvidia_drivers_online() -> Result<UninstallResult> {
 
                 if is_nvidia_device(&hardware_id, &manufacturer, &name) {
                     nvidia_devices.push(dev_info_data);
-                    println!("[NvidiaUninstall] 找到英伟达设备: {}", name);
+                    log::info!("[NvidiaUninstall] 找到英伟达设备: {}", name);
                 }
             }
 
@@ -500,11 +500,11 @@ pub fn uninstall_nvidia_drivers_online() -> Result<UninstallResult> {
             let name = get_device_registry_property_string(dev_info, &device_data, SPDRP_DEVICEDESC)
                 .unwrap_or_else(|| "未知设备".to_string());
 
-            println!("[NvidiaUninstall] 正在卸载: {}", name);
+            log::info!("[NvidiaUninstall] 正在卸载: {}", name);
 
             // 方法1：尝试使用 SetupDiRemoveDevice - 返回 BOOL 类型
             if SetupDiRemoveDevice(dev_info, &mut device_data).as_bool() {
-                println!("[NvidiaUninstall] 成功卸载: {}", name);
+                log::info!("[NvidiaUninstall] 成功卸载: {}", name);
                 uninstalled += 1;
                 result.needs_reboot = true;
             } else {
@@ -534,11 +534,11 @@ pub fn uninstall_nvidia_drivers_online() -> Result<UninstallResult> {
                     if SetupDiCallClassInstaller(DIF_PROPERTYCHANGE, dev_info, Some(&device_data))
                         .is_ok()
                     {
-                        println!("[NvidiaUninstall] 已禁用设备: {}", name);
+                        log::info!("[NvidiaUninstall] 已禁用设备: {}", name);
                         uninstalled += 1;
                         result.needs_reboot = true;
                     } else {
-                        println!(
+                        log::error!(
                             "[NvidiaUninstall] 禁用失败: {} (错误: {:?})",
                             name,
                             GetLastError()
@@ -546,7 +546,7 @@ pub fn uninstall_nvidia_drivers_online() -> Result<UninstallResult> {
                         failed += 1;
                     }
                 } else {
-                    println!(
+                    log::error!(
                         "[NvidiaUninstall] 设置参数失败: {} (错误: {:?})",
                         name,
                         GetLastError()
@@ -624,16 +624,16 @@ pub fn uninstall_nvidia_drivers_offline(target_partition: &str) -> Result<Uninst
                 || dir_name.contains("nvdisplay");
 
             if is_nvidia {
-                println!("[NvidiaUninstall] 删除离线驱动目录: {}", dir_name);
+                log::info!("[NvidiaUninstall] 删除离线驱动目录: {}", dir_name);
 
                 match remove_directory_recursive(&path) {
                     Ok(_) => {
                         removed_count += 1;
-                        println!("[NvidiaUninstall] 成功删除: {}", dir_name);
+                        log::info!("[NvidiaUninstall] 成功删除: {}", dir_name);
                     }
                     Err(e) => {
                         failed_count += 1;
-                        println!("[NvidiaUninstall] 删除失败: {} - {}", dir_name, e);
+                        log::error!("[NvidiaUninstall] 删除失败: {} - {}", dir_name, e);
                     }
                 }
             }
@@ -660,7 +660,7 @@ pub fn uninstall_nvidia_drivers_offline(target_partition: &str) -> Result<Uninst
                             if name_lower.starts_with("nv") || name_lower.contains("nvidia") {
                                 // 尝试读取文件内容确认
                                 if is_nvidia_inf_file(&path) {
-                                    println!("[NvidiaUninstall] 删除INF文件: {}", name);
+                                    log::info!("[NvidiaUninstall] 删除INF文件: {}", name);
                                     if std::fs::remove_file(&path).is_ok() {
                                         // 同时删除对应的 PNF 文件
                                         let pnf_path = path.with_extension("pnf");

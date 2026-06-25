@@ -417,7 +417,7 @@ impl App {
         let locked_partitions = self.check_bitlocker_for_backup();
         if !locked_partitions.is_empty() {
             // 有锁定的分区，显示解锁对话框
-            println!("[BACKUP] 检测到 {} 个BitLocker锁定的分区，需要先解锁", locked_partitions.len());
+            log::info!("[BACKUP] 检测到 {} 个BitLocker锁定的分区，需要先解锁", locked_partitions.len());
             self.backup_bitlocker_partitions = locked_partitions;
             self.backup_bitlocker_current = self.backup_bitlocker_partitions.first().map(|p| p.letter.clone());
             self.backup_bitlocker_message.clear();
@@ -464,7 +464,7 @@ impl App {
                 let (pe_exists, _) = crate::core::pe::PeManager::check_pe_exists(&pe.filename);
                 if !pe_exists {
                     // PE不存在，先下载PE
-                    println!("[BACKUP] PE文件不存在，开始下载: {}", pe.filename);
+                    log::info!("[BACKUP] PE文件不存在，开始下载: {}", pe.filename);
                     self.pending_download_url = Some(pe.download_url.clone());
                     self.pending_download_filename = Some(pe.filename.clone());
                     self.pending_pe_md5 = pe.md5.clone();  // 设置MD5校验值
@@ -585,7 +585,7 @@ impl App {
     }
 
     fn start_pe_backup(&mut self, source_partition: crate::core::disk::Partition) {
-        println!("[BACKUP PE] ========== 开始PE备份准备 ==========");
+        log::info!("[BACKUP PE] ========== 开始PE备份准备 ==========");
         
         let (progress_tx, progress_rx) = mpsc::channel::<DismProgress>();
         self.backup_progress_rx = Some(progress_rx);
@@ -678,7 +678,7 @@ impl App {
                 status: tr!("PE备份准备完成"),
             });
             
-            println!("[BACKUP PE] ========== PE备份准备结束 ==========");
+            log::info!("[BACKUP PE] ========== PE备份准备结束 ==========");
         });
     }
 
@@ -783,7 +783,7 @@ impl App {
             }
         } else if self.is_backing_up {
             if ui.button(tr!("取消备份")).clicked() {
-                println!("[BACKUP] 用户取消备份");
+                log::info!("[BACKUP] 用户取消备份");
                 self.is_backing_up = false;
                 self.current_panel = Panel::SystemBackup;
             }

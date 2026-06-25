@@ -267,7 +267,7 @@ impl CabinetExtractor {
             bail!("{}", tr!("SetupIterateCabinetW 失败"));
         }
         
-        println!("[CABINET] 成功解压 {} 个文件到 {:?}", extracted.len(), dest_dir);
+        log::info!("[CABINET] 成功解压 {} 个文件到 {:?}", extracted.len(), dest_dir);
         
         Ok(extracted)
     }
@@ -324,11 +324,11 @@ pub fn extract_all_cabs(source_dir: &Path, dest_dir: &Path) -> Result<usize> {
             
             match extractor.extract(&path, &cab_dest) {
                 Ok(files) => {
-                    println!("[CABINET] 解压 {:?}: {} 个文件", path.file_name(), files.len());
+                    log::info!("[CABINET] 解压 {:?}: {} 个文件", path.file_name(), files.len());
                     count += 1;
                 }
                 Err(e) => {
-                    println!("[CABINET] 解压 {:?} 失败: {}", path.file_name(), e);
+                    log::error!("[CABINET] 解压 {:?} 失败: {}", path.file_name(), e);
                 }
             }
         }

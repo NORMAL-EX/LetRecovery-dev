@@ -28,7 +28,7 @@ impl CabinetExtractor {
     /// 会自动查找系统中的 expand.exe
     pub fn new() -> Result<Self> {
         let expand_path = Self::find_expand_executable()?;
-        println!("[CABINET] 使用 expand: {}", expand_path.display());
+        log::info!("[CABINET] 使用 expand: {}", expand_path.display());
         Ok(Self { expand_path })
     }
 
@@ -81,7 +81,7 @@ impl CabinetExtractor {
         std::fs::create_dir_all(dest_dir)
             .context(tr!("创建目标目录失败"))?;
 
-        println!(
+        log::info!(
             "[CABINET] 解压: {} -> {}",
             cab_path.display(),
             dest_dir.display()
@@ -121,7 +121,7 @@ impl CabinetExtractor {
             extracted_files
         };
 
-        println!("[CABINET] 成功解压 {} 个文件", files.len());
+        log::info!("[CABINET] 成功解压 {} 个文件", files.len());
 
         Ok(files)
     }
@@ -301,7 +301,7 @@ pub fn extract_all_cabs(source_dir: &Path, dest_dir: &Path) -> Result<usize> {
 
             match extractor.extract(&path, &cab_dest) {
                 Ok(files) => {
-                    println!(
+                    log::info!(
                         "[CABINET] 解压 {:?}: {} 个文件",
                         path.file_name(),
                         files.len()
@@ -309,7 +309,7 @@ pub fn extract_all_cabs(source_dir: &Path, dest_dir: &Path) -> Result<usize> {
                     count += 1;
                 }
                 Err(e) => {
-                    println!("[CABINET] 解压 {:?} 失败: {}", path.file_name(), e);
+                    log::error!("[CABINET] 解压 {:?} 失败: {}", path.file_name(), e);
                 }
             }
         }
