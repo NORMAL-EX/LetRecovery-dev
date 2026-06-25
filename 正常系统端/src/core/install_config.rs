@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use std::path::Path;
 
+use crate::tr;
+
 /// 递归复制目录（用于把 diskpart 脚本暂存到数据分区）。
 fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dst)?;
@@ -231,12 +233,12 @@ impl ConfigFileManager {
         // 创建数据目录
         let data_dir = format!("{}\\{}", data_partition, Self::DATA_DIR);
         std::fs::create_dir_all(&data_dir)
-            .context("创建数据目录失败")?;
+            .context(tr!("创建数据目录失败"))?;
 
         // 写入标记文件到目标分区
         let marker_path = format!("{}\\{}", target_partition, Self::INSTALL_MARKER);
         std::fs::write(&marker_path, "LetRecovery Install Marker")
-            .context("写入安装标记文件失败")?;
+            .context(tr!("写入安装标记文件失败"))?;
 
         // 处理自定义无人值守文件：把用户选择的 XML 复制到数据目录，INI 里只存相对文件名
         let mut config = config.clone();
@@ -244,7 +246,7 @@ impl ConfigFileManager {
             const CUSTOM_UNATTEND_NAME: &str = "custom_unattend.xml";
             let dst = format!("{}\\{}", data_dir, CUSTOM_UNATTEND_NAME);
             std::fs::copy(&config.custom_unattend_path, &dst)
-                .with_context(|| format!("复制自定义无人值守文件失败: {}", config.custom_unattend_path))?;
+                .with_context(|| tr!("复制自定义无人值守文件失败: {}", config.custom_unattend_path))?;
             config.custom_unattend_path = CUSTOM_UNATTEND_NAME.to_string();
             println!("[CONFIG] 已复制自定义无人值守文件 -> {}", dst);
         }
@@ -268,7 +270,7 @@ impl ConfigFileManager {
         let config_path = format!("{}\\{}", data_dir, Self::INSTALL_CONFIG);
         let content = Self::serialize_install_config(&config);
         std::fs::write(&config_path, &content)
-            .context("写入安装配置文件失败")?;
+            .context(tr!("写入安装配置文件失败"))?;
 
         println!("[CONFIG] 安装配置已写入: {}", config_path);
         println!("[CONFIG] 安装标记已写入: {}", marker_path);
@@ -284,18 +286,18 @@ impl ConfigFileManager {
         config: &ExpandConfig,
     ) -> Result<()> {
         let data_dir = format!("{}\\{}", data_partition, Self::DATA_DIR);
-        std::fs::create_dir_all(&data_dir).context("创建数据目录失败")?;
+        std::fs::create_dir_all(&data_dir).context(tr!("创建数据目录失败"))?;
 
         let marker_path = format!("{}\\{}", target_partition, Self::EXPAND_MARKER);
         std::fs::write(&marker_path, "LetRecovery Expand Marker")
-            .context("写入扩容标记文件失败")?;
+            .context(tr!("写入扩容标记文件失败"))?;
 
         let config_path = format!("{}\\{}", data_dir, Self::EXPAND_CONFIG);
         let content = format!(
             "[Expand]\r\nTargetPartition={}\r\nTargetSizeMb={}\r\nWimEngine={}\r\n",
             config.target_partition, config.target_size_mb, config.wim_engine
         );
-        std::fs::write(&config_path, &content).context("写入扩容配置文件失败")?;
+        std::fs::write(&config_path, &content).context(tr!("写入扩容配置文件失败"))?;
 
         println!("[CONFIG] 扩容配置已写入: {}", config_path);
         println!("[CONFIG] 扩容标记已写入: {}", marker_path);
@@ -311,18 +313,18 @@ impl ConfigFileManager {
         // 创建数据目录
         let data_dir = format!("{}\\{}", data_partition, Self::DATA_DIR);
         std::fs::create_dir_all(&data_dir)
-            .context("创建数据目录失败")?;
+            .context(tr!("创建数据目录失败"))?;
 
         // 写入标记文件到源分区
         let marker_path = format!("{}\\{}", source_partition, Self::BACKUP_MARKER);
         std::fs::write(&marker_path, "LetRecovery Backup Marker")
-            .context("写入备份标记文件失败")?;
+            .context(tr!("写入备份标记文件失败"))?;
 
         // 写入配置文件
         let config_path = format!("{}\\{}", data_dir, Self::BACKUP_CONFIG);
         let content = Self::serialize_backup_config(config);
         std::fs::write(&config_path, &content)
-            .context("写入备份配置文件失败")?;
+            .context(tr!("写入备份配置文件失败"))?;
 
         println!("[CONFIG] 备份配置已写入: {}", config_path);
         println!("[CONFIG] 备份标记已写入: {}", marker_path);
@@ -334,7 +336,7 @@ impl ConfigFileManager {
     pub fn read_install_config(data_partition: &str) -> Result<InstallConfig> {
         let config_path = format!("{}\\{}\\{}", data_partition, Self::DATA_DIR, Self::INSTALL_CONFIG);
         let content = std::fs::read_to_string(&config_path)
-            .context("读取安装配置文件失败")?;
+            .context(tr!("读取安装配置文件失败"))?;
         Self::deserialize_install_config(&content)
     }
 
@@ -342,7 +344,7 @@ impl ConfigFileManager {
     pub fn read_backup_config(data_partition: &str) -> Result<BackupConfig> {
         let config_path = format!("{}\\{}\\{}", data_partition, Self::DATA_DIR, Self::BACKUP_CONFIG);
         let content = std::fs::read_to_string(&config_path)
-            .context("读取备份配置文件失败")?;
+            .context(tr!("读取备份配置文件失败"))?;
         Self::deserialize_backup_config(&content)
     }
 
@@ -601,17 +603,17 @@ WimEngine={}
 pub fn validate_unattend_xml(xml: &str) -> Result<(), String> {
     let s = xml.trim_start_matches('\u{feff}');
     if s.trim().is_empty() {
-        return Err("文件内容为空".to_string());
+        return Err(tr!("文件内容为空"));
     }
 
     // 完整 XML 解析：标签未闭合/未配对、引号未闭合、非法嵌套等都会在此报错。
-    let doc = roxmltree::Document::parse(s).map_err(|e| format!("XML 语法错误：{}", e))?;
+    let doc = roxmltree::Document::parse(s).map_err(|e| tr!("XML 语法错误：{}", e))?;
 
     // 根元素必须是 <unattend>
     let root = doc.root_element();
     let root_name = root.tag_name().name();
     if root_name != "unattend" {
-        return Err(format!(
+        return Err(tr!(
             "不是有效的无人值守文件（根元素应为 <unattend>，实际为 <{}>）",
             if root_name.is_empty() { "?" } else { root_name }
         ));
@@ -628,7 +630,7 @@ pub fn validate_unattend_xml(xml: &str) -> Result<(), String> {
 pub fn validate_winnt_sif(content: &str) -> Result<(), String> {
     let s = content.trim_start_matches('\u{feff}');
     if s.trim().is_empty() {
-        return Err("文件内容为空".to_string());
+        return Err(tr!("文件内容为空"));
     }
     let lower = s.to_ascii_lowercase();
     let has_section = ["[unattended]", "[data]", "[guiunattended]", "[userdata]"]
@@ -636,8 +638,7 @@ pub fn validate_winnt_sif(content: &str) -> Result<(), String> {
         .any(|sec| lower.contains(sec));
     if !has_section {
         return Err(
-            "不像有效的 winnt.sif(缺少 [Unattended]/[Data]/[GuiUnattended] 等节)。XP/2003 应答文件为 INI 格式的 winnt.sif,不是 XML。"
-                .to_string(),
+            tr!("不像有效的 winnt.sif(缺少 [Unattended]/[Data]/[GuiUnattended] 等节)。XP/2003 应答文件为 INI 格式的 winnt.sif,不是 XML。")
         );
     }
     Ok(())

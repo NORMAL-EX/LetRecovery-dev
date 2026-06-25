@@ -1,5 +1,6 @@
 use anyhow::Result;
 use std::path::Path;
+use crate::tr;
 use crate::utils::cmd::create_command;
 use crate::utils::encoding::gbk_to_utf8;
 use crate::utils::path::get_bin_dir;
@@ -60,7 +61,7 @@ impl std::fmt::Display for PartitionStyle {
         match self {
             PartitionStyle::GPT => write!(f, "GPT"),
             PartitionStyle::MBR => write!(f, "MBR"),
-            PartitionStyle::Unknown => write!(f, "未知"),
+            PartitionStyle::Unknown => write!(f, "{}", tr!("未知")),
         }
     }
 }
@@ -801,9 +802,12 @@ impl DiskManager {
         
         if max_shrink_mb == 0 {
             anyhow::bail!(
-                "分区 {}: 无法缩小，可能需要先进行碎片整理。\n\
+                "{}",
+                tr!(
+                    "分区 {}: 无法缩小，可能需要先进行碎片整理。\n\
                 建议：在 Windows 中运行磁盘碎片整理工具，或使用其他分区工具。",
-                source_letter
+                    source_letter
+                )
             );
         }
 
@@ -821,15 +825,18 @@ impl DiskManager {
         // 确保至少有 1GB 可用
         if actual_size_mb < 1024 {
             anyhow::bail!(
-                "分区 {}: 可缩小空间太小（{} MB），需要至少 1024 MB (1 GB)。\n\
+                "{}",
+                tr!(
+                    "分区 {}: 可缩小空间太小（{} MB），需要至少 1024 MB (1 GB)。\n\
                 建议：清理磁盘空间或进行碎片整理后重试。",
-                source_letter, actual_size_mb
+                    source_letter, actual_size_mb
+                )
             );
         }
 
         // 找一个可用的盘符
         let new_letter = Self::find_available_drive_letter()
-            .ok_or_else(|| anyhow::anyhow!("没有可用的盘符"))?;
+            .ok_or_else(|| anyhow::anyhow!("{}", tr!("没有可用的盘符")))?;
 
         println!(
             "[DISK] 准备从 {}: 缩小 {} MB 并创建新分区 {}:",
@@ -876,7 +883,7 @@ impl DiskManager {
             || output_lower.contains("无效") || output_lower.contains("invalid")
             || output_lower.contains("不支持") || output_lower.contains("无法")
             || output_lower.contains("拒绝") || output_lower.contains("denied") {
-            anyhow::bail!("Diskpart 执行失败: {}", output_text);
+            anyhow::bail!("{}", tr!("Diskpart 执行失败: {}", output_text));
         }
 
         // 等待系统识别新分区
@@ -890,9 +897,12 @@ impl DiskManager {
             }
             if retry == 4 {
                 anyhow::bail!(
-                    "分区创建失败：新分区 {}: 不可访问。\n\
+                    "{}",
+                    tr!(
+                        "分区创建失败：新分区 {}: 不可访问。\n\
                     Diskpart 输出: {}",
-                    new_letter, output_text
+                        new_letter, output_text
+                    )
                 );
             }
             std::thread::sleep(std::time::Duration::from_secs(1));
@@ -913,7 +923,7 @@ impl DiskManager {
                 actual_size_mb
             ),
         )
-        .map_err(|e| anyhow::anyhow!("写入标志文件失败: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("{}", tr!("写入标志文件失败: {}", e)))?;
 
         println!(
             "[DISK] 新分区 {}: 创建成功，大小 {} MB，标志文件已写入",
@@ -932,7 +942,7 @@ impl DiskManager {
     /// 删除自动创建的分区
     pub fn delete_auto_created_partition(letter: char) -> Result<()> {
         if !Self::is_auto_created_partition(letter) {
-            anyhow::bail!("分区 {} 不是自动创建的分区", letter);
+            anyhow::bail!("{}", tr!("分区 {} 不是自动创建的分区", letter));
         }
 
         println!("[DISK] 准备删除自动创建的分区 {}:", letter);
@@ -1082,15 +1092,18 @@ impl DiskManager {
         if max_shrink_bytes < required_size_bytes {
             println!("[DISK] {} 盘可缩小空间不足以容纳镜像文件", exclude_letter);
             return Err(anyhow::anyhow!(
-                "磁盘空间不足：{} 盘可缩小空间为 {:.2} GB，但镜像需要 {:.2} GB。\n\
+                "{}",
+                tr!(
+                    "磁盘空间不足：{} 盘可缩小空间为 {} GB，但镜像需要 {} GB。\n\
                 建议：\n\
                 1. 清理 {} 盘空间\n\
                 2. 运行磁盘碎片整理\n\
                 3. 或手动创建一个数据分区",
-                exclude_letter,
-                max_shrink_bytes as f64 / 1024.0 / 1024.0 / 1024.0,
-                required_size_bytes as f64 / 1024.0 / 1024.0 / 1024.0,
-                exclude_letter
+                    exclude_letter,
+                    format!("{:.2}", max_shrink_bytes as f64 / 1024.0 / 1024.0 / 1024.0),
+                    format!("{:.2}", required_size_bytes as f64 / 1024.0 / 1024.0 / 1024.0),
+                    exclude_letter
+                )
             ));
         }
 
@@ -1130,19 +1143,25 @@ impl DiskManager {
         // 确保分区大小至少为 1GB 且能容纳镜像
         if actual_size_mb < 1024 {
             return Err(anyhow::anyhow!(
-                "{} 盘可缩小空间太小（{} MB），需要至少 1 GB。\n\
+                "{}",
+                tr!(
+                    "{} 盘可缩小空间太小（{} MB），需要至少 1 GB。\n\
                 建议运行磁盘碎片整理后重试。",
-                exclude_letter,
-                max_shrink_mb
+                    exclude_letter,
+                    max_shrink_mb
+                )
             ));
         }
 
         if actual_size_mb * 1024 * 1024 < required_size_bytes {
             return Err(anyhow::anyhow!(
-                "{} 盘可缩小空间（{} MB）不足以容纳镜像（需要 {} MB）。",
-                exclude_letter,
-                actual_size_mb,
-                required_size_mb
+                "{}",
+                tr!(
+                    "{} 盘可缩小空间（{} MB）不足以容纳镜像（需要 {} MB）。",
+                    exclude_letter,
+                    actual_size_mb,
+                    required_size_mb
+                )
             ));
         }
 

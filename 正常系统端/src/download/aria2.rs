@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use tokio::sync::Mutex as TokioMutex;
 
+use crate::tr;
 use crate::utils::cmd::create_command;
 use crate::utils::path::get_bin_dir;
 
@@ -163,7 +164,7 @@ impl Aria2Manager {
         }
 
         let client = client.ok_or_else(|| {
-            anyhow::anyhow!("初始化aria2失败: {}", last_error)
+            anyhow::anyhow!("{}", tr!("初始化aria2失败: {}", last_error))
         })?;
 
         Ok(Self {
@@ -257,7 +258,7 @@ impl Aria2Manager {
             TaskStatus::Paused => DownloadStatus::Paused,
             TaskStatus::Complete => DownloadStatus::Complete,
             TaskStatus::Error => DownloadStatus::Error(status.error_message.unwrap_or_default()),
-            TaskStatus::Removed => DownloadStatus::Error("已移除".to_string()),
+            TaskStatus::Removed => DownloadStatus::Error(tr!("已移除")),
         };
 
         Ok(DownloadProgress {

@@ -1,6 +1,8 @@
 use anyhow::Result;
 use std::path::Path;
 
+use crate::tr;
+
 #[cfg(windows)]
 use windows::{
     core::PCWSTR,
@@ -127,7 +129,7 @@ impl IsoMounter {
 
             if result != WIN32_ERROR(0) {
                 println!("[ISO] OpenVirtualDisk 失败: {:?}", result);
-                anyhow::bail!("OpenVirtualDisk 失败: {:?}", result);
+                anyhow::bail!("{}", tr!("OpenVirtualDisk 失败: {}", format!("{:?}", result)));
             }
 
             println!("[ISO] OpenVirtualDisk 成功, handle: {:?}", handle);
@@ -154,7 +156,7 @@ impl IsoMounter {
             if result != WIN32_ERROR(0) {
                 println!("[ISO] AttachVirtualDisk 失败: {:?}", result);
                 let _ = CloseHandle(handle);
-                anyhow::bail!("AttachVirtualDisk 失败: {:?}", result);
+                anyhow::bail!("{}", tr!("AttachVirtualDisk 失败: {}", format!("{:?}", result)));
             }
 
             println!("[ISO] AttachVirtualDisk 成功");
@@ -201,7 +203,7 @@ impl IsoMounter {
                 return Ok(letter);
             }
 
-            anyhow::bail!("ISO 挂载后无法找到盘符，请手动检查")
+            anyhow::bail!("{}", tr!("ISO 挂载后无法找到盘符，请手动检查"))
         }
     }
 
@@ -238,14 +240,14 @@ impl IsoMounter {
             );
 
             if result != WIN32_ERROR(0) {
-                anyhow::bail!("OpenVirtualDisk 失败: {:?}", result);
+                anyhow::bail!("{}", tr!("OpenVirtualDisk 失败: {}", format!("{:?}", result)));
             }
 
             let result = DetachVirtualDisk(handle, DETACH_VIRTUAL_DISK_FLAG_NONE, 0);
             let _ = CloseHandle(handle);
 
             if result != WIN32_ERROR(0) {
-                anyhow::bail!("DetachVirtualDisk 失败: {:?}", result);
+                anyhow::bail!("{}", tr!("DetachVirtualDisk 失败: {}", format!("{:?}", result)));
             }
 
             println!("[ISO] 卸载成功: {}", iso_path);
@@ -362,7 +364,7 @@ impl IsoMounter {
 
         #[cfg(not(windows))]
         {
-            anyhow::bail!("ISO 挂载仅支持 Windows 系统")
+            anyhow::bail!("{}", tr!("ISO 挂载仅支持 Windows 系统"))
         }
     }
 

@@ -1,6 +1,7 @@
 use anyhow::Result;
 use std::path::Path;
 
+use crate::tr;
 use crate::utils::cmd::create_command;
 use crate::utils::encoding::gbk_to_utf8;
 use crate::utils::path::get_bin_dir;
@@ -83,7 +84,7 @@ detail volume
             }
         }
         
-        let disk_num = disk_num.ok_or_else(|| anyhow::anyhow!("无法确定分区所在磁盘"))?;
+        let disk_num = disk_num.ok_or_else(|| anyhow::anyhow!("{}", tr!("无法确定分区所在磁盘")))?;
         println!("[BOOT] 目标分区在磁盘 {}", disk_num);
         
         // Step 2: 查找该磁盘上的 ESP 分区（使用 GPT 类型）
@@ -126,7 +127,7 @@ list partition
             }
         }
         
-        let esp_partition = esp_partition.ok_or_else(|| anyhow::anyhow!("未找到 ESP 分区"))?;
+        let esp_partition = esp_partition.ok_or_else(|| anyhow::anyhow!("{}", tr!("未找到 ESP 分区")))?;
         
         // Step 3: 为 ESP 分配盘符
         // 先尝试移除可能存在的旧盘符
@@ -156,7 +157,7 @@ assign letter=S
             println!("[BOOT] ESP 已挂载到 S:");
             Ok("S:".to_string())
         } else {
-            anyhow::bail!("ESP 盘符分配失败")
+            anyhow::bail!("{}", tr!("ESP 盘符分配失败"))
         }
     }
 
@@ -241,7 +242,7 @@ assign letter=S
             }
         }
         
-        anyhow::bail!("未找到 EFI 系统分区")
+        anyhow::bail!("{}", tr!("未找到 EFI 系统分区"))
     }
 
     /// 设置默认引导项
@@ -295,7 +296,7 @@ assign letter=S
 
         // 验证 Windows 目录存在
         if !Path::new(&windows_path).exists() {
-            anyhow::bail!("Windows 目录不存在: {}", windows_path);
+            anyhow::bail!("{}", tr!("Windows 目录不存在: {}", windows_path));
         }
 
         // 用户可编辑的修复引导脚本（bin\repair_boot.txt）——仅在「高级选项」开启时启用，优先于默认逻辑；
@@ -395,7 +396,7 @@ assign letter=S
                             
                             let stderr = gbk_to_utf8(&output.stderr);
                             if !output.status.success() {
-                                anyhow::bail!("UEFI 引导修复失败: {}", stderr);
+                                anyhow::bail!("{}", tr!("UEFI 引导修复失败: {}", stderr));
                             }
                         }
                     }
@@ -436,7 +437,7 @@ assign letter=S
                     println!("[BOOT] bcdboot (auto) stderr: {}", stderr);
                     
                     if !output.status.success() {
-                        anyhow::bail!("引导修复失败: {}", stderr);
+                        anyhow::bail!("{}", tr!("引导修复失败: {}", stderr));
                     }
                 }
             }
@@ -481,7 +482,7 @@ assign letter=S
                 
                 let stderr = gbk_to_utf8(&output.stderr);
                 if !output.status.success() {
-                    anyhow::bail!("Legacy 引导修复失败: {}", stderr);
+                    anyhow::bail!("{}", tr!("Legacy 引导修复失败: {}", stderr));
                 }
             }
             
@@ -505,7 +506,7 @@ assign letter=S
                 println!("[BOOT] XP 引导写入完成:\n{}", out);
                 Ok(())
             }
-            Err(e) => anyhow::bail!("XP 引导写入失败: {}", e),
+            Err(e) => anyhow::bail!("{}", tr!("XP 引导写入失败: {}", e)),
         }
     }
 
@@ -518,7 +519,7 @@ assign letter=S
         let esp = self
             .find_esp_on_same_disk(windows_partition)
             .or_else(|_| self.find_and_mount_esp())
-            .map_err(|e| anyhow::anyhow!("未找到 ESP，无法写 UEFI 引导: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("{}", tr!("未找到 ESP，无法写 UEFI 引导: {}", e)))?;
         println!("[BOOT] 使用 ESP: {}", esp);
         match lr_core::xp::write_xp_uefi_gpt_boot(
             windows_partition,
@@ -529,7 +530,7 @@ assign letter=S
                 println!("[BOOT] XP UEFI 引导写入完成:\n{}", out);
                 Ok(())
             }
-            Err(e) => anyhow::bail!("XP UEFI 引导写入失败: {}", e),
+            Err(e) => anyhow::bail!("{}", tr!("XP UEFI 引导写入失败: {}", e)),
         }
     }
 }

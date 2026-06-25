@@ -21,6 +21,8 @@ use std::ptr::null_mut;
 use anyhow::{bail, Context, Result};
 use libloading::Library;
 
+use crate::tr;
+
 #[cfg(windows)]
 use windows::Win32::Foundation::{GetLastError, BOOL, HWND};
 
@@ -271,7 +273,7 @@ struct SetupApi {
 impl SetupApi {
     fn new() -> Result<Self> {
         let lib = unsafe { Library::new("setupapi.dll") }
-            .context("无法加载 setupapi.dll")?;
+            .context(tr!("无法加载 setupapi.dll"))?;
 
         unsafe {
             let get_class_devs: FnSetupDiGetClassDevsW = 
@@ -362,7 +364,7 @@ impl SetupApi {
         };
 
         if dev_info.is_null() || dev_info == (-1isize as *mut c_void) {
-            bail!("SetupDiGetClassDevsW 失败: {}", get_last_error());
+            bail!("{}", tr!("SetupDiGetClassDevsW 失败: {}", get_last_error()));
         }
 
         // 枚举每个设备
@@ -454,7 +456,7 @@ impl SetupApi {
 
         if result.0 == 0 {
             let err = get_last_error();
-            bail!("SetupCopyOEMInf 失败: 错误码 {}", err);
+            bail!("{}", tr!("SetupCopyOEMInf 失败: 错误码 {}", err));
         }
 
         Ok(wide_to_string(&dest_buffer))
@@ -471,7 +473,7 @@ impl SetupApi {
 
         if result.0 == 0 {
             let err = get_last_error();
-            bail!("SetupUninstallOEMInf 失败: 错误码 {}", err);
+            bail!("{}", tr!("SetupUninstallOEMInf 失败: 错误码 {}", err));
         }
 
         Ok(())
@@ -518,7 +520,7 @@ struct NewDevApi {
 impl NewDevApi {
     fn new() -> Result<Self> {
         let lib = unsafe { Library::new("newdev.dll") }
-            .context("无法加载 newdev.dll")?;
+            .context(tr!("无法加载 newdev.dll"))?;
 
         unsafe {
             let di_install_driver: FnDiInstallDriverW = 
@@ -556,7 +558,7 @@ impl NewDevApi {
 
         if result.0 == 0 {
             let err = get_last_error();
-            bail!("DiInstallDriverW 失败: 错误码 {}", err);
+            bail!("{}", tr!("DiInstallDriverW 失败: 错误码 {}", err));
         }
 
         Ok(need_reboot.0 != 0)
@@ -590,7 +592,7 @@ impl NewDevApi {
             if err == 0 {
                 return Ok(false);
             }
-            bail!("UpdateDriverForPlugAndPlayDevicesW 失败: 错误码 {}", err);
+            bail!("{}", tr!("UpdateDriverForPlugAndPlayDevicesW 失败: 错误码 {}", err));
         }
 
         Ok(need_reboot.0 != 0)
@@ -715,7 +717,7 @@ impl DriverManager {
         // 驱动存储格式: C:\Windows\System32\DriverStore\FileRepository\xxx.inf_xxx\
         // 需要复制整个目录
 
-        let parent_dir = inf_path.parent().context("无法获取父目录")?;
+        let parent_dir = inf_path.parent().context(tr!("无法获取父目录"))?;
         
         // 如果 INF 在 FileRepository 中
         if parent_dir.to_string_lossy().contains("FileRepository") {
@@ -723,7 +725,7 @@ impl DriverManager {
             Self::copy_dir_recursive(parent_dir, dest_dir)?;
         } else {
             // 只复制 INF 文件本身（来自 Windows\INF）
-            let dest_inf = dest_dir.join(inf_path.file_name().context("无文件名")?);
+            let dest_inf = dest_dir.join(inf_path.file_name().context(tr!("无文件名"))?);
             std::fs::copy(inf_path, &dest_inf)?;
 
             // 尝试查找并复制关联的 .sys 文件
@@ -841,7 +843,7 @@ impl DriverManager {
         let mut inf_files = Vec::new();
 
         if !dir.is_dir() {
-            bail!("{:?} 不是目录", dir);
+            bail!("{}", tr!("{} 不是目录", format!("{:?}", dir)));
         }
 
         for entry in walkdir::WalkDir::new(dir)
@@ -891,7 +893,7 @@ impl DriverManager {
 
         // 使用 dism.exe 命令行进行离线驱动注入
         let dism_cmd = DismCmd::new()
-            .map_err(|e| anyhow::anyhow!("DISM 命令行初始化失败: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("{}", tr!("DISM 命令行初始化失败: {}", e)))?;
 
         // 统计驱动文件数量
         let inf_files = Self::find_inf_files(source_dir)?;
@@ -1336,7 +1338,7 @@ impl DriverManager {
             .join("FileRepository");
 
         if !driver_store.exists() {
-            bail!("驱动存储目录不存在: {:?}", driver_store);
+            bail!("{}", tr!("驱动存储目录不存在: {}", format!("{:?}", driver_store)));
         }
 
         let mut success_count = 0;

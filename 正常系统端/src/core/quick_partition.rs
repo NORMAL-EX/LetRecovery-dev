@@ -25,6 +25,7 @@ use windows::{
 #[cfg(windows)]
 const IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS: u32 = 0x00560000;
 
+use crate::tr;
 use crate::utils::cmd::create_command;
 use crate::utils::encoding::gbk_to_utf8;
 use crate::utils::path::get_bin_dir;
@@ -75,13 +76,13 @@ impl PhysicalDisk {
     /// 获取显示名称
     pub fn display_name(&self) -> String {
         if self.model.is_empty() {
-            format!("磁盘 {} ({:.1} GB)", self.disk_number, self.size_gb())
+            tr!("磁盘 {} ({} GB)", self.disk_number, format!("{:.1}", self.size_gb()))
         } else {
-            format!(
-                "磁盘 {} - {} ({:.1} GB)",
+            tr!(
+                "磁盘 {} - {} ({} GB)",
                 self.disk_number,
                 self.model,
-                self.size_gb()
+                format!("{:.1}", self.size_gb())
             )
         }
     }
@@ -145,9 +146,9 @@ impl DiskPartitionInfo {
         } else if self.is_msr {
             "MSR".to_string()
         } else if self.is_recovery {
-            "恢复分区".to_string()
+            tr!("恢复分区")
         } else {
-            format!("分区 {}", self.partition_number)
+            tr!("分区 {}", self.partition_number)
         }
     }
 }
@@ -793,7 +794,7 @@ pub fn execute_quick_partition(
         _ => {
             return QuickPartitionResult {
                 success: false,
-                message: "无效的分区表类型".to_string(),
+                message: tr!("无效的分区表类型"),
                 created_partitions: Vec::new(),
             };
         }
@@ -840,7 +841,7 @@ pub fn execute_quick_partition(
                 created_partitions.push(format!("{}:", letter));
             } else {
                 script.push_str("assign\n");
-                created_partitions.push(format!("分区 {}", i + 1));
+                created_partitions.push(tr!("分区 {}", i + 1));
             }
         }
     }
@@ -857,20 +858,20 @@ pub fn execute_quick_partition(
             {
                 QuickPartitionResult {
                     success: false,
-                    message: format!("分区操作失败: {}", output),
+                    message: tr!("分区操作失败: {}", output),
                     created_partitions: Vec::new(),
                 }
             } else {
                 QuickPartitionResult {
                     success: true,
-                    message: "分区操作完成".to_string(),
+                    message: tr!("分区操作完成"),
                     created_partitions,
                 }
             }
         }
         Err(e) => QuickPartitionResult {
             success: false,
-            message: format!("执行 diskpart 失败: {}", e),
+            message: tr!("执行 diskpart 失败: {}", e),
             created_partitions: Vec::new(),
         },
     }
@@ -920,7 +921,7 @@ pub fn can_safely_partition(disk: &PhysicalDisk) -> (bool, String) {
             if letter == system_drive {
                 return (
                     false,
-                    format!(
+                    tr!(
                         "磁盘 {} 包含当前系统盘 {}:，无法进行一键分区",
                         disk.disk_number, system_drive
                     ),
@@ -936,7 +937,7 @@ pub fn can_safely_partition(disk: &PhysicalDisk) -> (bool, String) {
             if Path::new(&windows_path).exists() {
                 return (
                     false,
-                    format!(
+                    tr!(
                         "磁盘 {} 上的分区 {}: 包含 Windows 系统，请先备份数据",
                         disk.disk_number, letter
                     ),
@@ -1108,7 +1109,7 @@ pub fn resize_existing_partition(
     if new_size_mb < min_size_mb {
         return ResizePartitionResult {
             success: false,
-            message: format!(
+            message: tr!(
                 "目标大小 {} MB 必须大于已使用空间 {} MB (最小 {} MB)",
                 new_size_mb, used_mb, min_size_mb
             ),
@@ -1120,7 +1121,7 @@ pub fn resize_existing_partition(
     if new_size_mb == 0 {
         return ResizePartitionResult {
             success: false,
-            message: "目标大小不能为0".to_string(),
+            message: tr!("目标大小不能为0"),
             new_size_mb: current_size_mb,
         };
     }
@@ -1129,7 +1130,7 @@ pub fn resize_existing_partition(
     if new_size_mb == current_size_mb {
         return ResizePartitionResult {
             success: true,
-            message: "分区大小未改变".to_string(),
+            message: tr!("分区大小未改变"),
             new_size_mb: current_size_mb,
         };
     }
@@ -1170,20 +1171,20 @@ pub fn resize_existing_partition(
                 {
                     ResizePartitionResult {
                         success: false,
-                        message: format!("缩小分区失败: {}", output.trim()),
+                        message: tr!("缩小分区失败: {}", output.trim()),
                         new_size_mb: current_size_mb,
                     }
                 } else {
                     ResizePartitionResult {
                         success: true,
-                        message: format!("分区已成功缩小 {} MB", shrink_amount_mb),
+                        message: tr!("分区已成功缩小 {} MB", shrink_amount_mb),
                         new_size_mb,
                     }
                 }
             }
             Err(e) => ResizePartitionResult {
                 success: false,
-                message: format!("执行 diskpart 失败: {}", e),
+                message: tr!("执行 diskpart 失败: {}", e),
                 new_size_mb: current_size_mb,
             },
         }
@@ -1221,20 +1222,20 @@ pub fn resize_existing_partition(
                 {
                     ResizePartitionResult {
                         success: false,
-                        message: format!("扩展分区失败: {}", output.trim()),
+                        message: tr!("扩展分区失败: {}", output.trim()),
                         new_size_mb: current_size_mb,
                     }
                 } else {
                     ResizePartitionResult {
                         success: true,
-                        message: format!("分区已成功扩展 {} MB", extend_amount_mb),
+                        message: tr!("分区已成功扩展 {} MB", extend_amount_mb),
                         new_size_mb,
                     }
                 }
             }
             Err(e) => ResizePartitionResult {
                 success: false,
-                message: format!("执行 diskpart 失败: {}", e),
+                message: tr!("执行 diskpart 失败: {}", e),
                 new_size_mb: current_size_mb,
             },
         }
@@ -1339,18 +1340,18 @@ pub fn get_unallocated_space_after_partition(disk_number: u32, partition_number:
 pub fn can_resize_partition(partition: &DiskPartitionInfo, disk: &PhysicalDisk) -> (bool, String, u64, u64) {
     // 检查是否是特殊分区
     if partition.is_esp {
-        return (false, "ESP分区不支持调整大小".to_string(), 0, 0);
+        return (false, tr!("ESP分区不支持调整大小"), 0, 0);
     }
     if partition.is_msr {
-        return (false, "MSR分区不支持调整大小".to_string(), 0, 0);
+        return (false, tr!("MSR分区不支持调整大小"), 0, 0);
     }
     if partition.is_recovery {
-        return (false, "恢复分区不支持调整大小".to_string(), 0, 0);
+        return (false, tr!("恢复分区不支持调整大小"), 0, 0);
     }
 
     // 检查是否有盘符（没有盘符的分区可能无法正常操作）
     if partition.drive_letter.is_none() {
-        return (false, "分区没有盘符，无法调整大小".to_string(), 0, 0);
+        return (false, tr!("分区没有盘符，无法调整大小"), 0, 0);
     }
 
     let drive_letter = partition.drive_letter.unwrap();
@@ -1363,7 +1364,7 @@ pub fn can_resize_partition(partition: &DiskPartitionInfo, disk: &PhysicalDisk) 
         .unwrap_or('C');
 
     if drive_letter == system_drive {
-        return (false, "无法调整当前系统分区大小".to_string(), 0, 0);
+        return (false, tr!("无法调整当前系统分区大小"), 0, 0);
     }
 
     // 计算最小大小（已使用空间 + 100MB 余量）
@@ -1382,7 +1383,7 @@ pub fn can_resize_partition(partition: &DiskPartitionInfo, disk: &PhysicalDisk) 
     if min_size_mb >= max_size_mb {
         return (
             false,
-            format!(
+            tr!(
                 "分区无法调整大小，已用空间 {} MB 接近分区大小 {} MB",
                 used_mb, current_size_mb
             ),
@@ -1393,7 +1394,7 @@ pub fn can_resize_partition(partition: &DiskPartitionInfo, disk: &PhysicalDisk) 
 
     (
         true,
-        format!(
+        tr!(
             "可调整范围: {} MB - {} MB (已用: {} MB)",
             min_size_mb, max_size_mb, used_mb
         ),

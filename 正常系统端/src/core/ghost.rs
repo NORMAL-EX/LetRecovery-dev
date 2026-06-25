@@ -18,6 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::core::dism::DismProgress;
+use crate::tr;
 use crate::utils::cmd::create_command;
 use crate::utils::encoding::gbk_to_utf8;
 use crate::utils::path::get_bin_dir;
@@ -173,27 +174,27 @@ impl Ghost {
         
         if extension != "gho" && extension != "ghs" {
             return Err(GhostError::InvalidImage(
-                format!("不支持的文件格式: .{}", extension)
+                tr!("不支持的文件格式: .{}", extension)
             ).into());
         }
 
         // 检查文件大小（GHO 文件至少应该有头部信息）
         let metadata = std::fs::metadata(path)
-            .context("无法读取文件元数据")?;
-        
+            .context(tr!("无法读取文件元数据"))?;
+
         if metadata.len() < 512 {
             return Err(GhostError::InvalidImage(
-                "文件太小，不是有效的 GHO 文件".to_string()
+                tr!("文件太小，不是有效的 GHO 文件")
             ).into());
         }
 
         // 读取并验证 GHO 文件头
         let mut file = std::fs::File::open(path)
-            .context("无法打开文件")?;
-        
+            .context(tr!("无法打开文件"))?;
+
         let mut header = [0u8; 4];
         file.read_exact(&mut header)
-            .context("无法读取文件头")?;
+            .context(tr!("无法读取文件头"))?;
 
         // Ghost 文件签名检查
         let is_valid = (header[0] == 0xFE && header[1] == 0xEF)
@@ -205,8 +206,11 @@ impl Ghost {
                 return Ok(());
             }
             return Err(GhostError::InvalidImage(
-                format!("文件头无效: {:02X} {:02X} {:02X} {:02X}", 
-                    header[0], header[1], header[2], header[3])
+                tr!("文件头无效: {} {} {} {}",
+                    format!("{:02X}", header[0]),
+                    format!("{:02X}", header[1]),
+                    format!("{:02X}", header[2]),
+                    format!("{:02X}", header[3]))
             ).into());
         }
 
@@ -231,7 +235,7 @@ impl Ghost {
 
         info.original_size = file_size * 2;
         info.compression_ratio = 0.5;
-        info.description = format!("GHO 镜像 - {:.1} GB (压缩后)", file_size as f64 / 1024.0 / 1024.0 / 1024.0);
+        info.description = tr!("GHO 镜像 - {} GB (压缩后)", format!("{:.1}", file_size as f64 / 1024.0 / 1024.0 / 1024.0));
 
         Ok(info)
     }
@@ -254,7 +258,7 @@ impl Ghost {
 
         if disk_number == 0 || partition_number == 0 {
             return Err(GhostError::InvalidPartition(
-                format!("无效的分区参数: 磁盘={}, 分区={}", disk_number, partition_number)
+                tr!("无效的分区参数: 磁盘={}, 分区={}", disk_number, partition_number)
             ).into());
         }
 
@@ -273,7 +277,7 @@ impl Ghost {
         if let Some(ref tx) = progress_tx {
             let _ = tx.send(DismProgress {
                 percentage: 0,
-                status: "STEP:3:释放系统镜像".to_string(),
+                status: format!("STEP:3:{}", tr!("释放系统镜像")),
             });
         }
 
@@ -289,7 +293,7 @@ impl Ghost {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .context("无法启动 Ghost 进程")?;
+            .context(tr!("无法启动 Ghost 进程"))?;
 
         let result = self.monitor_ghost_process(&mut child, progress_tx, estimated_size);
 
@@ -320,18 +324,18 @@ impl Ghost {
             .iter()
             .find(|p| p.letter.eq_ignore_ascii_case(&letter))
             .ok_or_else(|| GhostError::InvalidPartition(
-                format!("找不到分区 {}", letter)
+                tr!("找不到分区 {}", letter)
             ))?;
 
-        println!("[GHOST] 找到分区信息: letter={}, disk={:?}, partition={:?}", 
+        println!("[GHOST] 找到分区信息: letter={}, disk={:?}, partition={:?}",
             partition.letter, partition.disk_number, partition.partition_number);
 
         let disk_number = partition.disk_number.ok_or_else(|| {
-            GhostError::InvalidPartition(format!("无法获取 {} 的磁盘号，请刷新分区列表", letter))
+            GhostError::InvalidPartition(tr!("无法获取 {} 的磁盘号，请刷新分区列表", letter))
         })?;
-        
+
         let partition_number = partition.partition_number.ok_or_else(|| {
-            GhostError::InvalidPartition(format!("无法获取 {} 的分区号，请刷新分区列表", letter))
+            GhostError::InvalidPartition(tr!("无法获取 {} 的分区号，请刷新分区列表", letter))
         })?;
 
         let ghost_disk = disk_number + 1;
@@ -423,7 +427,7 @@ impl Ghost {
                     if let Some(ref tx) = progress_tx {
                         let _ = tx.send(DismProgress {
                             percentage: 100,
-                            status: "STEP:3:释放系统镜像".to_string(),
+                            status: format!("STEP:3:{}", tr!("释放系统镜像")),
                         });
                     }
 
@@ -434,9 +438,9 @@ impl Ghost {
                         return Ok(());
                     } else {
                         let error_msg = if stderr_output.trim().is_empty() {
-                            format!("Ghost 进程异常退出，退出码: {:?}", status.code())
+                            tr!("Ghost 进程异常退出，退出码: {}", format!("{:?}", status.code()))
                         } else {
-                            format!("Ghost 错误: {}", stderr_output.trim())
+                            tr!("Ghost 错误: {}", stderr_output.trim())
                         };
                         println!("[GHOST] 恢复失败: {}", error_msg);
                         return Err(GhostError::ExecutionFailed(error_msg).into());
@@ -454,14 +458,14 @@ impl Ghost {
                         if let Some(ref tx) = progress_tx {
                             let _ = tx.send(DismProgress {
                                 percentage: progress,
-                                status: "STEP:3:释放系统镜像".to_string(),
+                                status: format!("STEP:3:{}", tr!("释放系统镜像")),
                             });
                         }
                     }
                 }
                 Err(e) => {
                     return Err(GhostError::ExecutionFailed(
-                        format!("检查进程状态失败: {}", e)
+                        tr!("检查进程状态失败: {}", e)
                     ).into());
                 }
             }
@@ -507,13 +511,13 @@ impl Ghost {
 
         if disk_number == 0 || partition_number == 0 {
             return Err(GhostError::InvalidPartition(
-                format!("无效的分区参数: 磁盘={}, 分区={}", disk_number, partition_number)
+                tr!("无效的分区参数: 磁盘={}, 分区={}", disk_number, partition_number)
             ).into());
         }
 
         if let Some(parent) = Path::new(gho_file).parent() {
             std::fs::create_dir_all(parent)
-                .context("无法创建输出目录")?;
+                .context(tr!("无法创建输出目录"))?;
         }
 
         let source_partition = format!("{}:{}", disk_number, partition_number);
@@ -528,7 +532,7 @@ impl Ghost {
         if let Some(ref tx) = progress_tx {
             let _ = tx.send(DismProgress {
                 percentage: 0,
-                status: "正在准备备份...".to_string(),
+                status: tr!("正在准备备份..."),
             });
         }
 
@@ -544,7 +548,7 @@ impl Ghost {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .context("无法启动 Ghost 进程")?;
+            .context(tr!("无法启动 Ghost 进程"))?;
 
         let result = self.monitor_ghost_process(&mut child, progress_tx, 0);
 
@@ -570,18 +574,18 @@ impl Ghost {
         };
 
         let partitions = crate::core::disk::DiskManager::get_partitions()
-            .map_err(|e| anyhow::anyhow!("获取分区列表失败: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("{}", tr!("获取分区列表失败: {}", e)))?;
         let partition = partitions
             .iter()
             .find(|p| p.letter.eq_ignore_ascii_case(&letter))
-            .ok_or_else(|| anyhow::anyhow!("找不到分区 {}", letter))?;
+            .ok_or_else(|| anyhow::anyhow!("{}", tr!("找不到分区 {}", letter)))?;
 
         let disk_number = partition
             .disk_number
-            .ok_or_else(|| anyhow::anyhow!("无法获取 {} 的磁盘号，请刷新分区列表", letter))?;
+            .ok_or_else(|| anyhow::anyhow!("{}", tr!("无法获取 {} 的磁盘号，请刷新分区列表", letter)))?;
         let partition_number = partition
             .partition_number
-            .ok_or_else(|| anyhow::anyhow!("无法获取 {} 的分区号，请刷新分区列表", letter))?;
+            .ok_or_else(|| anyhow::anyhow!("{}", tr!("无法获取 {} 的分区号，请刷新分区列表", letter)))?;
 
         // Ghost 磁盘号从 1 开始（create_image 内部直接把它当作 ghost src 的磁盘号）
         self.create_image(disk_number + 1, partition_number, gho_file, 9, progress_tx)

@@ -11,6 +11,7 @@ use std::process::Stdio;
 
 use anyhow::{bail, Context, Result};
 
+use crate::tr;
 use crate::utils::command::new_command;
 
 /// Cabinet 文件解压器
@@ -49,7 +50,7 @@ impl CabinetExtractor {
             return Ok(expand);
         }
 
-        bail!("未找到 expand.exe，请确保 Windows 系统完整")
+        bail!("{}", tr!("未找到 expand.exe，请确保 Windows 系统完整"))
     }
 
     /// 验证 expand.exe 是否可用
@@ -73,12 +74,12 @@ impl CabinetExtractor {
     pub fn extract(&self, cab_path: &Path, dest_dir: &Path) -> Result<Vec<PathBuf>> {
         // 验证 cab 文件存在
         if !cab_path.exists() {
-            bail!("CAB 文件不存在: {}", cab_path.display());
+            bail!("{}", tr!("CAB 文件不存在: {}", cab_path.display()));
         }
 
         // 确保目标目录存在
         std::fs::create_dir_all(dest_dir)
-            .context("创建目标目录失败")?;
+            .context(tr!("创建目标目录失败"))?;
 
         println!(
             "[CABINET] 解压: {} -> {}",
@@ -95,7 +96,7 @@ impl CabinetExtractor {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        let output = cmd.output().context("执行 expand.exe 失败")?;
+        let output = cmd.output().context(tr!("执行 expand.exe 失败"))?;
 
         // 处理输出
         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -107,7 +108,7 @@ impl CabinetExtractor {
             } else {
                 stdout.to_string()
             };
-            bail!("expand.exe 解压失败: {}", error_msg.trim());
+            bail!("{}", tr!("expand.exe 解压失败: {}", error_msg.trim()));
         }
 
         // 解析输出，获取解压的文件列表
@@ -196,7 +197,7 @@ impl CabinetExtractor {
     /// - 文件名列表
     pub fn list_contents(&self, cab_path: &Path) -> Result<Vec<String>> {
         if !cab_path.exists() {
-            bail!("CAB 文件不存在: {}", cab_path.display());
+            bail!("{}", tr!("CAB 文件不存在: {}", cab_path.display()));
         }
 
         // 使用 expand.exe -D 列出内容
@@ -206,11 +207,11 @@ impl CabinetExtractor {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        let output = cmd.output().context("执行 expand.exe 失败")?;
+        let output = cmd.output().context(tr!("执行 expand.exe 失败"))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("列出 CAB 内容失败: {}", stderr.trim());
+            bail!("{}", tr!("列出 CAB 内容失败: {}", stderr.trim()));
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
