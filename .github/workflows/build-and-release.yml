@@ -14,6 +14,7 @@ on:
   # 开发分支：push 即自动构建发布（无需 workflow_dispatch 权限；tag 留空走当天日期）。
   push:
     branches:
+      - main
       - claude/dazzling-knuth-x9795l
 
 permissions:
