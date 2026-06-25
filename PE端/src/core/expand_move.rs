@@ -40,6 +40,7 @@ use windows::Win32::System::Ioctl::{
 use windows::Win32::System::IO::DeviceIoControl;
 
 use crate::core::disk::{DiskManager, PartitionStyle};
+use crate::tr;
 use crate::utils::command::new_command;
 use crate::utils::encoding::gbk_to_utf8;
 use crate::utils::path::get_bin_dir;
@@ -288,21 +289,21 @@ unsafe fn lock_dismount_volume(letter: char) -> Result<HANDLE> {
         Default::default(),
         None,
     )
-    .map_err(|e| anyhow!("打开卷 {}: 失败: {}", letter, e))?;
+    .map_err(|e| anyhow!("{}", tr!("打开卷 {}: 失败: {}", letter, e)))?;
     if handle == INVALID_HANDLE_VALUE {
-        bail!("打开卷 {}: 得到无效句柄", letter);
+        bail!("{}", tr!("打开卷 {}: 得到无效句柄", letter));
     }
     let mut returned: u32 = 0;
     if DeviceIoControl(handle, FSCTL_LOCK_VOLUME, None, 0, None, 0, Some(&mut returned), None).is_err()
     {
         let _ = CloseHandle(handle);
-        bail!("锁定卷 {}: 失败（可能有句柄占用）", letter);
+        bail!("{}", tr!("锁定卷 {}: 失败（可能有句柄占用）", letter));
     }
     if DeviceIoControl(handle, FSCTL_DISMOUNT_VOLUME, None, 0, None, 0, Some(&mut returned), None)
         .is_err()
     {
         let _ = CloseHandle(handle);
-        bail!("卸载卷 {}: 失败", letter);
+        bail!("{}", tr!("卸载卷 {}: 失败", letter));
     }
     Ok(handle)
 }
@@ -320,9 +321,9 @@ unsafe fn raw_move_right(disk_number: u32, src: u64, len: u64, delta: u64) -> Re
         Default::default(),
         None,
     )
-    .map_err(|e| anyhow!("打开物理磁盘 {} 失败: {}", disk_number, e))?;
+    .map_err(|e| anyhow!("{}", tr!("打开物理磁盘 {} 失败: {}", disk_number, e)))?;
     if handle == INVALID_HANDLE_VALUE {
-        bail!("打开物理磁盘 {} 得到无效句柄", disk_number);
+        bail!("{}", tr!("打开物理磁盘 {} 得到无效句柄", disk_number));
     }
 
     let result = (|| -> Result<()> {
@@ -345,7 +346,7 @@ unsafe fn raw_move_right(disk_number: u32, src: u64, len: u64, delta: u64) -> Re
         }
         // 刷盘
         windows::Win32::Storage::FileSystem::FlushFileBuffers(handle)
-            .map_err(|e| anyhow!("刷盘失败: {}", e))?;
+            .map_err(|e| anyhow!("{}", tr!("刷盘失败: {}", e)))?;
         Ok(())
     })();
 
@@ -355,7 +356,7 @@ unsafe fn raw_move_right(disk_number: u32, src: u64, len: u64, delta: u64) -> Re
 
 unsafe fn seek(handle: HANDLE, offset: i64) -> Result<()> {
     SetFilePointerEx(handle, offset, None, FILE_BEGIN)
-        .map_err(|e| anyhow!("定位到 {} 失败: {}", offset, e))
+        .map_err(|e| anyhow!("{}", tr!("定位到 {} 失败: {}", offset, e)))
 }
 
 unsafe fn read_exact(handle: HANDLE, buf: &mut [u8]) -> Result<()> {
@@ -363,9 +364,9 @@ unsafe fn read_exact(handle: HANDLE, buf: &mut [u8]) -> Result<()> {
     while done < buf.len() {
         let mut read: u32 = 0;
         ReadFile(handle, Some(&mut buf[done..]), Some(&mut read), None)
-            .map_err(|e| anyhow!("读盘失败: {}", e))?;
+            .map_err(|e| anyhow!("{}", tr!("读盘失败: {}", e)))?;
         if read == 0 {
-            bail!("读盘返回 0 字节（已读 {}/{}）", done, buf.len());
+            bail!("{}", tr!("读盘返回 0 字节（已读 {}/{}）", done, buf.len()));
         }
         done += read as usize;
     }
@@ -377,9 +378,9 @@ unsafe fn write_exact(handle: HANDLE, buf: &[u8]) -> Result<()> {
     while done < buf.len() {
         let mut written: u32 = 0;
         WriteFile(handle, Some(&buf[done..]), Some(&mut written), None)
-            .map_err(|e| anyhow!("写盘失败: {}", e))?;
+            .map_err(|e| anyhow!("{}", tr!("写盘失败: {}", e)))?;
         if written == 0 {
-            bail!("写盘返回 0 字节（已写 {}/{}）", done, buf.len());
+            bail!("{}", tr!("写盘返回 0 字节（已写 {}/{}）", done, buf.len()));
         }
         done += written as usize;
     }
@@ -428,17 +429,17 @@ pub fn expand_c_drive(letter: char, target_size_mb: u64, data_partition: &str) -
     }
 
     let (disk, c_off, c_len) = unsafe { volume_disk_and_offset(letter) }
-        .ok_or_else(|| anyhow!("无法定位分区 {}: 所在磁盘/偏移", letter))?;
+        .ok_or_else(|| anyhow!("{}", tr!("无法定位分区 {}: 所在磁盘/偏移", letter)))?;
     let target_bytes = target_size_mb * MIB;
     if target_bytes <= c_len {
-        return Ok(format!("分区 {}: 当前已达到或超过目标大小，无需扩容", letter));
+        return Ok(tr!("分区 {}: 当前已达到或超过目标大小，无需扩容", letter));
     }
     let delta = target_bytes - c_len;
 
     let (style, disk_size, parts) =
-        unsafe { read_disk_layout(disk) }.ok_or_else(|| anyhow!("读取磁盘 {} 布局失败", disk))?;
+        unsafe { read_disk_layout(disk) }.ok_or_else(|| anyhow!("{}", tr!("读取磁盘 {} 布局失败", disk)))?;
     if style == PartitionStyle::Unknown {
-        bail!("磁盘 {} 分区表类型未知，拒绝操作", disk);
+        bail!("{}", tr!("磁盘 {} 分区表类型未知，拒绝操作", disk));
     }
 
     // 找到 C 之后紧邻的分区 N（offset 最小且 > c_off）。
@@ -456,20 +457,20 @@ pub fn expand_c_drive(letter: char, target_size_mb: u64, data_partition: &str) -
 
     // 否则需要移动后方分区（Case 2）。
     let n = next.ok_or_else(|| {
-        anyhow!("C 盘后方空间不足且无可移动分区（相邻未分配仅 {} MiB）", adj_unalloc / MIB)
+        anyhow!("{}", tr!("C 盘后方空间不足且无可移动分区（相邻未分配仅 {} MiB）", adj_unalloc / MIB))
     })?;
 
     // ===== 防呆校验（任一不满足，安全失败，不触碰磁盘）=====
     if n.is_special {
-        bail!("C 盘后方分区是系统/ESP/MSR/恢复等特殊分区，为安全起见拒绝移动");
+        bail!("{}", tr!("C 盘后方分区是系统/ESP/MSR/恢复等特殊分区，为安全起见拒绝移动"));
     }
     // N 必须紧贴 C（中间最多只有已计入的 adj_unalloc）。
     if n.offset != c_end + adj_unalloc {
-        bail!("分区布局异常（后方分区不连续），拒绝移动");
+        bail!("{}", tr!("分区布局异常（后方分区不连续），拒绝移动"));
     }
     // N 必须有盘符（用于卸载与重建后还原）。
     let n_letter = letter_for(disk, n.offset)
-        .ok_or_else(|| anyhow!("后方分区无盘符，无法安全移动"))?;
+        .ok_or_else(|| anyhow!("{}", tr!("后方分区无盘符，无法安全移动")))?;
     // N 后方边界（下一分区起点或磁盘尾）。
     let after_n = parts
         .iter()
@@ -498,7 +499,7 @@ pub fn expand_c_drive(letter: char, target_size_mb: u64, data_partition: &str) -
         ("N 尾部空闲", free_after_n),
     ] {
         if !aligned(v) {
-            bail!("几何未按 1 MiB 对齐（{}={} 字节），为保证精确重建拒绝移动", name, v);
+            bail!("{}", tr!("几何未按 1 MiB 对齐（{}={} 字节），为保证精确重建拒绝移动", name, v));
         }
     }
 
@@ -523,22 +524,22 @@ pub fn expand_c_drive(letter: char, target_size_mb: u64, data_partition: &str) -
         let out = run_diskpart(&script)?;
         log::info!("[EXPAND-MOVE] shrink 输出: {}", out);
         if !diskpart_ok(&out) {
-            bail!("收缩后方分区 {}: 失败，未做任何移动。输出：{}", n_letter, out);
+            bail!("{}", tr!("收缩后方分区 {}: 失败，未做任何移动。输出：{}", n_letter, out));
         }
         // 重新读取布局，确认 N 偏移未变、长度已减小且仍 1 MiB 对齐。
         let (_s2, _ds2, parts2) =
-            unsafe { read_disk_layout(disk) }.ok_or_else(|| anyhow!("shrink 后重读磁盘布局失败"))?;
+            unsafe { read_disk_layout(disk) }.ok_or_else(|| anyhow!("{}", tr!("shrink 后重读磁盘布局失败")))?;
         let n2 = parts2
             .iter()
             .find(|p| p.number == n.number && p.offset == n.offset)
-            .ok_or_else(|| anyhow!("shrink 后未找到原分区，已中止（未移动数据）"))?;
+            .ok_or_else(|| anyhow!("{}", tr!("shrink 后未找到原分区，已中止（未移动数据）")))?;
         if !aligned(n2.length) {
-            bail!("shrink 后分区长度非 1 MiB 对齐，已中止（未移动数据）");
+            bail!("{}", tr!("shrink 后分区长度非 1 MiB 对齐，已中止（未移动数据）"));
         }
         n_len_now = n2.length;
         // 再次确认右移后能放下：n.offset+shift+n_len_now <= after_n
         if n.offset + shift + n_len_now > after_n {
-            bail!("shrink 后空间仍不足，已中止（未移动数据）");
+            bail!("{}", tr!("shrink 后空间仍不足，已中止（未移动数据）"));
         }
     }
 
@@ -551,7 +552,7 @@ pub fn expand_c_drive(letter: char, target_size_mb: u64, data_partition: &str) -
     }
     move_res.map_err(|e| {
         journal(data_partition, &format!("MOVE FAILED: {}", e));
-        anyhow!("搬移分区数据失败（分区 {} 可能已损坏，请用 journal 诊断）：{}", n_letter, e)
+        anyhow!("{}", tr!("搬移分区数据失败（分区 {} 可能已损坏，请用 journal 诊断）：{}", n_letter, e))
     })?;
     journal(data_partition, "MOVE done");
 
@@ -573,16 +574,17 @@ pub fn expand_c_drive(letter: char, target_size_mb: u64, data_partition: &str) -
     log::info!("[EXPAND-MOVE] recreate 输出: {}", out);
     if !diskpart_ok(&out) {
         bail!(
-            "搬移已完成但重建分区表项失败（分区 {} 数据在新位置 offset={} 但表项未建好，请据 journal 手工修复）。输出：{}",
-            n_letter, new_off, out
+            "{}",
+            tr!("搬移已完成但重建分区表项失败（分区 {} 数据在新位置 offset={} 但表项未建好，请据 journal 手工修复）。输出：{}",
+            n_letter, new_off, out)
         );
     }
 
     // ===== Step D：把 C extend 到目标 =====
     journal(data_partition, "EXTEND C");
     let msg = DiskManager::expand_partition_lossless(letter, target_size_mb).map_err(|e| {
-        anyhow!("分区已成功移动，但最后扩展 C 失败：{}（可重试一键扩容，此时已是相邻未分配空间）", e)
+        anyhow!("{}", tr!("分区已成功移动，但最后扩展 C 失败：{}（可重试一键扩容，此时已是相邻未分配空间）", e))
     })?;
     journal(data_partition, "DONE");
-    Ok(format!("已移动后方分区 {} 并{}", n_letter, msg))
+    Ok(tr!("已移动后方分区 {} 并{}", n_letter, msg))
 }

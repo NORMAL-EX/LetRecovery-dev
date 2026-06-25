@@ -11,6 +11,7 @@ use std::path::Path;
 use std::sync::mpsc::Sender;
 
 use crate::core::dism_exe::{DismExe, DismExeProgress};
+use crate::tr;
 use lr_core::image_meta::{WimProgress, WIM_COMPRESS_LZX, WIM_COMPRESS_LZMS};
 use lr_core::wimlib::WimlibManager;
 use lr_core::WimEngineManager;
@@ -58,10 +59,10 @@ impl Dism {
 
         log::info!("[Dism] 校验镜像完整性: {}", image_file);
 
-        let lib = Wimlib::new().map_err(|e| anyhow::anyhow!("wimlib 初始化失败: {}", e))?;
+        let lib = Wimlib::new().map_err(|e| anyhow::anyhow!("{}", tr!("wimlib 初始化失败: {}", e)))?;
         let handle = lib
             .open_wim(image_file)
-            .map_err(|e| anyhow::anyhow!("打开镜像失败: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("{}", tr!("打开镜像失败: {}", e)))?;
 
         // 进度监控线程：读取 wimlib 全局校验进度并上报
         let done = Arc::new(AtomicBool::new(false));
@@ -79,7 +80,7 @@ impl Dism {
                     if let Some(ref t) = tx {
                         let _ = t.send(DismProgress {
                             percentage: p,
-                            status: format!("正在校验镜像 ({}%)...", p),
+                            status: tr!("正在校验镜像 ({}%)...", p),
                         });
                     }
                 }
@@ -115,7 +116,7 @@ impl Dism {
         log::info!("[Dism] 应用镜像: {} -> {}", image_file, apply_dir);
 
         let wim_manager = WimEngineManager::new_current()
-            .map_err(|e| anyhow::anyhow!("镜像引擎初始化失败: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("{}", tr!("镜像引擎初始化失败: {}", e)))?;
 
         // 创建进度转换通道
         let (wim_tx, wim_rx) = std::sync::mpsc::channel::<WimProgress>();
@@ -145,7 +146,7 @@ impl Dism {
                 Ok(())
             }
             Err(e) => {
-                anyhow::bail!("镜像应用失败: {}", e)
+                anyhow::bail!("{}", tr!("镜像应用失败: {}", e))
             }
         }
     }
@@ -163,7 +164,7 @@ impl Dism {
         log::info!("[Dism] 捕获镜像: {} -> {}", capture_dir, image_file);
 
         let wim_manager = WimEngineManager::new_current()
-            .map_err(|e| anyhow::anyhow!("镜像引擎初始化失败: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("{}", tr!("镜像引擎初始化失败: {}", e)))?;
 
         let (wim_tx, wim_rx) = std::sync::mpsc::channel::<WimProgress>();
 
@@ -196,7 +197,7 @@ impl Dism {
                 Ok(())
             }
             Err(e) => {
-                anyhow::bail!("镜像捕获失败: {}", e)
+                anyhow::bail!("{}", tr!("镜像捕获失败: {}", e))
             }
         }
     }
@@ -230,7 +231,7 @@ impl Dism {
         log::info!("[Dism] 捕获ESD镜像: {} -> {}", capture_dir, image_file);
 
         let wim_manager = WimEngineManager::new_current()
-            .map_err(|e| anyhow::anyhow!("镜像引擎初始化失败: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("{}", tr!("镜像引擎初始化失败: {}", e)))?;
 
         let (wim_tx, wim_rx) = std::sync::mpsc::channel::<WimProgress>();
 
@@ -263,7 +264,7 @@ impl Dism {
                 Ok(())
             }
             Err(e) => {
-                anyhow::bail!("ESD镜像捕获失败: {}", e)
+                anyhow::bail!("{}", tr!("ESD镜像捕获失败: {}", e))
             }
         }
     }
@@ -301,12 +302,12 @@ impl Dism {
         if let Some(ref tx) = progress_tx {
             let _ = tx.send(DismProgress {
                 percentage: 0,
-                status: "正在捕获镜像...".to_string(),
+                status: tr!("正在捕获镜像..."),
             });
         }
 
         let engine = WimEngineManager::new_current()
-            .map_err(|e| anyhow::anyhow!("镜像引擎初始化失败: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("{}", tr!("镜像引擎初始化失败: {}", e)))?;
 
         let (wim_tx, wim_rx) = std::sync::mpsc::channel::<WimProgress>();
 
@@ -336,20 +337,20 @@ impl Dism {
 
         if let Err(e) = result {
             let _ = std::fs::remove_file(&temp_wim);
-            anyhow::bail!("捕获镜像失败: {}", e);
+            anyhow::bail!("{}", tr!("捕获镜像失败: {}", e));
         }
 
         // Step 2: 分割WIM为SWM
         if let Some(ref tx) = progress_tx {
             let _ = tx.send(DismProgress {
                 percentage: 80,
-                status: "正在分割镜像...".to_string(),
+                status: tr!("正在分割镜像..."),
             });
         }
 
         // 分卷由 libwim 执行（与生成引擎无关）。
         let wim_manager = WimlibManager::new()
-            .map_err(|e| anyhow::anyhow!("wimlib 初始化失败: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("{}", tr!("wimlib 初始化失败: {}", e)))?;
         let split_result = wim_manager.split_wim(&temp_wim, image_file, split_size_mb as u64);
 
         // 清理临时WIM
@@ -360,14 +361,14 @@ impl Dism {
                 if let Some(ref tx) = progress_tx {
                     let _ = tx.send(DismProgress {
                         percentage: 100,
-                        status: "分卷完成".to_string(),
+                        status: tr!("分卷完成"),
                     });
                 }
                 log::info!("[Dism] SWM分卷镜像创建成功");
                 Ok(())
             }
             Err(e) => {
-                anyhow::bail!("分割镜像失败: {}", e)
+                anyhow::bail!("{}", tr!("分割镜像失败: {}", e))
             }
         }
     }
@@ -387,7 +388,7 @@ impl Dism {
 
         // 使用 dism.exe 命令行方式导入驱动
         let dism_exe = DismExe::new()
-            .map_err(|e| anyhow::anyhow!("dism.exe 初始化失败: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("{}", tr!("dism.exe 初始化失败: {}", e)))?;
 
         dism_exe.add_driver_offline(image_path, driver_path, true, false, None)?;
 
@@ -409,7 +410,7 @@ impl Dism {
         );
 
         let dism_exe = DismExe::new()
-            .map_err(|e| anyhow::anyhow!("dism.exe 初始化失败: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("{}", tr!("dism.exe 初始化失败: {}", e)))?;
 
         // 创建进度转换通道
         let (exe_tx, exe_rx) = std::sync::mpsc::channel::<DismExeProgress>();
@@ -438,7 +439,7 @@ impl Dism {
                 Ok(())
             }
             Err(e) => {
-                anyhow::bail!("离线驱动导入失败: {}", e)
+                anyhow::bail!("{}", tr!("离线驱动导入失败: {}", e))
             }
         }
     }
@@ -453,7 +454,7 @@ impl Dism {
         );
 
         let dism_exe = DismExe::new()
-            .map_err(|e| anyhow::anyhow!("dism.exe 初始化失败: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("{}", tr!("dism.exe 初始化失败: {}", e)))?;
 
         dism_exe.add_package_offline(image_path, cab_path, false, None)?;
 
@@ -475,7 +476,7 @@ impl Dism {
         );
 
         let dism_exe = DismExe::new()
-            .map_err(|e| anyhow::anyhow!("dism.exe 初始化失败: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("{}", tr!("dism.exe 初始化失败: {}", e)))?;
 
         // 创建进度转换通道
         let (exe_tx, exe_rx) = std::sync::mpsc::channel::<DismExeProgress>();
@@ -512,7 +513,7 @@ impl Dism {
                 Ok((success, fail))
             }
             Err(e) => {
-                anyhow::bail!("批量 CAB 更新包安装失败: {}", e)
+                anyhow::bail!("{}", tr!("批量 CAB 更新包安装失败: {}", e))
             }
         }
     }
@@ -546,7 +547,7 @@ impl Dism {
             }
         }
 
-        anyhow::bail!("无法获取镜像信息")
+        anyhow::bail!("{}", tr!("无法获取镜像信息"))
     }
 
     /// 直接解析 WIM 文件的 XML 元数据
@@ -565,7 +566,7 @@ impl Dism {
         // 验证 WIM 签名 "MSWIM\0\0\0"
         let signature = &header[0..8];
         if signature != b"MSWIM\0\0\0" {
-            anyhow::bail!("不是有效的 WIM 文件");
+            anyhow::bail!("{}", tr!("不是有效的 WIM 文件"));
         }
 
         // 从头部读取 XML 数据的偏移量和大小
@@ -573,7 +574,7 @@ impl Dism {
         let xml_size = u64::from_le_bytes(header[56..64].try_into().unwrap());
 
         if xml_offset == 0 || xml_size == 0 || xml_size > 100_000_000 {
-            anyhow::bail!("XML 元数据位置无效");
+            anyhow::bail!("{}", tr!("XML 元数据位置无效"));
         }
 
         log::info!("[Dism] XML 偏移: {}, 大小: {}", xml_offset, xml_size);
@@ -593,7 +594,7 @@ impl Dism {
     /// 将 UTF-16LE 编码的字节数组转换为 UTF-8 字符串
     fn decode_utf16le(data: &[u8]) -> Result<String> {
         if data.len() < 2 {
-            anyhow::bail!("数据太短");
+            anyhow::bail!("{}", tr!("数据太短"));
         }
 
         // 检查并跳过 BOM (0xFF 0xFE)
@@ -620,7 +621,7 @@ impl Dism {
         }
 
         String::from_utf16(&utf16_data)
-            .map_err(|e| anyhow::anyhow!("UTF-16 解码失败: {}", e))
+            .map_err(|e| anyhow::anyhow!("{}", tr!("UTF-16 解码失败: {}", e)))
     }
 
     /// 解析 WIM XML 元数据字符串
@@ -643,7 +644,7 @@ impl Dism {
                     let name = Self::extract_xml_tag(image_block, "DISPLAYNAME")
                         .or_else(|| Self::extract_xml_tag(image_block, "NAME"))
                         .filter(|s| !s.is_empty())
-                        .unwrap_or_else(|| format!("镜像 {}", index));
+                        .unwrap_or_else(|| tr!("镜像 {}", index));
                     
                     let size_bytes = Self::extract_xml_tag(image_block, "TOTALBYTES")
                         .and_then(|s| s.parse().ok())
@@ -671,7 +672,7 @@ impl Dism {
         }
 
         if images.is_empty() {
-            anyhow::bail!("未找到有效的镜像信息");
+            anyhow::bail!("{}", tr!("未找到有效的镜像信息"));
         }
 
         Ok(images)

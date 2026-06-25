@@ -1,5 +1,7 @@
 use egui::{Color32, RichText};
 
+use crate::tr;
+
 /// 安装/备份步骤
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InstallStep {
@@ -257,11 +259,11 @@ impl ProgressUI {
 
             // 标题
             let title = if state.is_expand_mode {
-                "LetRecovery PE 扩容助手"
+                tr!("LetRecovery PE 扩容助手")
             } else if state.is_install_mode {
-                "LetRecovery PE 安装助手"
+                tr!("LetRecovery PE 安装助手")
             } else {
-                "LetRecovery PE 备份助手"
+                tr!("LetRecovery PE 备份助手")
             };
             ui.heading(RichText::new(title).size(24.0).strong());
 
@@ -275,7 +277,7 @@ impl ProgressUI {
                     state.current_backup_step.name()
                 };
                 ui.label(
-                    RichText::new(format!("当前步骤: [{}]", current_step_name))
+                    RichText::new(tr!("当前步骤: [{}]", current_step_name))
                         .size(16.0)
                         .color(Color32::from_rgb(100, 180, 255)),
                 );
@@ -284,7 +286,7 @@ impl ProgressUI {
 
                 // 步骤进度条
                 ui.horizontal(|ui| {
-                    ui.label("步骤进度:");
+                    ui.label(tr!("步骤进度:"));
                     let progress = state.step_progress as f32 / 100.0;
                     ui.add(
                         egui::ProgressBar::new(progress)
@@ -298,7 +300,7 @@ impl ProgressUI {
 
             // 总体进度条
             ui.horizontal(|ui| {
-                ui.label("总体进度:");
+                ui.label(tr!("总体进度:"));
                 let progress = state.overall_progress as f32 / 100.0;
                 ui.add(
                     egui::ProgressBar::new(progress)
@@ -337,7 +339,7 @@ impl ProgressUI {
             if let Some(ref error) = state.error_message {
                 ui.add_space(20.0);
                 ui.label(
-                    RichText::new(format!("错误: {}", error))
+                    RichText::new(tr!("错误: {}", error))
                         .size(14.0)
                         .color(Color32::from_rgb(255, 100, 100)),
                 );
@@ -347,11 +349,11 @@ impl ProgressUI {
             if state.is_completed {
                 ui.add_space(30.0);
                 let message = if state.is_expand_mode {
-                    "系统盘扩容完成！即将重启..."
+                    tr!("系统盘扩容完成！即将重启...")
                 } else if state.is_install_mode {
-                    "系统安装完成！即将重启..."
+                    tr!("系统安装完成！即将重启...")
                 } else {
-                    "系统备份完成！即将重启..."
+                    tr!("系统备份完成！即将重启...")
                 };
                 ui.label(
                     RichText::new(message)
@@ -417,7 +419,7 @@ impl ProgressUI {
 
             ui.label(RichText::new(icon).size(14.0).color(color).monospace());
             ui.add_space(10.0);
-            ui.label(RichText::new(name).size(14.0).color(color));
+            ui.label(RichText::new(tr!(name)).size(14.0).color(color));
         });
         ui.add_space(5.0);
     }

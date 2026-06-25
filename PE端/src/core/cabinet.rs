@@ -11,6 +11,8 @@ use std::sync::Mutex;
 use anyhow::{bail, Context, Result};
 use libloading::Library;
 
+use crate::tr;
+
 // ============================================================================
 // Windows API 类型定义
 // ============================================================================
@@ -206,10 +208,10 @@ impl CabinetExtractor {
     /// 创建 Cabinet 解压器实例
     pub fn new() -> Result<Self> {
         let lib = unsafe { Library::new("setupapi.dll") }
-            .context("无法加载 setupapi.dll")?;
-        
+            .context(tr!("无法加载 setupapi.dll"))?;
+
         unsafe {
-            let iterate_cabinet: FnSetupIterateCabinetW = 
+            let iterate_cabinet: FnSetupIterateCabinetW =
                 *lib.get(b"SetupIterateCabinetW")?;
             
             Ok(Self {
@@ -262,7 +264,7 @@ impl CabinetExtractor {
         };
         
         if result.0 == 0 && extracted.is_empty() {
-            bail!("SetupIterateCabinetW 失败");
+            bail!("{}", tr!("SetupIterateCabinetW 失败"));
         }
         
         println!("[CABINET] 成功解压 {} 个文件到 {:?}", extracted.len(), dest_dir);

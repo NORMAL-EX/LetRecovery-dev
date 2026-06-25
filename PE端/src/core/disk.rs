@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use windows::core::PCWSTR;
 use windows::Win32::Storage::FileSystem::{GetDiskFreeSpaceExW, GetDriveTypeW, GetVolumeInformationW};
 
+use crate::tr;
 use crate::utils::command::new_command;
 use crate::utils::encoding::gbk_to_utf8;
 use crate::utils::path::get_bin_dir;
@@ -340,9 +341,9 @@ impl DiskManager {
                 || stdout.contains("denied") || stdout.contains("error") || stdout.contains("拒绝") {
                 stdout.trim().to_string()
             } else {
-                format!("格式化失败: {}", stdout.trim())
+                tr!("格式化失败: {}", stdout.trim())
             };
-            
+
             log::error!("格式化失败: {}", error_msg);
             anyhow::bail!("{}", error_msg);
         }
@@ -787,7 +788,7 @@ impl DiskManager {
     /// 会报“没有可用的未分配空间”，本函数据此返回明确错误（分区移动属另一条尚未启用的路径）。
     pub fn expand_partition_lossless(letter: char, target_size_mb: u64) -> Result<String> {
         let current_mb = Self::get_partition_size_mb(letter)
-            .ok_or_else(|| anyhow::anyhow!("无法获取分区 {}: 的当前大小", letter))?;
+            .ok_or_else(|| anyhow::anyhow!("{}", tr!("无法获取分区 {}: 的当前大小", letter)))?;
         log::info!("[EXPAND] 目标分区 {}: 当前 {} MB，目标 {} MB", letter, current_mb, target_size_mb);
 
         // 计算 extend 的 size 参数（MB）。0 或不大于当前 → 扩到最大（不带 size）。
@@ -824,17 +825,18 @@ impl DiskManager {
 
         if no_space {
             anyhow::bail!(
-                "C 盘后面没有相邻的未分配空间可并入。若要从后面的分区夺取空间，需要分区移动功能（暂未启用）。"
+                "{}",
+                tr!("C 盘后面没有相邻的未分配空间可并入。若要从后面的分区夺取空间，需要分区移动功能（暂未启用）。")
             );
         }
         if !has_success {
-            anyhow::bail!("扩容失败: {}", text);
+            anyhow::bail!("{}", tr!("扩容失败: {}", text));
         }
 
         let new_mb = Self::get_partition_size_mb(letter).unwrap_or(current_mb);
         if new_mb <= current_mb {
-            anyhow::bail!("diskpart 报告成功，但分区大小未增加（{} MB）。可能没有相邻未分配空间。", new_mb);
+            anyhow::bail!("{}", tr!("diskpart 报告成功，但分区大小未增加（{} MB）。可能没有相邻未分配空间。", new_mb));
         }
-        Ok(format!("分区 {}: 已从 {} MB 扩大到 {} MB", letter, current_mb, new_mb))
+        Ok(tr!("分区 {}: 已从 {} MB 扩大到 {} MB", letter, current_mb, new_mb))
     }
 }

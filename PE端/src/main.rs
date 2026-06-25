@@ -179,7 +179,7 @@ fn main() -> eframe::Result<()> {
             }
             None => {
                 log::warn!("未检测到配置文件，启动默认界面...");
-                show_error_message("未检测到安装或备份配置文件。\n\n请确保已正确准备配置文件后重试。");
+                show_error_message(&tr!("未检测到安装或备份配置文件。\n\n请确保已正确准备配置文件后重试。"));
                 return Ok(());
             }
         }
@@ -387,7 +387,7 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
             Some(p) => p,
             None => {
                 eprintln!("[PE INSTALL] 错误: 未找到安装配置文件");
-                show_error_message("未找到安装配置文件，无法继续安装。");
+                show_error_message(&tr!("未找到安装配置文件，无法继续安装。"));
                 return Ok(());
             }
         };
@@ -399,7 +399,7 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
             Ok(c) => c,
             Err(e) => {
                 eprintln!("[PE INSTALL] 错误: 读取配置失败: {}", e);
-                show_error_message(&format!("读取安装配置失败: {}", e));
+                show_error_message(&tr!("读取安装配置失败: {}", e));
                 return Ok(());
             }
         };
@@ -420,7 +420,7 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
 
         if !std::path::Path::new(&image_path).exists() {
             eprintln!("[PE INSTALL] 错误: 镜像文件不存在: {}", image_path);
-            show_error_message(&format!("镜像文件不存在: {}", image_path));
+            show_error_message(&tr!("镜像文件不存在: {}", image_path));
             return Ok(());
         }
 
@@ -434,7 +434,7 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
             if let Err(e) = dism.verify_image(&image_path, None) {
                 eprintln!("[PE INSTALL] 镜像校验失败: {}", e);
                 log::error!("[PE安装/CLI] 镜像校验失败: {}", e);
-                show_error_message(&format!(
+                show_error_message(&tr!(
                     "镜像校验失败：镜像可能已损坏或不完整（{}）。请重新获取镜像后重试。",
                     e
                 ));
@@ -447,7 +447,7 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
         println!("[PE INSTALL] Step 1: 格式化分区");
         if let Err(e) = DiskManager::format_partition(&target_partition) {
             eprintln!("[PE INSTALL] 格式化失败: {}", e);
-            show_error_message(&format!("格式化分区失败: {}", e));
+            show_error_message(&tr!("格式化分区失败: {}", e));
             return Ok(());
         }
 
@@ -458,7 +458,7 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
         let apply_result = if config.is_gho {
             let ghost = Ghost::new();
             if !ghost.is_available() {
-                show_error_message("Ghost工具不可用");
+                show_error_message(&tr!("Ghost工具不可用"));
                 return Ok(());
             }
             let partitions = DiskManager::get_partitions().unwrap_or_default();
@@ -470,7 +470,7 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
 
         if let Err(e) = apply_result {
             eprintln!("[PE INSTALL] 释放镜像失败: {}", e);
-            show_error_message(&format!("释放镜像失败: {}", e));
+            show_error_message(&tr!("释放镜像失败: {}", e));
             return Ok(());
         }
 
@@ -558,7 +558,7 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
         };
         if let Err(e) = boot_result {
             eprintln!("[PE INSTALL] 修复引导失败: {}", e);
-            show_error_message(&format!("修复引导失败: {}", e));
+            show_error_message(&tr!("修复引导失败: {}", e));
             return Ok(());
         }
 
@@ -639,7 +639,7 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
                 .args(["/r", "/t", "10", "/c", "LetRecovery 系统安装完成，即将重启..."])
                 .spawn();
         } else {
-            show_success_message("系统安装完成！请手动重启计算机。");
+            show_success_message(&tr!("系统安装完成！请手动重启计算机。"));
         }
     } else {
         // 备份模式
@@ -650,7 +650,7 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
             Some(p) => p,
             None => {
                 eprintln!("[PE BACKUP] 错误: 未找到备份配置文件");
-                show_error_message("未找到备份配置文件，无法继续备份。");
+                show_error_message(&tr!("未找到备份配置文件，无法继续备份。"));
                 return Ok(());
             }
         };
@@ -662,7 +662,7 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
             Ok(c) => c,
             Err(e) => {
                 eprintln!("[PE BACKUP] 错误: 读取配置失败: {}", e);
-                show_error_message(&format!("读取备份配置失败: {}", e));
+                show_error_message(&tr!("读取备份配置失败: {}", e));
                 return Ok(());
             }
         };
@@ -688,7 +688,7 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
                 let ghost = core::ghost::Ghost::new();
                 if !ghost.is_available() {
                     eprintln!("[PE BACKUP] Ghost 工具不可用");
-                    show_error_message("系统备份失败: Ghost 工具不可用");
+                    show_error_message(&tr!("系统备份失败: Ghost 工具不可用"));
                     return Ok(());
                 }
                 ghost.create_image_from_letter(&source_partition, &config.save_path, None)
@@ -714,7 +714,7 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
 
         if let Err(e) = backup_result {
             eprintln!("[PE BACKUP] 备份失败: {}", e);
-            show_error_message(&format!("系统备份失败: {}", e));
+            show_error_message(&tr!("系统备份失败: {}", e));
             return Ok(());
         }
 
@@ -728,7 +728,7 @@ fn run_cli_mode(is_install: bool) -> eframe::Result<()> {
         ConfigFileManager::cleanup_pe_dir(&data_partition);
 
         println!("[PE BACKUP] 备份完成!");
-        show_success_message(&format!(
+        show_success_message(&tr!(
             "系统备份完成！\n保存位置: {}",
             config.save_path
         ));
