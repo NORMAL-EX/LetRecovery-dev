@@ -77,7 +77,7 @@ impl App {
                         });
                     
                     // 刷新语言列表按钮
-                    if ui.button("").on_hover_text(tr!("刷新语言列表")).clicked() {
+                    if ui.button(tr!("刷新")).on_hover_text(tr!("刷新语言列表")).clicked() {
                         i18n::refresh_available_languages();
                     }
                 });
