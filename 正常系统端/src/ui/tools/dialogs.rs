@@ -5,6 +5,7 @@
 use egui;
 use std::collections::HashSet;
 use std::sync::mpsc;
+use crate::tr;
 use crate::app::App;
 use super::types::{DriverBackupMode, WindowsPartitionInfo};
 use super::version_detect::get_windows_partition_infos;
@@ -61,7 +62,7 @@ impl App {
         if let Some(ref rx) = self.appx_list_rx {
             if let Ok(packages) = rx.try_recv() {
                 if packages.is_empty() {
-                    self.remove_appx_message = "未找到可移除的应用".to_string();
+                    self.remove_appx_message = tr!("未找到可移除的应用");
                 } else {
                     self.remove_appx_message.clear();
                 }
@@ -74,7 +75,7 @@ impl App {
         // 检查APPX移除结果
         if let Some(ref rx) = self.appx_remove_rx {
             if let Ok((success, fail)) = rx.try_recv() {
-                self.remove_appx_message = format!("移除完成: 成功 {}, 失败 {}", success, fail);
+                self.remove_appx_message = tr!("移除完成: 成功 {}, 失败 {}", success, fail);
                 self.remove_appx_loading = false;
                 self.appx_remove_rx = None;
                 // 刷新列表
@@ -86,7 +87,7 @@ impl App {
         if let Some(ref rx) = self.time_sync_rx {
             if let Ok(result) = rx.try_recv() {
                 if result.success {
-                    self.time_sync_message = format!(
+                    self.time_sync_message = tr!(
                         "{}\n\n原时间: {}\n新时间: {}",
                         result.message,
                         result.old_time.unwrap_or_default(),
@@ -112,7 +113,7 @@ impl App {
         // 检查批量格式化结果
         if let Some(ref rx) = self.batch_format_rx {
             if let Ok(result) = rx.try_recv() {
-                let mut msg = format!(
+                let mut msg = tr!(
                     "格式化完成: 成功 {}, 失败 {}",
                     result.success_count, result.fail_count
                 );
@@ -191,7 +192,7 @@ impl App {
             return;
         }
 
-        egui::Window::new("本机网络信息")
+        egui::Window::new(tr!("本机网络信息"))
             .open(&mut self.show_network_info_dialog)
             .resizable(true)
             .default_width(500.0)
@@ -200,10 +201,10 @@ impl App {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     if let Some(ref adapters) = self.network_info_cache {
                         if adapters.is_empty() {
-                            ui.label("未检测到网络适配器");
+                            ui.label(tr!("未检测到网络适配器"));
                         } else {
                             for (i, adapter) in adapters.iter().enumerate() {
-                                egui::CollapsingHeader::new(format!(
+                                egui::CollapsingHeader::new(tr!(
                                     "适配器 {}: {}",
                                     i + 1,
                                     adapter.description
@@ -214,28 +215,28 @@ impl App {
                                         .num_columns(2)
                                         .spacing([20.0, 4.0])
                                         .show(ui, |ui| {
-                                            ui.label("名称:");
+                                            ui.label(tr!("名称:"));
                                             ui.label(&adapter.name);
                                             ui.end_row();
 
-                                            ui.label("描述:");
+                                            ui.label(tr!("描述:"));
                                             ui.label(&adapter.description);
                                             ui.end_row();
 
                                             if !adapter.adapter_type.is_empty() {
-                                                ui.label("类型:");
+                                                ui.label(tr!("类型:"));
                                                 ui.label(&adapter.adapter_type);
                                                 ui.end_row();
                                             }
 
                                             if !adapter.mac_address.is_empty() {
-                                                ui.label("MAC 地址:");
+                                                ui.label(tr!("MAC 地址:"));
                                                 ui.label(&adapter.mac_address);
                                                 ui.end_row();
                                             }
 
                                             if !adapter.ip_addresses.is_empty() {
-                                                ui.label("IP 地址:");
+                                                ui.label(tr!("IP 地址:"));
                                                 for ip in &adapter.ip_addresses {
                                                     ui.label(ip);
                                                     ui.end_row();
@@ -244,13 +245,13 @@ impl App {
                                             }
 
                                             if !adapter.status.is_empty() {
-                                                ui.label("状态:");
+                                                ui.label(tr!("状态:"));
                                                 ui.label(&adapter.status);
                                                 ui.end_row();
                                             }
 
                                             if adapter.speed > 0 {
-                                                ui.label("速度:");
+                                                ui.label(tr!("速度:"));
                                                 let speed_mbps = adapter.speed / 1_000_000;
                                                 ui.label(format!("{} Mbps", speed_mbps));
                                                 ui.end_row();
@@ -262,7 +263,7 @@ impl App {
                         }
                     } else {
                         ui.spinner();
-                        ui.label("正在获取网络信息...");
+                        ui.label(tr!("正在获取网络信息..."));
                     }
                 });
             });
@@ -278,34 +279,34 @@ impl App {
         let windows_partitions = self.get_cached_windows_partitions();
         let is_loading_partitions = self.windows_partitions_loading;
 
-        egui::Window::new("导入硬盘控制器驱动")
+        egui::Window::new(tr!("导入硬盘控制器驱动"))
             .resizable(false)
             .default_width(450.0)
             .show(ui.ctx(), |ui| {
-                ui.label("将 Intel VMD / Apple SSD / Visior 等硬盘控制器驱动导入到离线系统");
+                ui.label(tr!("将 Intel VMD / Apple SSD / Visior 等硬盘控制器驱动导入到离线系统"));
                 ui.add_space(10.0);
 
                 if is_loading_partitions {
                     ui.horizontal(|ui| {
                         ui.spinner();
-                        ui.label("正在检测Windows分区...");
+                        ui.label(tr!("正在检测Windows分区..."));
                     });
                 } else if windows_partitions.is_empty() {
                     ui.colored_label(
                         egui::Color32::from_rgb(255, 165, 0),
-                        "未找到包含 Windows 系统的分区",
+                        tr!("未找到包含 Windows 系统的分区"),
                     );
                 } else {
                     ui.horizontal(|ui| {
-                        ui.label("目标分区:");
-                        
+                        ui.label(tr!("目标分区:"));
+
                         let current_text = self
                             .import_storage_driver_target
                             .as_ref()
                             .map(|letter| {
                                 format_partition_display(&windows_partitions, letter)
                             })
-                            .unwrap_or_else(|| "请选择".to_string());
+                            .unwrap_or_else(|| tr!("请选择"));
 
                         egui::ComboBox::from_id_salt("import_storage_driver_partition")
                             .selected_text(current_text)
@@ -343,14 +344,14 @@ impl App {
 
                     if self.import_storage_driver_loading {
                         ui.spinner();
-                        ui.label("正在导入驱动...");
+                        ui.label(tr!("正在导入驱动..."));
                     } else {
-                        if ui.add_enabled(can_import, egui::Button::new("导入驱动")).clicked() {
+                        if ui.add_enabled(can_import, egui::Button::new(tr!("导入驱动"))).clicked() {
                             self.start_import_storage_driver();
                         }
                     }
 
-                    if ui.button("关闭").clicked() {
+                    if ui.button(tr!("关闭")).clicked() {
                         should_close = true;
                     }
                 });
@@ -366,7 +367,7 @@ impl App {
         let target = match &self.import_storage_driver_target {
             Some(t) => t.clone(),
             None => {
-                self.import_storage_driver_message = "请先选择目标分区".to_string();
+                self.import_storage_driver_message = tr!("请先选择目标分区");
                 return;
             }
         };
@@ -377,12 +378,12 @@ impl App {
 
         if !driver_dir.exists() {
             self.import_storage_driver_message =
-                format!("驱动目录不存在: {}", driver_dir.display());
+                tr!("驱动目录不存在: {}", driver_dir.display());
             return;
         }
 
         self.import_storage_driver_loading = true;
-        self.import_storage_driver_message = "正在导入驱动...".to_string();
+        self.import_storage_driver_message = tr!("正在导入驱动...");
 
         let driver_dir_str = driver_dir.to_string_lossy().to_string();
         let (tx, rx) = mpsc::channel();
@@ -391,8 +392,8 @@ impl App {
         std::thread::spawn(move || {
             let dism = crate::core::dism::Dism::new();
             let result = match dism.add_drivers_offline(&target, &driver_dir_str) {
-                Ok(_) => Ok("驱动导入成功！".to_string()),
-                Err(e) => Err(format!("驱动导入失败: {}", e)),
+                Ok(_) => Ok(tr!("驱动导入成功！")),
+                Err(e) => Err(tr!("驱动导入失败: {}", e)),
             };
             let _ = tx.send(result);
         });
@@ -409,38 +410,38 @@ impl App {
         let is_loading_partitions = self.windows_partitions_loading;
         let is_pe = self.is_pe_environment();
 
-        egui::Window::new("移除APPX应用")
+        egui::Window::new(tr!("移除APPX应用"))
             .resizable(true)
             .default_width(550.0)
             .default_height(450.0)
             .show(ui.ctx(), |ui| {
                 if is_pe {
-                    ui.label("移除离线系统中预装的 Microsoft Store 应用");
+                    ui.label(tr!("移除离线系统中预装的 Microsoft Store 应用"));
                 } else {
-                    ui.label("移除当前系统或离线系统中的 Microsoft Store 应用");
+                    ui.label(tr!("移除当前系统或离线系统中的 Microsoft Store 应用"));
                 }
                 ui.add_space(10.0);
 
                 if is_loading_partitions {
                     ui.horizontal(|ui| {
                         ui.spinner();
-                        ui.label("正在检测Windows分区...");
+                        ui.label(tr!("正在检测Windows分区..."));
                     });
                 } else {
                     ui.horizontal(|ui| {
-                        ui.label("目标系统:");
+                        ui.label(tr!("目标系统:"));
 
                         let current_text = self
                             .remove_appx_target
                             .as_ref()
                             .map(|letter| {
                                 if letter == "__CURRENT__" {
-                                    "当前系统".to_string()
+                                    tr!("当前系统")
                                 } else {
                                     format_partition_display(&windows_partitions, letter)
                                 }
                             })
-                            .unwrap_or_else(|| "请选择".to_string());
+                            .unwrap_or_else(|| tr!("请选择"));
 
                         let old_target = self.remove_appx_target.clone();
 
@@ -452,7 +453,7 @@ impl App {
                                     ui.selectable_value(
                                         &mut self.remove_appx_target,
                                         Some("__CURRENT__".to_string()),
-                                        "当前系统",
+                                        tr!("当前系统"),
                                     );
                                     ui.separator();
                                 }
@@ -487,17 +488,17 @@ impl App {
                 if self.remove_appx_loading {
                     ui.horizontal(|ui| {
                         ui.spinner();
-                        ui.label("正在处理...");
+                        ui.label(tr!("正在处理..."));
                     });
                 } else if !self.remove_appx_list.is_empty() {
                     ui.horizontal(|ui| {
-                        if ui.button("全选").clicked() {
+                        if ui.button(tr!("全选")).clicked() {
                             for pkg in &self.remove_appx_list {
                                 self.remove_appx_selected
                                     .insert(pkg.package_name.clone());
                             }
                         }
-                        if ui.button("反选").clicked() {
+                        if ui.button(tr!("反选")).clicked() {
                             let current: HashSet<_> = self.remove_appx_selected.clone();
                             self.remove_appx_selected.clear();
                             for pkg in &self.remove_appx_list {
@@ -507,7 +508,7 @@ impl App {
                                 }
                             }
                         }
-                        ui.label(format!("已选择 {} 个应用", self.remove_appx_selected.len()));
+                        ui.label(tr!("已选择 {} 个应用", self.remove_appx_selected.len()));
                     });
 
                     ui.add_space(5.0);
@@ -529,7 +530,7 @@ impl App {
                             }
                         });
                 } else if self.remove_appx_target.is_some() && !is_loading_partitions {
-                    ui.label("未找到可移除的应用，或请先点击刷新列表按钮");
+                    ui.label(tr!("未找到可移除的应用，或请先点击刷新列表按钮"));
                 }
 
                 ui.add_space(10.0);
@@ -548,20 +549,20 @@ impl App {
                         && self.remove_appx_target.is_some();
 
                     if ui
-                        .add_enabled(can_remove, egui::Button::new("移除选中应用"))
+                        .add_enabled(can_remove, egui::Button::new(tr!("移除选中应用")))
                         .clicked()
                     {
                         self.start_remove_appx();
                     }
 
-                    let can_refresh = self.remove_appx_target.is_some() 
+                    let can_refresh = self.remove_appx_target.is_some()
                         && !self.remove_appx_loading
                         && !is_loading_partitions;
-                    if ui.add_enabled(can_refresh, egui::Button::new("刷新列表")).clicked() {
+                    if ui.add_enabled(can_refresh, egui::Button::new(tr!("刷新列表"))).clicked() {
                         self.start_load_appx_list();
                     }
 
-                    if ui.button("关闭").clicked() {
+                    if ui.button(tr!("关闭")).clicked() {
                         should_close = true;
                     }
                 });
@@ -582,7 +583,7 @@ impl App {
         self.remove_appx_loading = true;
         self.remove_appx_list.clear();
         self.remove_appx_selected.clear();
-        self.remove_appx_message = "正在加载应用列表...".to_string();
+        self.remove_appx_message = tr!("正在加载应用列表...");
 
         let (tx, rx) = mpsc::channel();
         self.appx_list_rx = Some(rx);
@@ -598,18 +599,18 @@ impl App {
         let target = match &self.remove_appx_target {
             Some(t) => t.clone(),
             None => {
-                self.remove_appx_message = "请先选择目标分区".to_string();
+                self.remove_appx_message = tr!("请先选择目标分区");
                 return;
             }
         };
 
         if self.remove_appx_selected.is_empty() {
-            self.remove_appx_message = "请先选择要移除的应用".to_string();
+            self.remove_appx_message = tr!("请先选择要移除的应用");
             return;
         }
 
         self.remove_appx_loading = true;
-        self.remove_appx_message = "正在移除应用...".to_string();
+        self.remove_appx_message = tr!("正在移除应用...");
 
         let selected: Vec<String> = self.remove_appx_selected.iter().cloned().collect();
         let (tx, rx) = mpsc::channel();
@@ -631,18 +632,18 @@ impl App {
         let windows_partitions = self.get_cached_windows_partitions();
         let is_loading_partitions = self.windows_partitions_loading;
 
-        egui::Window::new("驱动备份还原")
+        egui::Window::new(tr!("驱动备份还原"))
             .resizable(false)
             .default_width(500.0)
             .show(ui.ctx(), |ui| {
-                ui.label("导出或导入系统驱动");
+                ui.label(tr!("导出或导入系统驱动"));
                 ui.add_space(10.0);
 
                 // 模式选择
                 ui.horizontal(|ui| {
-                    ui.label("操作模式:");
-                    ui.radio_value(&mut self.driver_backup_mode, DriverBackupMode::Export, "导出驱动");
-                    ui.radio_value(&mut self.driver_backup_mode, DriverBackupMode::Import, "导入驱动");
+                    ui.label(tr!("操作模式:"));
+                    ui.radio_value(&mut self.driver_backup_mode, DriverBackupMode::Export, tr!("导出驱动"));
+                    ui.radio_value(&mut self.driver_backup_mode, DriverBackupMode::Import, tr!("导入驱动"));
                 });
 
                 ui.add_space(10.0);
@@ -650,20 +651,20 @@ impl App {
                 if is_loading_partitions {
                     ui.horizontal(|ui| {
                         ui.spinner();
-                        ui.label("正在检测Windows分区...");
+                        ui.label(tr!("正在检测Windows分区..."));
                     });
                 } else {
                     // 根据模式显示不同选项
                     match self.driver_backup_mode {
                         DriverBackupMode::Export => {
                             ui.horizontal(|ui| {
-                                ui.label("源系统分区:");
-                                
+                                ui.label(tr!("源系统分区:"));
+
                                 let current_text = self
                                     .driver_backup_target
                                     .as_ref()
                                     .map(|letter| format_partition_display(&windows_partitions, letter))
-                                    .unwrap_or_else(|| "请选择".to_string());
+                                    .unwrap_or_else(|| tr!("请选择"));
 
                                 egui::ComboBox::from_id_salt("driver_backup_source")
                                     .selected_text(current_text)
@@ -686,12 +687,12 @@ impl App {
 
                             ui.add_space(5.0);
                             ui.horizontal(|ui| {
-                                ui.label("保存目录:");
+                                ui.label(tr!("保存目录:"));
                                 ui.add(
                                     egui::TextEdit::singleline(&mut self.driver_backup_path)
                                         .desired_width(300.0),
                                 );
-                                if ui.button("浏览...").clicked() {
+                                if ui.button(tr!("浏览...")).clicked() {
                                     if let Some(path) = rfd::FileDialog::new().pick_folder() {
                                         self.driver_backup_path = path.to_string_lossy().to_string();
                                     }
@@ -700,13 +701,13 @@ impl App {
                         }
                         DriverBackupMode::Import => {
                             ui.horizontal(|ui| {
-                                ui.label("目标系统分区:");
-                                
+                                ui.label(tr!("目标系统分区:"));
+
                                 let current_text = self
                                     .driver_backup_target
                                     .as_ref()
                                     .map(|letter| format_partition_display(&windows_partitions, letter))
-                                    .unwrap_or_else(|| "请选择".to_string());
+                                    .unwrap_or_else(|| tr!("请选择"));
 
                                 egui::ComboBox::from_id_salt("driver_import_target")
                                     .selected_text(current_text)
@@ -729,12 +730,12 @@ impl App {
 
                             ui.add_space(5.0);
                             ui.horizontal(|ui| {
-                                ui.label("驱动目录:");
+                                ui.label(tr!("驱动目录:"));
                                 ui.add(
                                     egui::TextEdit::singleline(&mut self.driver_backup_path)
                                         .desired_width(300.0),
                                 );
-                                if ui.button("浏览...").clicked() {
+                                if ui.button(tr!("浏览...")).clicked() {
                                     if let Some(path) = rfd::FileDialog::new().pick_folder() {
                                         self.driver_backup_path = path.to_string_lossy().to_string();
                                     }
@@ -756,11 +757,11 @@ impl App {
                 ui.horizontal(|ui| {
                     if self.driver_backup_loading {
                         ui.spinner();
-                        ui.label("正在处理，请稍候...");
+                        ui.label(tr!("正在处理，请稍候..."));
                     } else {
                         let button_label = match self.driver_backup_mode {
-                            DriverBackupMode::Export => "导出",
-                            DriverBackupMode::Import => "导入",
+                            DriverBackupMode::Export => tr!("导出"),
+                            DriverBackupMode::Import => tr!("导入"),
                         };
 
                         let can_execute = !self.driver_backup_path.is_empty()
@@ -775,7 +776,7 @@ impl App {
                         }
                     }
 
-                    if ui.button("关闭").clicked() {
+                    if ui.button(tr!("关闭")).clicked() {
                         should_close = true;
                     }
                 });
@@ -789,25 +790,25 @@ impl App {
     /// 启动后台驱动备份/还原操作
     fn start_driver_backup_action(&mut self) {
         if self.driver_backup_path.is_empty() {
-            self.driver_backup_message = "请指定目录路径".to_string();
+            self.driver_backup_message = tr!("请指定目录路径");
             return;
         }
 
         let target = match &self.driver_backup_target {
             Some(t) => t.clone(),
             None => {
-                self.driver_backup_message = "请选择系统分区".to_string();
+                self.driver_backup_message = tr!("请选择系统分区");
                 return;
             }
         };
 
         let path = self.driver_backup_path.clone();
         let mode = self.driver_backup_mode;
-        
+
         self.driver_backup_loading = true;
         self.driver_backup_message = match mode {
-            DriverBackupMode::Export => "正在导出驱动，请稍候...".to_string(),
-            DriverBackupMode::Import => "正在导入驱动，请稍候...".to_string(),
+            DriverBackupMode::Export => tr!("正在导出驱动，请稍候..."),
+            DriverBackupMode::Import => tr!("正在导入驱动，请稍候..."),
         };
 
         let (tx, rx) = mpsc::channel();
@@ -819,18 +820,18 @@ impl App {
             let result = match mode {
                 DriverBackupMode::Export => {
                     match dism.export_drivers_from_system(&target, &path) {
-                        Ok(_) => Ok(format!("驱动导出成功: {} -> {}", target, path)),
-                        Err(e) => Err(format!("驱动导出失败: {}", e)),
+                        Ok(_) => Ok(tr!("驱动导出成功: {} -> {}", target, path)),
+                        Err(e) => Err(tr!("驱动导出失败: {}", e)),
                     }
                 }
                 DriverBackupMode::Import => {
                     // 检查驱动目录是否存在
                     if !std::path::Path::new(&path).exists() {
-                        Err(format!("驱动目录不存在: {}", path))
+                        Err(tr!("驱动目录不存在: {}", path))
                     } else {
                         match dism.add_drivers_offline(&target, &path) {
-                            Ok(_) => Ok("驱动导入成功！".to_string()),
-                            Err(e) => Err(format!("驱动导入失败: {}", e)),
+                            Ok(_) => Ok(tr!("驱动导入成功！")),
+                            Err(e) => Err(tr!("驱动导入失败: {}", e)),
                         }
                     }
                 }
@@ -853,7 +854,7 @@ impl App {
         let software_list_clone = self.software_list.clone();
         let is_loading = self.software_list_loading;
 
-        egui::Window::new("已安装软件列表")
+        egui::Window::new(tr!("已安装软件列表"))
             .resizable(true)
             .default_width(500.0)
             .default_height(450.0)
@@ -861,10 +862,10 @@ impl App {
                 if is_loading {
                     ui.horizontal(|ui| {
                         ui.spinner();
-                        ui.label("正在加载软件列表...");
+                        ui.label(tr!("正在加载软件列表..."));
                     });
                 } else {
-                    ui.label(format!("共 {} 个软件", software_list_clone.len()));
+                    ui.label(tr!("共 {} 个软件", software_list_clone.len()));
                     ui.add_space(5.0);
 
                     // 表头
@@ -872,9 +873,9 @@ impl App {
                         .num_columns(3)
                         .spacing([8.0, 4.0])
                         .show(ui, |ui| {
-                            ui.label(egui::RichText::new("软件名称").strong());
-                            ui.label(egui::RichText::new("版本").strong());
-                            ui.label(egui::RichText::new("发布者").strong());
+                            ui.label(egui::RichText::new(tr!("软件名称")).strong());
+                            ui.label(egui::RichText::new(tr!("版本")).strong());
+                            ui.label(egui::RichText::new(tr!("发布者")).strong());
                             ui.end_row();
                         });
 
@@ -902,17 +903,17 @@ impl App {
                 ui.add_space(10.0);
 
                 ui.horizontal(|ui| {
-                    if ui.button("保存列表为TXT").clicked() {
+                    if ui.button(tr!("保存列表为TXT")).clicked() {
                         if let Some(path) = rfd::FileDialog::new()
                             .set_file_name("installed_software.txt")
-                            .add_filter("文本文件", &["txt"])
+                            .add_filter(tr!("文本文件"), &["txt"])
                             .save_file()
                         {
                             save_path = Some(path);
                         }
                     }
 
-                    if ui.button("关闭").clicked() {
+                    if ui.button(tr!("关闭")).clicked() {
                         should_close = true;
                     }
                 });
@@ -937,13 +938,13 @@ impl App {
         let mut should_close = false;
         let mut do_reset = false;
 
-        egui::Window::new("确认重置网络设置")
+        egui::Window::new(tr!("确认重置网络设置"))
             .resizable(false)
             .default_width(400.0)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ui.ctx(), |ui| {
                 ui.add_space(6.0);
-                ui.label("此操作将执行以下命令重置网络设置：");
+                ui.label(tr!("此操作将执行以下命令重置网络设置："));
                 ui.add_space(5.0);
 
                 ui.add(
@@ -958,15 +959,15 @@ impl App {
                 );
 
                 ui.add_space(10.0);
-                ui.label("重置后可能需要重新配置网络连接。");
+                ui.label(tr!("重置后可能需要重新配置网络连接。"));
                 ui.add_space(15.0);
 
                 ui.horizontal(|ui| {
-                    if ui.button("确认重置").clicked() {
+                    if ui.button(tr!("确认重置")).clicked() {
                         do_reset = true;
                         should_close = true;
                     }
-                    if ui.button("取消").clicked() {
+                    if ui.button(tr!("取消")).clicked() {
                         should_close = true;
                     }
                 });
@@ -985,13 +986,13 @@ impl App {
     pub fn do_reset_network(&mut self) {
         let (success_count, fail_count) = reset_network();
 
-        self.tool_message = format!(
+        self.tool_message = tr!(
             "网络重置完成: 成功 {} 个命令, 失败 {} 个命令",
             success_count, fail_count
         );
 
         if success_count > 0 {
-            self.tool_message.push_str("\n建议重启计算机以完成网络重置。");
+            self.tool_message.push_str(&tr!("\n建议重启计算机以完成网络重置。"));
         }
     }
 
@@ -1020,16 +1021,16 @@ impl App {
         let mut should_close = false;
         let mut do_sync = false;
 
-        egui::Window::new("系统时间校准")
+        egui::Window::new(tr!("系统时间校准"))
             .resizable(false)
             .default_width(400.0)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ui.ctx(), |ui| {
                 ui.add_space(6.0);
-                ui.label("是否立即网络同步本机的时间到北京时间？");
+                ui.label(tr!("是否立即网络同步本机的时间到北京时间？"));
                 ui.add_space(10.0);
 
-                ui.label(egui::RichText::new("将从以下NTP服务器获取时间：").small());
+                ui.label(egui::RichText::new(tr!("将从以下NTP服务器获取时间：")).small());
                 ui.label(egui::RichText::new("• ntp.aliyun.com\n• ntp.tencent.com\n• cn.ntp.org.cn").monospace().small());
                 
                 ui.add_space(15.0);
@@ -1044,12 +1045,12 @@ impl App {
                 ui.horizontal(|ui| {
                     if self.time_sync_loading {
                         ui.spinner();
-                        ui.label("正在同步时间...");
+                        ui.label(tr!("正在同步时间..."));
                     } else {
-                        if ui.button("确定").clicked() {
+                        if ui.button(tr!("确定")).clicked() {
                             do_sync = true;
                         }
-                        if ui.button("取消").clicked() {
+                        if ui.button(tr!("取消")).clicked() {
                             should_close = true;
                         }
                     }
@@ -1072,7 +1073,7 @@ impl App {
         }
 
         self.time_sync_loading = true;
-        self.time_sync_message = "正在连接NTP服务器...".to_string();
+        self.time_sync_message = tr!("正在连接NTP服务器...");
 
         let (tx, rx) = mpsc::channel();
         self.time_sync_rx = Some(rx);
@@ -1094,33 +1095,33 @@ impl App {
         let mut should_close = false;
         let mut do_format = false;
 
-        egui::Window::new("批量格式化")
+        egui::Window::new(tr!("批量格式化"))
             .resizable(true)
             .default_width(500.0)
             .default_height(400.0)
             .show(ui.ctx(), |ui| {
-                ui.label("选择要格式化的分区（系统盘已自动隐藏）");
+                ui.label(tr!("选择要格式化的分区（系统盘已自动隐藏）"));
                 ui.add_space(10.0);
 
                 if self.batch_format_partitions_loading {
                     ui.horizontal(|ui| {
                         ui.spinner();
-                        ui.label("正在检测分区...");
+                        ui.label(tr!("正在检测分区..."));
                     });
                 } else if self.batch_format_partitions.is_empty() {
                     ui.colored_label(
                         egui::Color32::from_rgb(255, 165, 0),
-                        "未找到可格式化的分区",
+                        tr!("未找到可格式化的分区"),
                     );
                 } else {
                     // 全选/反选按钮
                     ui.horizontal(|ui| {
-                        if ui.button("全选").clicked() {
+                        if ui.button(tr!("全选")).clicked() {
                             for p in &self.batch_format_partitions {
                                 self.batch_format_selected.insert(p.letter.clone());
                             }
                         }
-                        if ui.button("反选").clicked() {
+                        if ui.button(tr!("反选")).clicked() {
                             let current: HashSet<_> = self.batch_format_selected.clone();
                             self.batch_format_selected.clear();
                             for p in &self.batch_format_partitions {

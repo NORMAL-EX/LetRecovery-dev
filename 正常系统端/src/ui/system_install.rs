@@ -1,6 +1,7 @@
 use egui;
 use std::sync::mpsc;
 
+use crate::tr;
 use crate::app::{App, BootModeSelection, UnattendCheckResult};
 use crate::core::disk::{Partition, PartitionStyle};
 use crate::core::dism::ImageInfo;
@@ -22,7 +23,7 @@ pub enum ImageInfoResult {
 
 impl App {
     pub fn show_system_install(&mut self, ui: &mut egui::Ui) {
-        ui.heading("系统安装");
+        ui.heading(tr!("系统安装"));
         ui.separator();
 
         // 整页套一层垂直滚动：窗口调小时也能滚动到底部的「开始安装」按钮等控件。
@@ -37,7 +38,7 @@ impl App {
             ui.horizontal(|ui| {
                 ui.colored_label(
                     egui::Color32::from_rgb(100, 181, 246),
-                    "新手用户？可以在\"关于\"页面中开启小白模式，获得更简单的操作体验",
+                    tr!("新手用户？可以在\"关于\"页面中开启小白模式，获得更简单的操作体验"),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.small_button("×").clicked() {
@@ -65,15 +66,15 @@ impl App {
 
         // 镜像文件选择
         ui.horizontal(|ui| {
-            ui.label("系统镜像:");
-            
+            ui.label(tr!("系统镜像:"));
+
             let text_edit = egui::TextEdit::singleline(&mut self.local_image_path)
                 .desired_width(400.0);
             ui.add_enabled(!self.iso_mounting, text_edit);
-            
-            if ui.add_enabled(!self.iso_mounting, egui::Button::new("浏览...")).clicked() {
+
+            if ui.add_enabled(!self.iso_mounting, egui::Button::new(tr!("浏览..."))).clicked() {
                 if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("系统镜像", &["wim", "esd", "swm", "iso", "gho"])
+                    .add_filter(tr!("系统镜像"), &["wim", "esd", "swm", "iso", "gho"])
                     .pick_file()
                 {
                     self.local_image_path = path.to_string_lossy().to_string();
@@ -87,7 +88,7 @@ impl App {
         if self.iso_mounting {
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.label("正在挂载 ISO 镜像，请稍候...");
+                ui.label(tr!("正在挂载 ISO 镜像，请稍候..."));
             });
         }
 
@@ -95,20 +96,20 @@ impl App {
         if self.image_info_loading {
             ui.horizontal(|ui| {
                 ui.spinner();
-                ui.label("正在加载镜像信息，请稍候...");
+                ui.label(tr!("正在加载镜像信息，请稍候..."));
             });
         }
 
         // 显示ISO挂载错误
         if let Some(ref error) = self.iso_mount_error {
-            ui.colored_label(egui::Color32::RED, format!("ISO 挂载失败: {}", error));
+            ui.colored_label(egui::Color32::RED, tr!("ISO 挂载失败: {}", error));
         }
 
         // 识别为 XP/2003 i386 文本安装介质的提示（原版 XP ISO 无 install.wim，走文本安装）
         if self.xp_i386_source.is_some() {
             ui.colored_label(
                 egui::Color32::from_rgb(0, 160, 0),
-                "已识别为 Windows XP/2003 i386 文本安装介质（仅支持 Legacy/MBR；重启后进入蓝底文本安装阶段）",
+                tr!("已识别为 Windows XP/2003 i386 文本安装介质（仅支持 Legacy/MBR；重启后进入蓝底文本安装阶段）"),
             );
         }
 
@@ -136,7 +137,7 @@ impl App {
             if volumes_to_show.is_empty() {
                 ui.colored_label(
                     egui::Color32::from_rgb(255, 165, 0),
-                    "该镜像中没有可用的系统版本",
+                    tr!("该镜像中没有可用的系统版本"),
                 );
             } else {
                 // 获取要选择的默认索引
@@ -152,12 +153,12 @@ impl App {
                 if use_original {
                     ui.colored_label(
                         egui::Color32::from_rgb(255, 165, 0),
-                        "未检测到标准系统镜像，显示所有分卷",
+                        tr!("未检测到标准系统镜像，显示所有分卷"),
                     );
                 }
                 
                 ui.horizontal(|ui| {
-                    ui.label("系统版本:");
+                    ui.label(tr!("系统版本:"));
                     egui::ComboBox::from_id_salt("volume_select")
                         .selected_text(
                             self.selected_volume
@@ -206,27 +207,27 @@ impl App {
                     .striped(true)
                     .min_col_width(60.0)
                     .show(ui, |ui| {
-                        ui.label("分区卷");
-                        ui.label("总空间");
-                        ui.label("可用空间");
-                        ui.label("卷标");
-                        ui.label("分区表");
+                        ui.label(tr!("分区卷"));
+                        ui.label(tr!("总空间"));
+                        ui.label(tr!("可用空间"));
+                        ui.label(tr!("卷标"));
+                        ui.label(tr!("分区表"));
                         ui.label("BitLocker");
-                        ui.label("状态");
+                        ui.label(tr!("状态"));
                         ui.end_row();
 
                         for (i, partition) in partitions_clone.iter().enumerate() {
                             let label = if is_pe {
                                 if partition.has_windows {
-                                    format!("{} (有系统)", partition.letter)
+                                    tr!("{} (有系统)", partition.letter)
                                 } else {
                                     partition.letter.clone()
                                 }
                             } else {
                                 if partition.is_system_partition {
-                                    format!("{} (当前系统)", partition.letter)
+                                    tr!("{} (当前系统)", partition.letter)
                                 } else if partition.has_windows {
-                                    format!("{} (有系统)", partition.letter)
+                                    tr!("{} (有系统)", partition.letter)
                                 } else {
                                     partition.letter.clone()
                                 }
@@ -255,9 +256,9 @@ impl App {
                             ui.colored_label(status_color, partition.bitlocker_status.as_str());
 
                             let status = if partition.has_windows {
-                                "已有系统"
+                                tr!("已有系统")
                             } else {
-                                "空闲"
+                                tr!("空闲")
                             };
                             ui.label(status);
                             
@@ -282,23 +283,23 @@ impl App {
 
         // 安装选项
         ui.horizontal(|ui| {
-            ui.checkbox(&mut self.format_partition, "格式化分区");
-            ui.checkbox(&mut self.repair_boot, "添加引导");
+            ui.checkbox(&mut self.format_partition, tr!("格式化分区"));
+            ui.checkbox(&mut self.repair_boot, tr!("添加引导"));
             
             // 无人值守选项 - 根据检测结果处理
             // 如果勾选了格式化分区，则无人值守不受限制（因为格式化会清除现有配置）
             let unattend_disabled = self.partition_has_unattend && !self.format_partition;
             let unattend_tooltip = if self.partition_has_unattend && !self.format_partition {
-                "目标分区已存在无人值守配置文件，无法启用此选项以避免冲突。\n勾选「格式化分区」可解除此限制。"
+                tr!("目标分区已存在无人值守配置文件，无法启用此选项以避免冲突。\n勾选「格式化分区」可解除此限制。")
             } else if self.partition_has_unattend && self.format_partition {
-                "格式化将清除现有配置文件，可以启用无人值守"
+                tr!("格式化将清除现有配置文件，可以启用无人值守")
             } else {
-                "启用无人值守安装"
+                tr!("启用无人值守安装")
             };
             
             if unattend_disabled {
                 // 显示禁用状态的复选框
-                let response = ui.add_enabled(false, egui::Checkbox::new(&mut false, "无人值守"))
+                let response = ui.add_enabled(false, egui::Checkbox::new(&mut false, tr!("无人值守")))
                     .on_disabled_hover_text(unattend_tooltip);
                 
                 // 如果用户点击了禁用的复选框，显示提示对话框
@@ -306,12 +307,12 @@ impl App {
                     self.show_unattend_conflict_modal = true;
                 }
             } else {
-                ui.checkbox(&mut self.unattended_install, "无人值守")
+                ui.checkbox(&mut self.unattended_install, tr!("无人值守"))
                     .on_hover_text(unattend_tooltip);
             }
             
             // 驱动操作下拉框
-            ui.label("驱动:");
+            ui.label(tr!("驱动:"));
             egui::ComboBox::from_id_salt("driver_action_select")
                 .selected_text(format!("{}", self.driver_action))
                 .width(80.0)
@@ -319,27 +320,27 @@ impl App {
                     ui.selectable_value(
                         &mut self.driver_action,
                         crate::app::DriverAction::None,
-                        "无",
+                        tr!("无"),
                     );
                     ui.selectable_value(
                         &mut self.driver_action,
                         crate::app::DriverAction::SaveOnly,
-                        "仅保存",
+                        tr!("仅保存"),
                     );
                     ui.selectable_value(
                         &mut self.driver_action,
                         crate::app::DriverAction::AutoImport,
-                        "自动导入",
+                        tr!("自动导入"),
                     );
                 });
-            
-            ui.checkbox(&mut self.auto_reboot, "立即重启");
+
+            ui.checkbox(&mut self.auto_reboot, tr!("立即重启"));
 
             // 运行 Diskpart 脚本（仅在「高级选项」开启时显示）
             if self.app_config.enable_advanced_options {
-                ui.checkbox(&mut self.run_diskpart_scripts, "运行Diskpart脚本")
+                ui.checkbox(&mut self.run_diskpart_scripts, tr!("运行Diskpart脚本"))
                     .on_hover_text(
-                        "安装前运行 程序目录\\diskpart\\ 下的所有脚本(.cmd/.bat 走 cmd，.txt 走 diskpart)，\n在 PE 中、格式化/释放镜像之前执行，可用于自定义分区。",
+                        tr!("安装前运行 程序目录\\diskpart\\ 下的所有脚本(.cmd/.bat 走 cmd，.txt 走 diskpart)，\n在 PE 中、格式化/释放镜像之前执行，可用于自定义分区。"),
                     );
             }
         });
@@ -348,20 +349,20 @@ impl App {
         if self.unattended_install {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
-                ui.label("自定义无人值守:");
-                if ui.button("选择文件…").clicked() {
+                ui.label(tr!("自定义无人值守:"));
+                if ui.button(tr!("选择文件…")).clicked() {
                     // XP/2003 i386 介质的应答文件是 winnt.sif(INI),不是 Vista+ 的 unattend.xml。
                     // 据所选介质切换筛选器与校验方式,否则 *.xml 筛选会把 .sif 全过滤掉(列表空)。
                     let is_xp = self.xp_i386_source.is_some();
                     let mut dlg = rfd::FileDialog::new();
                     if is_xp {
                         dlg = dlg
-                            .add_filter("XP 应答文件 winnt.sif", &["sif"])
-                            .add_filter("所有文件", &["*"]);
+                            .add_filter(tr!("XP 应答文件 winnt.sif"), &["sif"])
+                            .add_filter(tr!("所有文件"), &["*"]);
                     } else {
                         dlg = dlg
-                            .add_filter("无人值守文件", &["xml"])
-                            .add_filter("所有文件", &["*"]);
+                            .add_filter(tr!("无人值守文件"), &["xml"])
+                            .add_filter(tr!("所有文件"), &["*"]);
                     }
                     if let Some(path) = dlg.pick_file() {
                         let p = path.to_string_lossy().to_string();
@@ -384,13 +385,13 @@ impl App {
                             }
                             Err(e) => {
                                 self.custom_unattend_path = p;
-                                self.custom_unattend_error = Some(format!("无法读取文件: {}", e));
+                                self.custom_unattend_error = Some(tr!("无法读取文件: {}", e));
                             }
                         }
                     }
                 }
                 if !self.custom_unattend_path.is_empty()
-                    && ui.button("清除").clicked()
+                    && ui.button(tr!("清除")).clicked()
                 {
                     self.custom_unattend_path.clear();
                     self.custom_unattend_error = None;
@@ -398,14 +399,14 @@ impl App {
 
                 // 引导模式与“自定义无人值守”并列在同一行
                 ui.separator();
-                ui.label("引导模式:");
+                ui.label(tr!("引导模式:"));
                 egui::ComboBox::from_id_salt("boot_mode_select")
                     .selected_text(format!("{}", self.selected_boot_mode))
                     .show_ui(ui, |ui| {
                         ui.selectable_value(
                             &mut self.selected_boot_mode,
                             BootModeSelection::Auto,
-                            "自动 (根据分区表)",
+                            tr!("自动 (根据分区表)"),
                         );
                         ui.selectable_value(
                             &mut self.selected_boot_mode,
@@ -424,31 +425,31 @@ impl App {
                             self.selected_boot_mode,
                             partition.partition_style,
                         );
-                        ui.label(format!("( 将使用: {} )", actual_mode));
+                        ui.label(tr!("( 将使用: {} )", actual_mode));
                     }
                 }
             });
 
             if self.custom_unattend_path.is_empty() {
                 ui.label(
-                    egui::RichText::new("未选择则使用内置生成的无人值守配置").weak(),
+                    egui::RichText::new(tr!("未选择则使用内置生成的无人值守配置")).weak(),
                 );
             } else {
                 ui.horizontal(|ui| {
-                    ui.label("已选:");
+                    ui.label(tr!("已选:"));
                     ui.monospace(self.custom_unattend_path.clone());
                 });
                 match &self.custom_unattend_error {
                     Some(err) => {
                         ui.colored_label(
                             egui::Color32::from_rgb(220, 50, 47),
-                            format!("无人值守文件语法错误：{}（已禁用安装）", err),
+                            tr!("无人值守文件语法错误：{}（已禁用安装）", err),
                         );
                     }
                     None => {
                         ui.colored_label(
                             egui::Color32::from_rgb(0, 160, 0),
-                            "无人值守文件语法校验通过",
+                            tr!("无人值守文件语法校验通过"),
                         );
                     }
                 }
@@ -457,14 +458,14 @@ impl App {
         } else {
             // 未启用无人值守：引导模式单独一行
             ui.horizontal(|ui| {
-                ui.label("引导模式:");
+                ui.label(tr!("引导模式:"));
                 egui::ComboBox::from_id_salt("boot_mode_select")
                     .selected_text(format!("{}", self.selected_boot_mode))
                     .show_ui(ui, |ui| {
                         ui.selectable_value(
                             &mut self.selected_boot_mode,
                             BootModeSelection::Auto,
-                            "自动 (根据分区表)",
+                            tr!("自动 (根据分区表)"),
                         );
                         ui.selectable_value(
                             &mut self.selected_boot_mode,
@@ -483,7 +484,7 @@ impl App {
                             self.selected_boot_mode,
                             partition.partition_style,
                         );
-                        ui.label(format!("( 将使用: {} )", actual_mode));
+                        ui.label(tr!("( 将使用: {} )", actual_mode));
                     }
                 }
             });
@@ -505,7 +506,7 @@ impl App {
                 if pe_count > 1 {
                     if let Some(ref config) = self.config {
                         ui.horizontal(|ui| {
-                            ui.label("PE环境:");
+                            ui.label(tr!("PE环境:"));
                             egui::ComboBox::from_id_salt("pe_select_install")
                                 .selected_text(
                                     self.selected_pe_for_install
@@ -526,12 +527,12 @@ impl App {
                     }
                 }
             } else {
-                ui.colored_label(egui::Color32::RED, "未找到PE配置");
+                ui.colored_label(egui::Color32::RED, tr!("未找到PE配置"));
             }
 
             ui.colored_label(
                 egui::Color32::from_rgb(255, 165, 0),
-                "安装到当前系统分区需要先重启到PE环境",
+                tr!("安装到当前系统分区需要先重启到PE环境"),
             );
         }
 
@@ -540,17 +541,17 @@ impl App {
             ui.add_space(5.0);
             ui.colored_label(
                 egui::Color32::RED,
-                "无法获取PE配置，无法安装到当前系统分区。请检查网络连接后重试。",
+                tr!("无法获取PE配置，无法安装到当前系统分区。请检查网络连接后重试。"),
             );
         }
 
         ui.horizontal(|ui| {
-            if ui.button("高级选项...").clicked() {
+            if ui.button(tr!("高级选项...")).clicked() {
                 self.show_advanced_options = true;
                 // 每次打开重新检测 WiFi，决定是否显示“迁移当前 WiFi”选项
                 self.advanced_options.wifi_detected = None;
             }
-            if ui.button("刷新分区").clicked() {
+            if ui.button(tr!("刷新分区")).clicked() {
                 self.refresh_partitions();
             }
         });
@@ -572,7 +573,7 @@ impl App {
             if ui
                 .add_enabled(
                     can_install && !self.is_installing,
-                    egui::Button::new("开始安装").min_size(egui::vec2(120.0, 35.0)),
+                    egui::Button::new(tr!("开始安装")).min_size(egui::vec2(120.0, 35.0)),
                 )
                 .clicked()
             {
@@ -582,9 +583,9 @@ impl App {
             // 显示安装模式提示
             if can_install {
                 if needs_pe && !is_pe {
-                    ui.label("(将通过PE环境安装)");
+                    ui.label(tr!("(将通过PE环境安装)"));
                 } else {
-                    ui.label("(直接安装)");
+                    ui.label(tr!("(直接安装)"));
                 }
             }
         });
@@ -596,7 +597,7 @@ impl App {
                     ui.add_space(5.0);
                     ui.colored_label(
                         egui::Color32::from_rgb(255, 165, 0),
-                        "目标分区已有系统，建议勾选\"格式化分区\"",
+                        tr!("目标分区已有系统，建议勾选\"格式化分区\""),
                     );
                 }
             }
@@ -1350,7 +1351,7 @@ impl App {
 
                         let _ = tx.send(crate::core::dism::DismProgress {
                             percentage: decryption_progress,
-                            status: format!("DECRYPTING:正在解密: {}", waiting_list.join(", ")),
+                            status: format!("DECRYPTING:{}", tr!("正在解密: {}", waiting_list.join(", "))),
                         });
                     }
 
