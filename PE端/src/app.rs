@@ -7,6 +7,7 @@ use eframe::egui;
 
 use crate::core::config::{ConfigFileManager, OperationType};
 use crate::core::dism::DismProgress;
+use crate::tr;
 use crate::ui::progress::{InstallStep, BackupStep, ProgressState, ProgressUI};
 use crate::utils::reboot_pe;
 
@@ -164,7 +165,7 @@ impl App {
                     execute_expand_workflow(tx);
                 }
                 None => {
-                    let _ = tx.send(WorkerMessage::Failed("未检测到安装或备份配置".to_string()));
+                    let _ = tx.send(WorkerMessage::Failed(tr!("未检测到安装或备份配置")));
                 }
             }
         });
@@ -238,19 +239,19 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
     let data_partition = match ConfigFileManager::find_data_partition() {
         Some(p) => p,
         None => {
-            let _ = tx.send(WorkerMessage::Failed("未找到安装配置文件".to_string()));
+            let _ = tx.send(WorkerMessage::Failed(tr!("未找到安装配置文件")));
             return;
         }
     };
 
     log::info!("数据分区: {}", data_partition);
-    let _ = tx.send(WorkerMessage::SetStatus(format!("数据分区: {}", data_partition)));
+    let _ = tx.send(WorkerMessage::SetStatus(tr!("数据分区: {}", data_partition)));
 
     // 读取安装配置
     let config = match ConfigFileManager::read_install_config(&data_partition) {
         Ok(c) => c,
         Err(e) => {
-            let _ = tx.send(WorkerMessage::Failed(format!("读取配置失败: {}", e)));
+            let _ = tx.send(WorkerMessage::Failed(tr!("读取配置失败: {}", e)));
             return;
         }
     };
@@ -270,7 +271,7 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
     let image_path = format!("{}\\{}", data_dir, config.image_path);
 
     if !std::path::Path::new(&image_path).exists() {
-        let _ = tx.send(WorkerMessage::Failed(format!("镜像文件不存在: {}", image_path)));
+        let _ = tx.send(WorkerMessage::Failed(tr!("镜像文件不存在: {}", image_path)));
         return;
     }
 
@@ -282,7 +283,7 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
     if !config.is_gho {
         let _ = tx.send(WorkerMessage::SetInstallStep(InstallStep::VerifyImage));
         let _ = tx.send(WorkerMessage::SetStatus(
-            "正在校验系统镜像完整性（可能需要几分钟）...".to_string(),
+            tr!("正在校验系统镜像完整性（可能需要几分钟）..."),
         ));
         log::info!("[PE安装] 开始校验镜像: {}", image_path);
 
@@ -300,7 +301,7 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
 
         if let Err(e) = verify_result {
             log::error!("[PE安装] 镜像校验失败: {}", e);
-            let _ = tx.send(WorkerMessage::Failed(format!(
+            let _ = tx.send(WorkerMessage::Failed(tr!(
                 "镜像校验失败：镜像可能已损坏或不完整（{}）。请重新获取镜像后重试。",
                 e
             )));
@@ -314,14 +315,14 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
 
     // 装机前运行 diskpart 脚本（分区准备）——来自数据目录暂存的 diskpart\
     if config.run_diskpart_scripts {
-        let _ = tx.send(WorkerMessage::SetStatus("正在运行 Diskpart 脚本...".to_string()));
+        let _ = tx.send(WorkerMessage::SetStatus(tr!("正在运行 Diskpart 脚本...")));
         let scripts_dir = std::path::Path::new(&data_dir).join("diskpart");
         log::info!("[PE安装] 运行 Diskpart 脚本: {}", scripts_dir.display());
         match lr_core::diskpart::run_scripts_in_dir(&scripts_dir) {
             Ok(out) => log::info!("[PE安装] Diskpart 脚本执行完成:\n{}", out),
             Err(e) => {
                 log::error!("[PE安装] Diskpart 脚本执行失败: {}", e);
-                let _ = tx.send(WorkerMessage::Failed(format!("Diskpart 脚本执行失败: {}", e)));
+                let _ = tx.send(WorkerMessage::Failed(tr!("Diskpart 脚本执行失败: {}", e)));
                 return;
             }
         }
@@ -329,7 +330,7 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
 
     // Step 1: 格式化分区
     let _ = tx.send(WorkerMessage::SetInstallStep(InstallStep::FormatPartition));
-    let _ = tx.send(WorkerMessage::SetStatus("正在格式化目标分区...".to_string()));
+    let _ = tx.send(WorkerMessage::SetStatus(tr!("正在格式化目标分区...")));
 
     // 使用卷标参数（如果有配置的话）
     let volume_label = if config.volume_label.is_empty() {
@@ -345,14 +346,14 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
         }
         Err(e) => {
             log::error!("[PE安装] 格式化分区失败: {}", e);
-            let _ = tx.send(WorkerMessage::Failed(format!("格式化分区失败: {}", e)));
+            let _ = tx.send(WorkerMessage::Failed(tr!("格式化分区失败: {}", e)));
             return;
         }
     }
 
     // Step 2: 释放镜像
     let _ = tx.send(WorkerMessage::SetInstallStep(InstallStep::ApplyImage));
-    let _ = tx.send(WorkerMessage::SetStatus("正在释放系统镜像...".to_string()));
+    let _ = tx.send(WorkerMessage::SetStatus(tr!("正在释放系统镜像...")));
 
     let apply_dir = format!("{}\\", target_partition);
     log::info!(
@@ -375,7 +376,7 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
         // GHO镜像使用Ghost
         let ghost = Ghost::new();
         if !ghost.is_available() {
-            let _ = tx.send(WorkerMessage::Failed("Ghost工具不可用".to_string()));
+            let _ = tx.send(WorkerMessage::Failed(tr!("Ghost工具不可用")));
             return;
         }
 
@@ -392,7 +393,7 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
 
     if let Err(e) = apply_result {
         log::error!("[PE安装] 释放镜像失败: {}", e);
-        let _ = tx.send(WorkerMessage::Failed(format!("释放镜像失败: {}", e)));
+        let _ = tx.send(WorkerMessage::Failed(tr!("释放镜像失败: {}", e)));
         return;
     }
     log::info!("[PE安装] 释放镜像完成");
@@ -407,8 +408,8 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
     let driver_path_exists = std::path::Path::new(&driver_path).exists();
     
     if config.should_import_drivers() && driver_path_exists {
-        let _ = tx.send(WorkerMessage::SetStatus("正在导入驱动...".to_string()));
-        
+        let _ = tx.send(WorkerMessage::SetStatus(tr!("正在导入驱动...")));
+
         // 创建进度通道
         let (driver_progress_tx, driver_progress_rx) = channel::<DismProgress>();
         let tx_driver = tx.clone();
@@ -417,7 +418,7 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
         let driver_progress_handle = thread::spawn(move || {
             while let Ok(progress) = driver_progress_rx.recv() {
                 let _ = tx_driver.send(WorkerMessage::SetProgress(progress.percentage));
-                let _ = tx_driver.send(WorkerMessage::SetStatus(format!("导入驱动: {}", progress.status)));
+                let _ = tx_driver.send(WorkerMessage::SetStatus(tr!("导入驱动: {}", progress.status)));
             }
         });
         
@@ -439,8 +440,8 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
         let cab_files_in_driver_dir = find_cab_files_in_directory(&driver_path);
         if !cab_files_in_driver_dir.is_empty() {
             log::info!("在驱动目录中发现 {} 个 CAB 文件，将一并安装", cab_files_in_driver_dir.len());
-            let _ = tx.send(WorkerMessage::SetStatus(format!(
-                "正在安装驱动目录中的 {} 个 CAB 更新包...", 
+            let _ = tx.send(WorkerMessage::SetStatus(tr!(
+                "正在安装驱动目录中的 {} 个 CAB 更新包...",
                 cab_files_in_driver_dir.len()
             )));
             
@@ -452,7 +453,7 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
             let cab_progress_handle = thread::spawn(move || {
                 while let Ok(progress) = cab_progress_rx.recv() {
                     let _ = tx_cab.send(WorkerMessage::SetProgress(progress.percentage));
-                    let _ = tx_cab.send(WorkerMessage::SetStatus(format!("安装CAB: {}", progress.status)));
+                    let _ = tx_cab.send(WorkerMessage::SetStatus(tr!("安装CAB: {}", progress.status)));
                 }
             });
             
@@ -470,13 +471,13 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
         }
     } else if config.should_import_drivers() && !driver_path_exists {
         log::info!("驱动目录不存在，跳过驱动导入: {}", driver_path);
-        let _ = tx.send(WorkerMessage::SetStatus("跳过驱动导入（目录不存在）".to_string()));
+        let _ = tx.send(WorkerMessage::SetStatus(tr!("跳过驱动导入（目录不存在）")));
     } else if config.has_driver_data() {
         // SaveOnly 模式：驱动已保存但不导入
-        let _ = tx.send(WorkerMessage::SetStatus("跳过驱动导入（仅保存模式）".to_string()));
+        let _ = tx.send(WorkerMessage::SetStatus(tr!("跳过驱动导入（仅保存模式）")));
         log::info!("驱动操作模式为仅保存，跳过驱动导入");
     } else {
-        let _ = tx.send(WorkerMessage::SetStatus("跳过驱动导入".to_string()));
+        let _ = tx.send(WorkerMessage::SetStatus(tr!("跳过驱动导入")));
         log::info!("驱动操作模式为无，跳过驱动导入");
     }
     let _ = tx.send(WorkerMessage::SetProgress(100));
@@ -487,7 +488,7 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
     if config.install_cab_packages {
         let cab_path = format!("{}\\updates", data_dir);
         if std::path::Path::new(&cab_path).exists() {
-            let _ = tx.send(WorkerMessage::SetStatus("正在安装更新包...".to_string()));
+            let _ = tx.send(WorkerMessage::SetStatus(tr!("正在安装更新包...")));
             
             // 创建进度通道
             let (cab_progress_tx, cab_progress_rx) = channel::<DismProgress>();
@@ -497,7 +498,7 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
             let cab_progress_handle = thread::spawn(move || {
                 while let Ok(progress) = cab_progress_rx.recv() {
                     let _ = tx_cab.send(WorkerMessage::SetProgress(progress.percentage));
-                    let _ = tx_cab.send(WorkerMessage::SetStatus(format!("安装更新: {}", progress.status)));
+                    let _ = tx_cab.send(WorkerMessage::SetStatus(tr!("安装更新: {}", progress.status)));
                 }
             });
             
@@ -506,7 +507,7 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
                 Ok((success, fail)) => {
                     log::info!("CAB更新包安装完成: {} 成功, {} 失败", success, fail);
                     let _ = tx.send(WorkerMessage::SetStatus(
-                        format!("更新包安装完成: {} 成功, {} 失败", success, fail)
+                        tr!("更新包安装完成: {} 成功, {} 失败", success, fail)
                     ));
                 }
                 Err(e) => {
@@ -519,17 +520,17 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
             let _ = cab_progress_handle.join();
         } else {
             log::info!("更新包目录不存在，跳过CAB安装: {}", cab_path);
-            let _ = tx.send(WorkerMessage::SetStatus("跳过更新包安装（目录不存在）".to_string()));
+            let _ = tx.send(WorkerMessage::SetStatus(tr!("跳过更新包安装（目录不存在）")));
         }
     } else {
-        let _ = tx.send(WorkerMessage::SetStatus("跳过更新包安装".to_string()));
+        let _ = tx.send(WorkerMessage::SetStatus(tr!("跳过更新包安装")));
         log::info!("未启用CAB更新包安装");
     }
     let _ = tx.send(WorkerMessage::SetProgress(100));
 
     // Step 5: 修复引导
     let _ = tx.send(WorkerMessage::SetInstallStep(InstallStep::RepairBoot));
-    let _ = tx.send(WorkerMessage::SetStatus("正在修复引导...".to_string()));
+    let _ = tx.send(WorkerMessage::SetStatus(tr!("正在修复引导...")));
 
     let boot_manager = BootManager::new();
     let use_uefi = DiskManager::detect_uefi_mode();
@@ -548,7 +549,7 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
                 Err(e) => {
                     log::warn!("[PE安装] XP UEFI 引导失败({})，回退 Legacy(ntldr)", e);
                     let _ = tx.send(WorkerMessage::SetStatus(
-                        "XP UEFI 引导不可用，回退 Legacy 引导...".to_string(),
+                        tr!("XP UEFI 引导不可用，回退 Legacy 引导..."),
                     ));
                     boot_manager.write_xp_boot(&target_partition)
                 }
@@ -561,14 +562,14 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
         boot_manager.repair_boot_advanced(&target_partition, use_uefi)
     };
     if let Err(e) = boot_result {
-        let _ = tx.send(WorkerMessage::Failed(format!("修复引导失败: {}", e)));
+        let _ = tx.send(WorkerMessage::Failed(tr!("修复引导失败: {}", e)));
         return;
     }
     let _ = tx.send(WorkerMessage::SetProgress(100));
 
     // Step 6: 应用高级选项
     let _ = tx.send(WorkerMessage::SetInstallStep(InstallStep::ApplyAdvancedOptions));
-    let _ = tx.send(WorkerMessage::SetStatus("正在应用高级选项...".to_string()));
+    let _ = tx.send(WorkerMessage::SetStatus(tr!("正在应用高级选项...")));
 
     if let Err(e) = apply_advanced_options(&target_partition, &config) {
         log::warn!("应用高级选项失败: {}", e);
@@ -583,20 +584,20 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
     if config.unattended {
         if !config.custom_unattend_file.is_empty() {
             // 用户提供了自定义无人值守文件：直接复制到目标系统（不再内置生成）
-            let _ = tx.send(WorkerMessage::SetStatus("正在应用自定义无人值守配置...".to_string()));
+            let _ = tx.send(WorkerMessage::SetStatus(tr!("正在应用自定义无人值守配置...")));
             let src = format!("{}\\{}", data_dir, config.custom_unattend_file);
             match apply_custom_unattend(&target_partition, &src) {
                 Ok(_) => log::info!("[UNATTEND] 已应用自定义无人值守文件: {}", src),
                 Err(e) => log::warn!("应用自定义无人值守文件失败: {}", e),
             }
         } else {
-            let _ = tx.send(WorkerMessage::SetStatus("正在生成无人值守配置...".to_string()));
+            let _ = tx.send(WorkerMessage::SetStatus(tr!("正在生成无人值守配置...")));
             if let Err(e) = generate_unattend_xml(&target_partition, &config) {
                 log::warn!("生成无人值守配置失败: {}", e);
             }
         }
     } else {
-        let _ = tx.send(WorkerMessage::SetStatus("跳过无人值守配置".to_string()));
+        let _ = tx.send(WorkerMessage::SetStatus(tr!("跳过无人值守配置")));
     }
 
     // 离线登录兜底：放开空密码登录策略 +（已知用户名时）配置空密码自动登录。
@@ -610,13 +611,13 @@ fn execute_install_workflow(tx: Sender<WorkerMessage>) {
 
     // Step 8: 清理临时文件
     let _ = tx.send(WorkerMessage::SetInstallStep(InstallStep::Cleanup));
-    let _ = tx.send(WorkerMessage::SetStatus("正在清理临时文件...".to_string()));
+    let _ = tx.send(WorkerMessage::SetStatus(tr!("正在清理临时文件...")));
 
     ConfigFileManager::cleanup_all(&data_partition, &target_partition);
     let _ = tx.send(WorkerMessage::SetProgress(50));
 
     // 清理自动创建的数据分区并扩展目标分区
-    let _ = tx.send(WorkerMessage::SetStatus("正在清理自动创建的分区...".to_string()));
+    let _ = tx.send(WorkerMessage::SetStatus(tr!("正在清理自动创建的分区...")));
     match DiskManager::cleanup_auto_created_partition_and_extend(&target_partition) {
         Ok(_) => {
             log::info!("自动创建分区清理完成");
@@ -651,14 +652,14 @@ fn execute_expand_workflow(tx: Sender<WorkerMessage>) {
     let data_partition = match ConfigFileManager::find_data_partition() {
         Some(p) => p,
         None => {
-            let _ = tx.send(WorkerMessage::Failed("未找到扩容配置文件".to_string()));
+            let _ = tx.send(WorkerMessage::Failed(tr!("未找到扩容配置文件")));
             return;
         }
     };
     let config = match ConfigFileManager::read_expand_config(&data_partition) {
         Ok(c) => c,
         Err(e) => {
-            let _ = tx.send(WorkerMessage::Failed(format!("读取扩容配置失败: {}", e)));
+            let _ = tx.send(WorkerMessage::Failed(tr!("读取扩容配置失败: {}", e)));
             return;
         }
     };
@@ -668,7 +669,7 @@ fn execute_expand_workflow(tx: Sender<WorkerMessage>) {
         .unwrap_or_else(|| config.target_partition.clone());
     let letter = target_partition.trim_end_matches(':').chars().next().unwrap_or('C');
 
-    let _ = tx.send(WorkerMessage::SetStatus(format!(
+    let _ = tx.send(WorkerMessage::SetStatus(tr!(
         "正在无损扩大分区 {}: （目标 {} MB，0=最大）...",
         letter, config.target_size_mb
     )));
@@ -684,7 +685,7 @@ fn execute_expand_workflow(tx: Sender<WorkerMessage>) {
         }
         Err(e) => {
             log::error!("[EXPAND] 扩容失败: {}", e);
-            let _ = tx.send(WorkerMessage::Failed(format!("扩容失败: {}", e)));
+            let _ = tx.send(WorkerMessage::Failed(tr!("扩容失败: {}", e)));
             // 失败也要清理标记/引导，避免下次重启又进 PE 反复尝试。
             ConfigFileManager::cleanup_partition_markers(&target_partition);
             ConfigFileManager::cleanup_data_dir(&data_partition);
@@ -698,7 +699,7 @@ fn execute_expand_workflow(tx: Sender<WorkerMessage>) {
     }
 
     // 清理：标记 + 配置 + PE 引导项 + PE 文件，避免下次重启再次进入扩容。
-    let _ = tx.send(WorkerMessage::SetStatus("正在清理临时文件...".to_string()));
+    let _ = tx.send(WorkerMessage::SetStatus(tr!("正在清理临时文件...")));
     ConfigFileManager::cleanup_partition_markers(&target_partition);
     ConfigFileManager::cleanup_data_dir(&data_partition);
     let bm = BootManager::new();
@@ -729,7 +730,7 @@ fn execute_backup_workflow(tx: Sender<WorkerMessage>) {
     let data_partition = match ConfigFileManager::find_data_partition() {
         Some(p) => p,
         None => {
-            let _ = tx.send(WorkerMessage::Failed("未找到备份配置文件".to_string()));
+            let _ = tx.send(WorkerMessage::Failed(tr!("未找到备份配置文件")));
             return;
         }
     };
@@ -738,12 +739,12 @@ fn execute_backup_workflow(tx: Sender<WorkerMessage>) {
 
     // Step 1: 读取配置
     let _ = tx.send(WorkerMessage::SetBackupStep(BackupStep::ReadConfig));
-    let _ = tx.send(WorkerMessage::SetStatus("正在读取备份配置...".to_string()));
+    let _ = tx.send(WorkerMessage::SetStatus(tr!("正在读取备份配置...")));
 
     let config = match ConfigFileManager::read_backup_config(&data_partition) {
         Ok(c) => c,
         Err(e) => {
-            let _ = tx.send(WorkerMessage::Failed(format!("读取配置失败: {}", e)));
+            let _ = tx.send(WorkerMessage::Failed(tr!("读取配置失败: {}", e)));
             return;
         }
     };
@@ -781,11 +782,11 @@ fn execute_backup_workflow(tx: Sender<WorkerMessage>) {
     let backup_result = match config.format {
         BackupFormat::Gho => {
             // GHO格式使用Ghost
-            let _ = tx.send(WorkerMessage::SetStatus("正在使用Ghost备份系统...".to_string()));
+            let _ = tx.send(WorkerMessage::SetStatus(tr!("正在使用Ghost备份系统...")));
             let ghost = Ghost::new();
             if !ghost.is_available() {
                 drop(progress_handle);
-                let _ = tx.send(WorkerMessage::Failed("Ghost工具不可用".to_string()));
+                let _ = tx.send(WorkerMessage::Failed(tr!("Ghost工具不可用")));
                 return;
             }
             
@@ -794,7 +795,7 @@ fn execute_backup_workflow(tx: Sender<WorkerMessage>) {
         }
         BackupFormat::Esd => {
             // ESD格式使用DISM高压缩
-            let _ = tx.send(WorkerMessage::SetStatus("正在备份系统（ESD高压缩）...".to_string()));
+            let _ = tx.send(WorkerMessage::SetStatus(tr!("正在备份系统（ESD高压缩）...")));
             let dism = Dism::new();
             if config.incremental && std::path::Path::new(&config.save_path).exists() {
                 dism.append_image_esd(
@@ -816,7 +817,7 @@ fn execute_backup_workflow(tx: Sender<WorkerMessage>) {
         }
         BackupFormat::Swm => {
             // SWM分卷格式
-            let _ = tx.send(WorkerMessage::SetStatus(format!("正在备份系统（SWM分卷，每卷{}MB）...", config.swm_split_size).to_string()));
+            let _ = tx.send(WorkerMessage::SetStatus(tr!("正在备份系统（SWM分卷，每卷{}MB）...", config.swm_split_size)));
             let dism = Dism::new();
             dism.capture_image_swm(
                 &config.save_path,
@@ -829,7 +830,7 @@ fn execute_backup_workflow(tx: Sender<WorkerMessage>) {
         }
         BackupFormat::Wim => {
             // 标准WIM格式
-            let _ = tx.send(WorkerMessage::SetStatus("正在执行系统备份...".to_string()));
+            let _ = tx.send(WorkerMessage::SetStatus(tr!("正在执行系统备份...")));
             let dism = Dism::new();
             if config.incremental && std::path::Path::new(&config.save_path).exists() {
                 dism.append_image(
@@ -855,14 +856,14 @@ fn execute_backup_workflow(tx: Sender<WorkerMessage>) {
     let _ = progress_handle.join();
 
     if let Err(e) = backup_result {
-        let _ = tx.send(WorkerMessage::Failed(format!("备份失败: {}", e)));
+        let _ = tx.send(WorkerMessage::Failed(tr!("备份失败: {}", e)));
         return;
     }
     let _ = tx.send(WorkerMessage::SetProgress(100));
 
     // Step 3: 验证备份文件
     let _ = tx.send(WorkerMessage::SetBackupStep(BackupStep::VerifyBackup));
-    let _ = tx.send(WorkerMessage::SetStatus("正在验证备份文件...".to_string()));
+    let _ = tx.send(WorkerMessage::SetStatus(tr!("正在验证备份文件...")));
 
     // 对于SWM格式，检查第一个分卷文件
     let verify_path = if config.format == BackupFormat::Swm {
@@ -873,14 +874,14 @@ fn execute_backup_workflow(tx: Sender<WorkerMessage>) {
     };
     
     if !std::path::Path::new(&verify_path).exists() {
-        let _ = tx.send(WorkerMessage::Failed("备份文件验证失败".to_string()));
+        let _ = tx.send(WorkerMessage::Failed(tr!("备份文件验证失败")));
         return;
     }
     let _ = tx.send(WorkerMessage::SetProgress(100));
 
     // Step 4: 恢复引导
     let _ = tx.send(WorkerMessage::SetBackupStep(BackupStep::RepairBoot));
-    let _ = tx.send(WorkerMessage::SetStatus("正在恢复引导...".to_string()));
+    let _ = tx.send(WorkerMessage::SetStatus(tr!("正在恢复引导...")));
 
     let boot_manager = BootManager::new();
     // 删除当前PE引导项
@@ -889,7 +890,7 @@ fn execute_backup_workflow(tx: Sender<WorkerMessage>) {
 
     // Step 5: 清理
     let _ = tx.send(WorkerMessage::SetBackupStep(BackupStep::Cleanup));
-    let _ = tx.send(WorkerMessage::SetStatus("正在清理临时文件...".to_string()));
+    let _ = tx.send(WorkerMessage::SetStatus(tr!("正在清理临时文件...")));
 
     ConfigFileManager::cleanup_partition_markers(&source_partition);
     ConfigFileManager::cleanup_data_dir(&data_partition);
