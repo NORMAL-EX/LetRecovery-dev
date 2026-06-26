@@ -370,18 +370,18 @@ impl App {
                 match format_partition(&target_partition) {
                     Ok(_) => log::info!("[INSTALL STEP 1] 格式化完成"),
                     Err(e) => {
-                        log::error!("[INSTALL STEP 1] 格式化失败: {}", e);
-                        // XP i386：格式化失败不能继续——否则会把安装文件层叠到旧/脏文件系统上。
-                        if options.is_xp_i386 {
-                            send_error(
-                                &progress_tx,
-                                &tr!(
-                                    "格式化分区 {} 失败：{}。已中止，未写入任何安装文件。请确认该分区未被占用后重试。",
-                                    target_partition, e
-                                ),
-                            );
-                            return;
-                        }
+                        // 用户勾了「格式化分区」却失败：一律中止（不再仅 XP 才拦）。否则会把镜像/安装
+                        // 文件层叠到旧/脏/被占用的文件系统上，得到一个被污染、引导与系统都可能异常的盘
+                        // （XP 尤其致命）。报真因，让用户处理（多为该卷被资源管理器/程序占用）后重试。
+                        log::error!("[INSTALL STEP 1] 格式化失败，中止安装: {}", e);
+                        send_error(
+                            &progress_tx,
+                            &tr!(
+                                "格式化分区 {} 失败：{}。已中止，未释放镜像、未写入任何安装文件。请确认该分区未被占用（关闭正在浏览它的资源管理器/程序）后重试。",
+                                target_partition, e
+                            ),
+                        );
+                        return;
                     }
                 }
                 send_step(&progress_tx, 1, &tr!("格式化分区"), 100);
