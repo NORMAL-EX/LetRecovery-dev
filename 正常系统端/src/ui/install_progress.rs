@@ -275,11 +275,19 @@ impl App {
         let advanced_options = self.advanced_options.clone();
         let partitions: Vec<Partition> = self.partitions.clone();
         
-        let partition_style = self.partitions
+        // 选中目标分区的「磁盘号:分区号」——安装目标以此为准（照搬 DSI），盘符只是 PE 里临时的、会变。
+        // 跑完 diskpart 脚本后用它把目标重新定位回来；分区表类型也一并取出（脚本后会刷新）。
+        let selected_partition = self
+            .partitions
             .iter()
             .find(|p| p.letter == target_partition)
+            .cloned();
+        let partition_style = selected_partition
+            .as_ref()
             .map(|p| p.partition_style)
             .unwrap_or(PartitionStyle::Unknown);
+        let target_disk = selected_partition.as_ref().and_then(|p| p.disk_number);
+        let target_part_no = selected_partition.as_ref().and_then(|p| p.partition_number);
 
         self.install_step = 1;
         self.install_progress.current_step = tr!("格式化分区");
@@ -287,6 +295,10 @@ impl App {
 
         std::thread::spawn(move || {
             log::info!("[INSTALL THREAD] 安装线程启动");
+
+            // 跑完 diskpart 脚本后，target_partition / partition_style 可能要按 disk:partition 重定位刷新。
+            let mut target_partition = target_partition;
+            let mut partition_style = partition_style;
             
             let temp_dir = std::env::temp_dir();
             let driver_backup_path = temp_dir.join("LetRecovery_DriverBackup");
@@ -294,70 +306,56 @@ impl App {
 
             // 装机前运行 diskpart 脚本（分区准备）——直接读程序目录\diskpart\（当前已在 PE）。
             //
-            // 不能仅凭脚本退出码中止：diskpart/cmd 分区脚本即便把活干完，也常返回非 0（diskpart 遇到
-            // 一条命令出错就停、或最后一条命令报 warning）。早先"失败即 return"会在脚本已经改了分区表
-            // 【之后】把安装拦腰斩断，反而把盘留在“清了/重建一半、没装系统”的空盘状态（实机回归）。
-            // 正确做法：跑完脚本后【重新扫描分区】，只在【目标分区真的消失/不可用】时才中止（此时再
-            // format/释放会落到不存在的卷上）；目标分区还在就继续装——这才是“准备分区脚本 + 装机”的正常用法。
+            // 不据脚本退出码中止：diskpart/cmd 分区脚本即便把活干完，也常返回非 0（遇到一条命令出错就停、
+            // 或最后一条报 warning）；早先“失败即 return”会在脚本已经改了分区表【之后】把安装拦腰斩断，
+            // 把盘留在“清了/重建一半、没装系统”的空盘状态（实机回归）。
+            //
+            // 目标分区按【磁盘号:分区号】重定位（照搬 DSI）：脚本会重建分区、盘符在 PE 里会变、新建分区
+            // 常常没盘符——所以不靠盘符认，靠 disk:partition 找回那个分区，没盘符就自动分配一个空闲盘符，
+            // 并刷新分区表类型（脚本可能把 GPT 改成 MBR）。只有该 disk:partition 真的不存在时才中止。
             if options.run_diskpart_scripts {
                 send_step(&progress_tx, 1, &tr!("运行 Diskpart 脚本"), 0);
                 let scripts_dir = crate::utils::path::get_exe_dir().join("diskpart");
                 log::info!("[INSTALL] 运行 Diskpart 脚本: {}", scripts_dir.display());
 
-                let script_result = lr_core::diskpart::run_scripts_in_dir(&scripts_dir);
-                let script_ok = script_result.is_ok();
-                let script_output = match &script_result {
+                let script_output = match lr_core::diskpart::run_scripts_in_dir(&scripts_dir) {
                     Ok(out) => {
                         log::info!("[INSTALL] Diskpart 脚本执行完成:\n{}", out);
-                        out.clone()
+                        out
                     }
                     Err(e) => {
-                        // 非 0 退出码先不当致命错误——脚本可能已完成分区，仅最后一步报了非 0。
                         log::warn!(
-                            "[INSTALL] Diskpart 脚本返回非 0/未全部成功（先不中止，按分区实况判断）：{}",
+                            "[INSTALL] Diskpart 脚本返回非 0/未全部成功（不据此中止，按 disk:partition 重定位目标）：{}",
                             e
                         );
-                        e.clone()
+                        e
                     }
                 };
 
-                // 脚本可能已改变分区布局，等卷管理器稳定后重新枚举分区，按目标分区是否仍存在来决定。
+                // 等卷管理器稳定，再按「磁盘号:分区号」把安装目标重新定位回来。
                 std::thread::sleep(std::time::Duration::from_millis(800));
-                let want = target_partition.trim_end_matches('\\').trim_end_matches(':');
-                let target_still_exists = match crate::core::disk::DiskManager::get_partitions() {
-                    Ok(parts) => parts.iter().any(|p| {
-                        p.letter
-                            .trim_end_matches('\\')
-                            .trim_end_matches(':')
-                            .eq_ignore_ascii_case(want)
-                    }),
-                    // 重新枚举本身失败（少见）：不臆断分区已坏，回退按脚本退出码——成功则继续，失败才中止。
-                    Err(e) => {
-                        log::warn!("[INSTALL] 脚本后重新枚举分区失败：{}（回退按脚本退出码判断）", e);
-                        script_ok
+                match resolve_install_target(target_disk, target_part_no, &target_partition) {
+                    Ok((letter, style)) => {
+                        log::info!(
+                            "[INSTALL] Diskpart 脚本后目标重定位: 磁盘{:?}:分区{:?}（原 {}）-> {}（分区表 {:?}）",
+                            target_disk, target_part_no, target_partition, letter, style
+                        );
+                        target_partition = letter;
+                        partition_style = style;
+                        send_step(&progress_tx, 1, &tr!("运行 Diskpart 脚本"), 100);
                     }
-                };
-
-                if target_still_exists {
-                    log::info!(
-                        "[INSTALL] Diskpart 脚本执行后目标分区 {} 仍可用，继续安装",
-                        target_partition
-                    );
-                    send_step(&progress_tx, 1, &tr!("运行 Diskpart 脚本"), 100);
-                } else {
-                    log::error!(
-                        "[INSTALL] Diskpart 脚本执行后目标分区 {} 已不存在，中止安装（未格式化、未释放镜像）",
-                        target_partition
-                    );
-                    send_error(
-                        &progress_tx,
-                        &tr!(
-                            "Diskpart 脚本执行后，目标分区 {} 已不存在（脚本可能改变了分区布局）。已中止，未格式化、未释放任何文件。\n请在脚本运行后点「刷新分区」重新选择正确的目标分区，或检查 diskpart 脚本。\n脚本输出：\n{}",
-                            target_partition,
-                            script_output
-                        ),
-                    );
-                    return;
+                    Err(e) => {
+                        log::error!("[INSTALL] Diskpart 脚本后无法定位安装目标，中止：{}", e);
+                        send_error(
+                            &progress_tx,
+                            &tr!(
+                                "Diskpart 脚本执行后无法定位安装目标：{}\n已中止，未格式化、未释放任何文件。请点「刷新分区」重新选择目标分区，或检查 diskpart 脚本。\n脚本输出：\n{}",
+                                e,
+                                script_output
+                            ),
+                        );
+                        return;
+                    }
                 }
             }
 
@@ -1055,6 +1053,89 @@ fn inject_user_version_drivers(target_partition: &str, is_xp: bool) {
         Ok(_) => log::info!("[USER DRV] bin/drivers/{} 注入成功", version),
         Err(e) => log::warn!("[USER DRV] bin/drivers/{} 注入失败: {}（继续安装）", version, e),
     }
+}
+
+/// 跑完 diskpart 脚本后，按「磁盘号:分区号」把安装目标重新定位回来（照搬 DSI 思路）。
+///
+/// 盘符在 PE 里会变、脚本新建的分区常常没盘符，所以安装目标不靠盘符认、靠 disk:partition 认：
+/// 按 (disk_number, partition_number) 在最新分区表里找回那个分区；有盘符直接用，没盘符就分配一个
+/// 空闲盘符（diskpart assign letter）后再用；该 disk:partition 真的不存在 → 返回 Err（调用方据此中止）。
+/// 返回 (当前盘符如 "W:", 当前分区表类型)。拿不到磁盘/分区号（旧分区无编号信息）时回退按原盘符找。
+fn resolve_install_target(
+    target_disk: Option<u32>,
+    target_part: Option<u32>,
+    orig_letter: &str,
+) -> Result<(String, PartitionStyle), String> {
+    use crate::core::disk::DiskManager;
+
+    let norm = |s: &str| s.trim_end_matches('\\').trim_end_matches(':').to_string();
+    let scan = || DiskManager::get_partitions().map_err(|e| format!("枚举分区失败: {}", e));
+
+    // 拿不到磁盘/分区号：回退——按原盘符在最新分区表里找。
+    let (td, tp) = match (target_disk, target_part) {
+        (Some(d), Some(p)) => (d, p),
+        _ => {
+            let orig = norm(orig_letter);
+            let parts = scan()?;
+            return parts
+                .iter()
+                .find(|p| norm(&p.letter).eq_ignore_ascii_case(&orig))
+                .map(|p| (format!("{}:", norm(&p.letter)), p.partition_style))
+                .ok_or_else(|| format!("目标分区 {} 不存在，且无磁盘/分区号可重定位", orig_letter));
+        }
+    };
+
+    // 主路径：按 disk:partition 找回那个分区。
+    let p = scan()?
+        .into_iter()
+        .find(|p| p.disk_number == Some(td) && p.partition_number == Some(tp))
+        .ok_or_else(|| format!("目标分区 磁盘{}:分区{}（原 {}）已不存在", td, tp, orig_letter))?;
+
+    // 已有盘符：直接用。
+    let letter = norm(&p.letter);
+    if !letter.is_empty() {
+        return Ok((format!("{}:", letter), p.partition_style));
+    }
+
+    // 没盘符：分配一个空闲盘符（照搬 DSI 的「查询空闲盘符 → assign」）。
+    let free = DiskManager::find_available_drive_letter()
+        .ok_or_else(|| format!("目标分区 磁盘{}:分区{} 没有盘符，且没有空闲盘符可分配", td, tp))?;
+    let script = format!(
+        "select disk {}\r\nselect partition {}\r\nassign letter={}\r\nexit\r\n",
+        td, tp, free
+    );
+    let tmp = std::env::temp_dir().join("lr_assign_target.txt");
+    std::fs::write(&tmp, script.as_bytes()).map_err(|e| format!("写分配盘符脚本失败: {}", e))?;
+    let tmp_str = tmp.to_string_lossy().into_owned();
+    let out = crate::utils::cmd::create_command("diskpart")
+        .args(["/s", tmp_str.as_str()])
+        .output();
+    let _ = std::fs::remove_file(&tmp);
+    match out {
+        Ok(o) => log::info!(
+            "[INSTALL] 为目标 磁盘{}:分区{} 分配盘符 {}：{}",
+            td,
+            tp,
+            free,
+            crate::utils::encoding::gbk_to_utf8(&o.stdout).trim()
+        ),
+        Err(e) => return Err(format!("为目标分区分配盘符失败: {}", e)),
+    }
+    std::thread::sleep(std::time::Duration::from_millis(600));
+
+    // 确认盘符已生效（重扫一次）。
+    let p2 = scan()?
+        .into_iter()
+        .find(|p| p.disk_number == Some(td) && p.partition_number == Some(tp))
+        .ok_or_else(|| format!("分配盘符后重新枚举不到 磁盘{}:分区{}", td, tp))?;
+    let letter2 = norm(&p2.letter);
+    if letter2.is_empty() {
+        return Err(format!(
+            "已尝试给 磁盘{}:分区{} 分配盘符 {}，但盘符仍未生效",
+            td, tp, free
+        ));
+    }
+    Ok((format!("{}:", letter2), p2.partition_style))
 }
 
 /// 格式化分区（用 diskpart，而不是 format.com）
