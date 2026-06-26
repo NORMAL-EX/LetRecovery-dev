@@ -439,7 +439,7 @@ fn get_disk_info(disk_number: u32) -> Option<PhysicalDisk> {
             let is_init = style != PartitionStyle::Unknown;
 
             // 解析分区信息
-            let partitions = parse_partition_layout(&buffer, header, style);
+            let partitions = parse_partition_layout(&buffer, header, style, disk_number);
 
             (style, is_init, partitions)
         } else {
@@ -471,23 +471,21 @@ fn parse_partition_layout(
     buffer: &[u8],
     header: &DriveLayoutInfoExHeader,
     style: PartitionStyle,
+    disk_number: u32,
 ) -> Vec<DiskPartitionInfo> {
     let mut partitions = Vec::new();
 
     // PARTITION_INFORMATION_EX 结构大小固定为 144 字节
     let partition_entry_size = 144;
 
-    // DRIVE_LAYOUT_INFORMATION_EX 头部大小:
-    // - PartitionStyle: 4 bytes
-    // - PartitionCount: 4 bytes
-    // - Union (GPT: 40 bytes, MBR: 8 bytes，但由于对齐，GPT 可能需要更多)
-    // 实际上，Windows 中 GPT 的 union 部分是 40 字节，MBR 是 8 字节
-    // 但分区数组需要对齐，所以我们使用正确的偏移
-    let header_size = if style == PartitionStyle::GPT {
-        8 + 40 // DriveLayoutInfoExHeader(8) + DRIVE_LAYOUT_INFORMATION_GPT(40) = 48
-    } else {
-        8 + 8 // DriveLayoutInfoExHeader(8) + DRIVE_LAYOUT_INFORMATION_MBR(8) = 16
-    };
+    // DRIVE_LAYOUT_INFORMATION_EX 头部大小 = FIELD_OFFSET(_, PartitionEntry)：
+    //   PartitionStyle(4) + PartitionCount(4) + union{Mbr,Gpt}(40) = 48。
+    // 关键：那个 union 是【定长】的——大小取最大成员 max(MBR=8, GPT=40)=40、按 8 对齐，
+    // 与磁盘实际是 MBR 还是 GPT 无关。所以分区数组对 MBR 和 GPT 都从偏移 48 起。
+    // （旧代码对 MBR 用 16 是把 union 当成只占 8 字节，导致 MBR 盘每个分区项整体前移 32 字节、
+    //   字段全部错位——partition_length 落进 union 区读成 ~0 被跳过，MBR 盘解析出 0 个分区，
+    //   进而 is_active/盘符匹配全失效，Legacy 引导回退、开机 0x7B。GPT 一直用 48 故正常。）
+    let header_size = 8 + 40; // = 48，MBR/GPT 一致
 
     for i in 0..header.partition_count {
         let offset = header_size + (i as usize * partition_entry_size);
@@ -558,8 +556,8 @@ fn parse_partition_layout(
         // 上可能根本不显示"活动"字段，`list partition` 的 `*` 又只表示焦点而非活动，都不可靠。
         let is_active = style == PartitionStyle::MBR && (partition_data[33] & 0x80) != 0;
 
-        // 获取盘符
-        let drive_letter = get_drive_letter_for_partition(starting_offset as u64);
+        // 获取盘符（按【磁盘号 + 偏移】匹配，避免多盘机器上两盘同偏移分区被错配同一盘符）
+        let drive_letter = get_drive_letter_for_partition(disk_number, starting_offset as u64);
 
         // 获取卷标、文件系统和空间使用信息
         let (label, file_system, used_bytes, free_bytes) = if let Some(letter) = drive_letter {
@@ -591,9 +589,11 @@ fn parse_partition_layout(
     partitions
 }
 
-/// 根据分区偏移量获取对应的盘符
+/// 根据【磁盘号 + 分区偏移量】获取对应的盘符。
+/// 必须同时比对磁盘号：多盘机器上两块盘的首分区往往都在 1MiB，仅比偏移会把一块盘的分区
+/// 错配成另一块盘上同偏移卷的盘符，进而让上层（引导分区定位）在错误的磁盘上写引导/设活动。
 #[cfg(windows)]
-fn get_drive_letter_for_partition(offset: u64) -> Option<char> {
+fn get_drive_letter_for_partition(disk_number: u32, offset: u64) -> Option<char> {
     for letter in b'C'..=b'Z' {
         let c = letter as char;
         let path = format!("{}:\\", c);
@@ -601,10 +601,11 @@ fn get_drive_letter_for_partition(offset: u64) -> Option<char> {
             continue;
         }
 
-        // 检查这个卷的偏移量是否匹配
-        if let Some(vol_offset) = get_volume_offset(c) {
-            // 允许一些误差（1MB以内）
-            if (vol_offset as i64 - offset as i64).unsigned_abs() < 1024 * 1024 {
+        // 检查这个卷的磁盘号与偏移量是否都匹配
+        if let Some((vol_disk, vol_offset)) = get_volume_offset(c) {
+            if vol_disk == disk_number
+                && (vol_offset as i64 - offset as i64).unsigned_abs() < 1024 * 1024
+            {
                 return Some(c);
             }
         }
@@ -612,9 +613,10 @@ fn get_drive_letter_for_partition(offset: u64) -> Option<char> {
     None
 }
 
-/// 获取卷的偏移量
+/// 获取卷所在的【磁盘号 + 起始偏移量】（DISK_EXTENT.DiskNumber / StartingOffset）。
+/// DiskNumber 即 \\.\PhysicalDriveN 的 N，与 get_disk_info 用的磁盘号同义。
 #[cfg(windows)]
-fn get_volume_offset(letter: char) -> Option<u64> {
+fn get_volume_offset(letter: char) -> Option<(u32, u64)> {
     unsafe {
         let volume_path = format!("\\\\.\\{}:", letter);
         let wide_path: Vec<u16> = volume_path.encode_utf16().chain(std::iter::once(0)).collect();
@@ -671,7 +673,8 @@ fn get_volume_offset(letter: char) -> Option<u64> {
         if result.is_ok() {
             let extents = &*(buffer.as_ptr() as *const VolumeDiskExtents);
             if extents.number_of_disk_extents > 0 {
-                return Some(extents.extents[0].starting_offset as u64);
+                let e = &extents.extents[0];
+                return Some((e.disk_number, e.starting_offset as u64));
             }
         }
 

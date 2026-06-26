@@ -408,6 +408,19 @@ assign letter=S
         Ok(())
     }
 
+    /// 按盘符把卷所在分区设为活动（磁盘:分区号未知时的兜底）。
+    /// diskpart `active` 作用于当前焦点分区，`select volume <letter>` 先把焦点落到该卷即可。
+    fn set_partition_active_by_letter(&self, boot_letter: &str) -> Result<()> {
+        let vol = boot_letter.trim_end_matches('\\').trim_end_matches(':');
+        let script = format!("select volume {}\r\nactive\r\n", vol);
+        let p = std::env::temp_dir().join("lr_set_active_vol.txt");
+        std::fs::write(&p, script.as_bytes())?;
+        let out = create_command("diskpart").args(["/s", &p.to_string_lossy()]).output()?;
+        let _ = std::fs::remove_file(&p);
+        log::info!("[BOOT] 设活动分区 卷{}: {}", vol, gbk_to_utf8(&out.stdout).trim());
+        Ok(())
+    }
+
     /// 修复指定分区的引导（高级版本，支持指定引导模式）
     pub fn repair_boot_advanced(&self, windows_partition: &str, use_uefi: bool) -> Result<()> {
         let windows_path = format!("{}\\Windows", windows_partition);
@@ -619,11 +632,16 @@ assign letter=S
                 );
             }
 
-            // 3) 把引导分区设为活动（DSI 的 PART *a）。boot_part==0 表示走了回退、磁盘/分区号未知，跳过。
-            if boot_part > 0 {
-                if let Err(e) = self.set_partition_active(boot_disk, boot_part) {
-                    log::warn!("[BOOT] 设活动分区失败（忽略）: {}", e);
-                }
+            // 3) 把引导分区设为活动（DSI 的 PART *a）——Legacy/MBR 开机的承重步骤，两条路径都要做。
+            //    有磁盘:分区号就按号设；走了回退(boot_part==0、磁盘/分区号未知)则按引导盘符兜底设活动，
+            //    避免"clean 后新建分区从未设活动 → 写完引导文件磁盘仍无活动分区 → BIOS 找不到引导设备 0x7B"。
+            let active_res = if boot_part > 0 {
+                self.set_partition_active(boot_disk, boot_part)
+            } else {
+                self.set_partition_active_by_letter(&boot_letter)
+            };
+            if let Err(e) = active_res {
+                log::warn!("[BOOT] 设活动分区失败（忽略）: {}", e);
             }
 
             log::info!("[BOOT] Legacy 引导修复成功");
