@@ -286,6 +286,148 @@ assign letter=S
         self.repair_boot_advanced(windows_partition, true)
     }
 
+    /// Legacy/MBR：在 windows_partition 所在磁盘上找到【引导分区（活动分区）】并挂好盘符（照搬 DSI）。
+    ///
+    /// System+Windows 拆分布局时，bootmgr/BCD 应写到【活动的 System 分区】而不是 Windows 分区；
+    /// 单分区布局时活动分区恰好就是 Windows 分区，逻辑一致。MBR 下 `list partition` 不显示活动标志，
+    /// 故逐个 `detail partition` 查"活动: 是 / Active: Yes"。给引导分区强制挂一个空闲盘符以便 bcdboot /s 指过去。
+    /// 返回 (引导分区盘符如 "S:", 磁盘号, 分区号)。
+    fn prepare_legacy_boot_partition(&self, windows_partition: &str) -> Result<(String, usize, usize)> {
+        let drive_letter = windows_partition.trim_end_matches(':').trim_end_matches('\\');
+
+        // 跑一段 diskpart 脚本，返回 stdout(UTF-8)。
+        let run_dp = |script: String, name: &str| -> Result<String> {
+            let p = std::env::temp_dir().join(name);
+            std::fs::write(&p, script.as_bytes())?;
+            let out = create_command("diskpart").args(["/s", &p.to_string_lossy()]).output()?;
+            let _ = std::fs::remove_file(&p);
+            Ok(gbk_to_utf8(&out.stdout))
+        };
+
+        // Step 1: 取目标卷所在磁盘号。
+        let s1 = run_dp(
+            format!("select volume {}\r\ndetail volume\r\n", drive_letter),
+            "lr_bp_disk.txt",
+        )?;
+        let mut disk_num: Option<usize> = None;
+        for line in s1.lines() {
+            let ll = line.to_lowercase();
+            if ll.contains("disk") || line.contains("磁盘") {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                for (i, p) in parts.iter().enumerate() {
+                    if p.to_lowercase().contains("disk") || *p == "磁盘" {
+                        if let Some(ns) = parts.get(i + 1) {
+                            if let Ok(n) = ns.parse::<usize>() {
+                                disk_num = Some(n);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            if disk_num.is_some() {
+                break;
+            }
+        }
+        let disk_num =
+            disk_num.ok_or_else(|| anyhow::anyhow!("无法确定 {} 所在磁盘", windows_partition))?;
+
+        // Step 2: 列出该磁盘的分区号。
+        let s2 = run_dp(
+            format!("select disk {}\r\nlist partition\r\n", disk_num),
+            "lr_bp_list.txt",
+        )?;
+        let mut part_nums: Vec<usize> = Vec::new();
+        for line in s2.lines() {
+            let ll = line.to_lowercase();
+            if ll.contains("partition") || line.contains("分区") {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                for (i, p) in parts.iter().enumerate() {
+                    if p.to_lowercase().contains("partition") || *p == "分区" {
+                        if let Some(ns) = parts.get(i + 1) {
+                            if let Ok(n) = ns.parse::<usize>() {
+                                part_nums.push(n);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Step 3: 逐个分区查"活动: 是 / Active: Yes"，定位活动（引导）分区。
+        let mut active: Option<usize> = None;
+        for &pn in &part_nums {
+            let sd = run_dp(
+                format!(
+                    "select disk {}\r\nselect partition {}\r\ndetail partition\r\n",
+                    disk_num, pn
+                ),
+                "lr_bp_det.txt",
+            )?;
+            let is_active = sd.lines().any(|l| {
+                let ll = l.to_lowercase();
+                (ll.contains("active") || l.contains("活动"))
+                    && (ll.contains("yes") || l.contains("是"))
+            });
+            if is_active {
+                active = Some(pn);
+                break;
+            }
+        }
+        let part = active.ok_or_else(|| anyhow::anyhow!("磁盘 {} 上未找到活动分区", disk_num))?;
+
+        // Step 4: 取活动（引导）分区的盘符——【有就用、没有才分配】，绝不 remove 已有盘符。
+        // （单分区布局下"活动分区"就是 Windows 分区，若 remove 会把刚要用的盘符抹掉，致 bcdboot 失效。）
+        let existing = crate::core::disk::DiskManager::get_partitions().ok().and_then(|ps| {
+            ps.into_iter()
+                .find(|p| {
+                    p.disk_number == Some(disk_num as u32) && p.partition_number == Some(part as u32)
+                })
+                .map(|p| p.letter.trim_end_matches('\\').trim_end_matches(':').to_string())
+        });
+        let lc = match existing {
+            Some(l) if !l.is_empty() => l,
+            _ => {
+                let free = crate::core::disk::DiskManager::find_available_drive_letter()
+                    .ok_or_else(|| anyhow::anyhow!("没有空闲盘符可分配给引导分区"))?;
+                let _ = run_dp(
+                    format!(
+                        "select disk {}\r\nselect partition {}\r\nassign letter={}\r\n",
+                        disk_num, part, free
+                    ),
+                    "lr_bp_asg.txt",
+                )?;
+                std::thread::sleep(std::time::Duration::from_millis(600));
+                free.to_string()
+            }
+        };
+        let letter = format!("{}:", lc);
+        if !Path::new(&format!("{}\\", letter)).exists() {
+            anyhow::bail!("引导分区 磁盘{}:分区{} 盘符 {} 不可用", disk_num, part, letter);
+        }
+        log::info!("[BOOT] Legacy 引导分区 = 磁盘{}:分区{} -> {}", disk_num, part, letter);
+        Ok((letter, disk_num, part))
+    }
+
+    /// 把指定 磁盘:分区 设为活动分区（Legacy/MBR 引导必需，照搬 DSI 的 PART *a）。
+    fn set_partition_active(&self, disk_num: usize, part_num: usize) -> Result<()> {
+        let script = format!(
+            "select disk {}\r\nselect partition {}\r\nactive\r\n",
+            disk_num, part_num
+        );
+        let p = std::env::temp_dir().join("lr_set_active.txt");
+        std::fs::write(&p, script.as_bytes())?;
+        let out = create_command("diskpart").args(["/s", &p.to_string_lossy()]).output()?;
+        let _ = std::fs::remove_file(&p);
+        log::info!(
+            "[BOOT] 设活动分区 磁盘{}:分区{}: {}",
+            disk_num,
+            part_num,
+            gbk_to_utf8(&out.stdout).trim()
+        );
+        Ok(())
+    }
+
     /// 修复指定分区的引导（高级版本，支持指定引导模式）
     pub fn repair_boot_advanced(&self, windows_partition: &str, use_uefi: bool) -> Result<()> {
         let windows_path = format!("{}\\Windows", windows_partition);
@@ -442,50 +584,68 @@ assign letter=S
                 }
             }
         } else {
-            // Legacy/BIOS 模式
+            // Legacy/BIOS 模式——照搬 DSI：bootmgr/BCD 写到【活动的 System 分区】，而不是 Windows 分区。
+            // System+Windows 拆分布局时引导分区≠Windows 分区（之前直接拿 Windows 分区写引导，导致开机 0x7B）；
+            // 单分区布局时活动分区就是 Windows 分区，逻辑一致。
             log::info!("[BOOT] Legacy 模式：写入 MBR 引导");
-            
-            // 使用 bootsect 写入引导扇区
-            let bootsect_path = get_bin_dir().join("bootsect.exe");
-            if bootsect_path.exists() {
-                log::info!("[BOOT] 使用 bootsect 写入引导扇区");
-                let output = create_command(&bootsect_path)
-                    .args(["/nt60", windows_partition, "/mbr"])
-                    .output()?;
-                
-                let stdout = gbk_to_utf8(&output.stdout);
-                let stderr = gbk_to_utf8(&output.stderr);
-                log::info!("[BOOT] bootsect stdout: {}", stdout);
-                log::info!("[BOOT] bootsect stderr: {}", stderr);
-            }
-            
-            // bcdboot C:\Windows /f BIOS /l zh-cn
-            let output = create_command(&self.bcdboot_path)
-                .args([
-                    &windows_path,
-                    "/f", "BIOS",
-                    "/l", "zh-cn"
-                ])
-                .output()?;
-            
-            let stdout = gbk_to_utf8(&output.stdout);
-            let stderr = gbk_to_utf8(&output.stderr);
-            
-            log::info!("[BOOT] bcdboot stdout: {}", stdout);
-            log::info!("[BOOT] bcdboot stderr: {}", stderr);
 
-            if !output.status.success() {
-                // 尝试不指定 /f 参数
-                let output = create_command(&self.bcdboot_path)
-                    .args([&windows_path, "/l", "zh-cn"])
+            // 找引导（活动）分区并挂好盘符；找不到则回退用 Windows 分区自身（老行为，至少不更差）。
+            let (boot_letter, boot_disk, boot_part) =
+                match self.prepare_legacy_boot_partition(windows_partition) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        log::warn!("[BOOT] 未找到引导/活动分区({})，回退用系统分区自身写引导", e);
+                        (windows_partition.to_string(), 0usize, 0usize)
+                    }
+                };
+            log::info!("[BOOT] Legacy 引导分区: {} (磁盘{}:分区{})", boot_letter, boot_disk, boot_part);
+
+            // 1) bcdboot W:\Windows /s <引导分区> /f BIOS /l zh-cn（/s 指定系统分区——关键差异）
+            let out = create_command(&self.bcdboot_path)
+                .args([windows_path.as_str(), "/s", boot_letter.as_str(), "/f", "BIOS", "/l", "zh-cn"])
+                .output()?;
+            log::info!(
+                "[BOOT] bcdboot /s {}: stdout={} stderr={}",
+                boot_letter,
+                gbk_to_utf8(&out.stdout),
+                gbk_to_utf8(&out.stderr)
+            );
+            if !out.status.success() {
+                // 回退1：不带 /s（让 bcdboot 自己挑活动分区）
+                let out2 = create_command(&self.bcdboot_path)
+                    .args([windows_path.as_str(), "/f", "BIOS", "/l", "zh-cn"])
                     .output()?;
-                
-                let stderr = gbk_to_utf8(&output.stderr);
-                if !output.status.success() {
-                    anyhow::bail!("{}", tr!("Legacy 引导修复失败: {}", stderr));
+                if !out2.status.success() {
+                    // 回退2：不带 /f
+                    let out3 = create_command(&self.bcdboot_path)
+                        .args([windows_path.as_str(), "/l", "zh-cn"])
+                        .output()?;
+                    if !out3.status.success() {
+                        anyhow::bail!("{}", tr!("Legacy 引导修复失败: {}", gbk_to_utf8(&out3.stderr)));
+                    }
                 }
             }
-            
+
+            // 2) bootsect /nt60 <引导分区> /force /mbr（写【引导分区】的引导扇区 + MBR 引导码）
+            let bootsect_path = get_bin_dir().join("bootsect.exe");
+            if bootsect_path.exists() {
+                let out = create_command(&bootsect_path)
+                    .args(["/nt60", boot_letter.as_str(), "/force", "/mbr"])
+                    .output()?;
+                log::info!(
+                    "[BOOT] bootsect /nt60 {} /force /mbr: {}",
+                    boot_letter,
+                    gbk_to_utf8(&out.stdout)
+                );
+            }
+
+            // 3) 把引导分区设为活动（DSI 的 PART *a）。boot_part==0 表示走了回退、磁盘/分区号未知，跳过。
+            if boot_part > 0 {
+                if let Err(e) = self.set_partition_active(boot_disk, boot_part) {
+                    log::warn!("[BOOT] 设活动分区失败（忽略）: {}", e);
+                }
+            }
+
             log::info!("[BOOT] Legacy 引导修复成功");
         }
 
