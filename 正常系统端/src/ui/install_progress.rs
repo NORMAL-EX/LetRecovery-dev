@@ -1069,14 +1069,13 @@ fn resolve_install_target(
     use crate::core::disk::DiskManager;
 
     let norm = |s: &str| s.trim_end_matches('\\').trim_end_matches(':').to_string();
-    let scan = || DiskManager::get_partitions().map_err(|e| format!("枚举分区失败: {}", e));
 
-    // 拿不到磁盘/分区号：回退——按原盘符在最新分区表里找。
+    // 拿不到磁盘/分区号：回退——按原盘符在最新分区表里找（只能找到有盘符的卷）。
     let (td, tp) = match (target_disk, target_part) {
         (Some(d), Some(p)) => (d, p),
         _ => {
             let orig = norm(orig_letter);
-            let parts = scan()?;
+            let parts = DiskManager::get_partitions().map_err(|e| format!("枚举分区失败: {}", e))?;
             return parts
                 .iter()
                 .find(|p| norm(&p.letter).eq_ignore_ascii_case(&orig))
@@ -1085,57 +1084,73 @@ fn resolve_install_target(
         }
     };
 
-    // 主路径：按 disk:partition 找回那个分区。
-    let p = scan()?
-        .into_iter()
-        .find(|p| p.disk_number == Some(td) && p.partition_number == Some(tp))
-        .ok_or_else(|| format!("目标分区 磁盘{}:分区{}（原 {}）已不存在", td, tp, orig_letter))?;
-
-    // 已有盘符：直接用。
-    let letter = norm(&p.letter);
-    if !letter.is_empty() {
-        return Ok((format!("{}:", letter), p.partition_style));
+    // 1) 该 disk:partition 已经挂着盘符 → 直接用。
+    //    注意 get_partitions() 是按 A-Z 盘符枚举的，只看得到【有盘符】的卷；无盘符分区在这里查不到。
+    if let Ok(parts) = DiskManager::get_partitions() {
+        if let Some(p) = parts
+            .iter()
+            .find(|p| p.disk_number == Some(td) && p.partition_number == Some(tp))
+        {
+            let letter = norm(&p.letter);
+            if !letter.is_empty() {
+                return Ok((format!("{}:", letter), p.partition_style));
+            }
+        }
     }
 
-    // 没盘符：分配一个空闲盘符（照搬 DSI 的「查询空闲盘符 → assign」）。
+    // 2) 没盘符（diskpart 新建的分区常常没盘符，上面按盘符枚举就看不到）：
+    //    直接按 disk:partition 用 diskpart 强制挂一个空闲盘符（remove 旧的再 assign，noerr 容错）。
+    //    diskpart 的 select partition 作用于无盘符分区也有效；若该分区根本不存在，select 会失败、
+    //    盘符挂不上，下面第 3 步据此中止。
     let free = DiskManager::find_available_drive_letter()
-        .ok_or_else(|| format!("目标分区 磁盘{}:分区{} 没有盘符，且没有空闲盘符可分配", td, tp))?;
+        .ok_or_else(|| "没有空闲盘符可分配给目标分区".to_string())?;
     let script = format!(
-        "select disk {}\r\nselect partition {}\r\nassign letter={}\r\nexit\r\n",
+        "select disk {}\r\nselect partition {}\r\nremove noerr\r\nassign letter={}\r\nexit\r\n",
         td, tp, free
     );
     let tmp = std::env::temp_dir().join("lr_assign_target.txt");
     std::fs::write(&tmp, script.as_bytes()).map_err(|e| format!("写分配盘符脚本失败: {}", e))?;
     let tmp_str = tmp.to_string_lossy().into_owned();
-    let out = crate::utils::cmd::create_command("diskpart")
+    let dp_out = match crate::utils::cmd::create_command("diskpart")
         .args(["/s", tmp_str.as_str()])
-        .output();
+        .output()
+    {
+        Ok(o) => crate::utils::encoding::gbk_to_utf8(&o.stdout),
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(format!("运行 diskpart 分配盘符失败: {}", e));
+        }
+    };
     let _ = std::fs::remove_file(&tmp);
-    match out {
-        Ok(o) => log::info!(
-            "[INSTALL] 为目标 磁盘{}:分区{} 分配盘符 {}：{}",
-            td,
-            tp,
-            free,
-            crate::utils::encoding::gbk_to_utf8(&o.stdout).trim()
-        ),
-        Err(e) => return Err(format!("为目标分区分配盘符失败: {}", e)),
-    }
-    std::thread::sleep(std::time::Duration::from_millis(600));
+    log::info!(
+        "[INSTALL] 给目标 磁盘{}:分区{} 挂盘符 {}：\n{}",
+        td,
+        tp,
+        free,
+        dp_out.trim()
+    );
 
-    // 确认盘符已生效（重扫一次）。
-    let p2 = scan()?
-        .into_iter()
-        .find(|p| p.disk_number == Some(td) && p.partition_number == Some(tp))
-        .ok_or_else(|| format!("分配盘符后重新枚举不到 磁盘{}:分区{}", td, tp))?;
-    let letter2 = norm(&p2.letter);
-    if letter2.is_empty() {
-        return Err(format!(
-            "已尝试给 磁盘{}:分区{} 分配盘符 {}，但盘符仍未生效",
-            td, tp, free
-        ));
+    // 3) 验证刚挂的盘符是否生效（生效 = 该 disk:partition 确实存在且现在可用）。PE 里卷管理器可能慢，重试几次。
+    let free_norm = free.to_string();
+    for attempt in 0..4 {
+        std::thread::sleep(std::time::Duration::from_millis(if attempt == 0 { 800 } else { 500 }));
+        if let Ok(parts) = DiskManager::get_partitions() {
+            if let Some(p) = parts
+                .iter()
+                .find(|p| norm(&p.letter).eq_ignore_ascii_case(&free_norm))
+            {
+                return Ok((format!("{}:", norm(&p.letter)), p.partition_style));
+            }
+        }
     }
-    Ok((format!("{}:", letter2), p2.partition_style))
+
+    Err(format!(
+        "目标分区 磁盘{}:分区{}（原 {}）在 Diskpart 脚本执行后不存在，或无法挂载盘符。\ndiskpart 输出：\n{}",
+        td,
+        tp,
+        orig_letter,
+        dp_out.trim()
+    ))
 }
 
 /// 格式化分区（用 diskpart，而不是 format.com）
