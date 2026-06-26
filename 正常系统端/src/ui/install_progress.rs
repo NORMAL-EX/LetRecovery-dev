@@ -581,7 +581,20 @@ impl App {
                 
                 log::info!("[INSTALL STEP 5] 引导模式: {}", if use_uefi { "UEFI" } else { "Legacy" });
                 send_step(&progress_tx, 5, &tr!("修复引导"), 50);
-                
+
+                // Legacy/MBR 写引导前：确保目标磁盘有【非 0 的唯一 MBR 签名】。
+                // diskpart clean 后磁盘 MBR 签名会变成 00000000，而 Win7 的 BCD 是按【磁盘签名 + 分区偏移】
+                // 定位"系统所在的卷"的——签名为 0 时 winload 解析不到该卷 → 开机 STOP 0x7B / 0xC0000034
+                // (INACCESSIBLE_BOOT_DEVICE / OBJECT_NAME_NOT_FOUND)。只在签名【确为 0】时补写，绝不动已有有效签名。
+                if !use_uefi {
+                    if let Some(d) = target_disk {
+                        match ensure_mbr_disk_signature(d) {
+                            Ok(msg) => log::info!("[INSTALL STEP 5] MBR 签名: {}", msg),
+                            Err(e) => log::warn!("[INSTALL STEP 5] MBR 签名检查失败（继续）: {}", e),
+                        }
+                    }
+                }
+
                 let boot_manager = crate::core::bcdedit::BootManager::new();
                 // XP/2003 写 XP 引导；否则 bcdboot。is_xp 已在上方统一计算。
                 let boot_result = if is_xp {
@@ -1150,6 +1163,77 @@ fn resolve_install_target(
         tp,
         orig_letter,
         dp_out.trim()
+    ))
+}
+
+/// 确保目标磁盘有【非 0 的唯一 MBR 磁盘签名】（Legacy/MBR 写引导前调用）。
+///
+/// diskpart `clean` 之后 MBR 签名会是 0x00000000；而 Win7 的 BCD 是按【磁盘签名 + 分区偏移】来定位
+/// "系统所在的卷"，签名为 0 时 winload 解析不到 → 开机 STOP 0x7B / 0xC0000034。
+/// 这里先用 `uniqueid disk` 读当前签名，**只在确为 0 时**用 `uniqueid disk id=<非0 8位hex>` 补一个，
+/// 绝不改动已有的有效签名（解析不到 8 位十六进制——例如 GPT 的 GUID——也一律跳过，保守处理）。
+fn ensure_mbr_disk_signature(disk: u32) -> Result<String, String> {
+    let run = |script: &str, tag: &str| -> Result<String, String> {
+        let tmp = std::env::temp_dir().join(format!("lr_sig_{}.txt", tag));
+        std::fs::write(&tmp, script.as_bytes()).map_err(|e| format!("写{}脚本失败: {}", tag, e))?;
+        let tmp_str = tmp.to_string_lossy().into_owned();
+        let out = crate::utils::cmd::create_command("diskpart")
+            .args(["/s", tmp_str.as_str()])
+            .output();
+        let _ = std::fs::remove_file(&tmp);
+        match out {
+            Ok(o) => Ok(crate::utils::encoding::gbk_to_utf8(&o.stdout)),
+            Err(e) => Err(format!("运行 diskpart({}) 失败: {}", tag, e)),
+        }
+    };
+
+    // 1) 读当前磁盘 ID（MBR 签名）。
+    let stdout = run(&format!("select disk {}\r\nuniqueid disk\r\nexit\r\n", disk), "read")?;
+    // 解析输出里的 8 位十六进制磁盘 ID（含 "ID" 的行里取第一个 8-hex token）。
+    let mut current: Option<String> = None;
+    for line in stdout.lines() {
+        if line.to_ascii_lowercase().contains("id") {
+            for tok in line.split(|c: char| !c.is_ascii_alphanumeric()) {
+                if tok.len() == 8 && tok.chars().all(|c| c.is_ascii_hexdigit()) {
+                    current = Some(tok.to_ascii_uppercase());
+                    break;
+                }
+            }
+        }
+        if current.is_some() {
+            break;
+        }
+    }
+    match current.as_deref() {
+        Some("00000000") => { /* 签名为 0，下面补写 */ }
+        Some(sig) => return Ok(format!("磁盘 {} 已有 MBR 签名 {}，无需处理", disk, sig)),
+        None => {
+            return Ok(format!(
+                "磁盘 {} 未解析到 MBR 签名（可能是 GPT/输出异常），保守跳过。输出：{}",
+                disk,
+                stdout.trim()
+            ))
+        }
+    }
+
+    // 2) 签名为 0：生成一个非 0 的 8 位十六进制签名并写入。
+    let new_id = {
+        let n = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.subsec_nanos() ^ (d.as_secs() as u32))
+            .unwrap_or(0xA1B2_C3D4);
+        n | 0x1000_0000 // 保证高位非 0，整体非 0
+    };
+    let new_hex = format!("{:08X}", new_id);
+    let so = run(
+        &format!("select disk {}\r\nuniqueid disk id={}\r\nexit\r\n", disk, new_hex),
+        "set",
+    )?;
+    Ok(format!(
+        "磁盘 {} 原 MBR 签名为 0，已写入新签名 {}（diskpart: {}）",
+        disk,
+        new_hex,
+        so.trim()
     ))
 }
 
