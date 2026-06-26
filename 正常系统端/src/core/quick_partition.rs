@@ -115,6 +115,8 @@ pub struct DiskPartitionInfo {
     pub used_bytes: u64,
     /// 空闲空间（字节）
     pub free_bytes: u64,
+    /// 是否为活动分区（MBR BootIndicator=0x80；权威来源，直接读 MBR 引导字节，GPT 恒为 false）
+    pub is_active: bool,
 }
 
 impl DiskPartitionInfo {
@@ -338,6 +340,25 @@ pub fn get_physical_disks() -> Vec<PhysicalDisk> {
     Vec::new()
 }
 
+/// 返回指定磁盘上活动（引导）分区的分区号（MBR BootIndicator=0x80）。
+///
+/// 权威来源：经 IOCTL_DISK_GET_DRIVE_LAYOUT_EX 直接读 MBR 引导字节，不依赖 diskpart 文本输出
+/// （新版 Windows 的 `detail partition` 可能不显示"活动"字段，`list partition` 的 `*` 只是焦点标记）。
+/// 无活动分区或非 MBR 盘返回 None。
+#[cfg(windows)]
+pub fn get_active_partition_number(disk_number: u32) -> Option<u32> {
+    let disk = get_disk_info(disk_number)?;
+    disk.partitions
+        .iter()
+        .find(|p| p.is_active)
+        .map(|p| p.partition_number)
+}
+
+#[cfg(not(windows))]
+pub fn get_active_partition_number(_disk_number: u32) -> Option<u32> {
+    None
+}
+
 /// 获取单个磁盘的详细信息
 #[cfg(windows)]
 fn get_disk_info(disk_number: u32) -> Option<PhysicalDisk> {
@@ -532,6 +553,11 @@ fn parse_partition_layout(
             (false, false, false, type_str)
         };
 
+        // 活动分区标志（仅 MBR 有意义）：BootIndicator(union 偏移 1 -> partition_data[33]) 高位置位即活动分区。
+        // 直接读 MBR 引导字节，是判断活动分区的权威来源——diskpart `detail partition` 在新版 Windows
+        // 上可能根本不显示"活动"字段，`list partition` 的 `*` 又只表示焦点而非活动，都不可靠。
+        let is_active = style == PartitionStyle::MBR && (partition_data[33] & 0x80) != 0;
+
         // 获取盘符
         let drive_letter = get_drive_letter_for_partition(starting_offset as u64);
 
@@ -555,6 +581,7 @@ fn parse_partition_layout(
             partition_type,
             used_bytes,
             free_bytes,
+            is_active,
         });
     }
 

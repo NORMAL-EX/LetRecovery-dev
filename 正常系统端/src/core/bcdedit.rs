@@ -286,127 +286,107 @@ assign letter=S
         self.repair_boot_advanced(windows_partition, true)
     }
 
-    /// Legacy/MBR：在 windows_partition 所在磁盘上找到【引导分区（活动分区）】并挂好盘符（照搬 DSI）。
+    /// Legacy/MBR：在 windows_partition 所在磁盘上确定【引导分区】并挂好盘符（照搬 DSI）。
     ///
     /// System+Windows 拆分布局时，bootmgr/BCD 应写到【活动的 System 分区】而不是 Windows 分区；
-    /// 单分区布局时活动分区恰好就是 Windows 分区，逻辑一致。MBR 下 `list partition` 不显示活动标志，
-    /// 故逐个 `detail partition` 查"活动: 是 / Active: Yes"。给引导分区强制挂一个空闲盘符以便 bcdboot /s 指过去。
+    /// 单分区/无独立 System 分区时则用 Windows 分区自身作引导分区，稍后把它设为活动——逻辑一致。
+    ///
+    /// 活动分区判定走 IOCTL（直接读 MBR BootIndicator 引导字节），不再解析 diskpart 文本：
+    /// 新版 Windows 的 `detail partition` 可能不显示"活动"字段，`list partition` 的 `*` 又只表示焦点，
+    /// 两种文本解析都不可靠。给独立 System 分区挂一个盘符以便 bcdboot /s 指过去。
     /// 返回 (引导分区盘符如 "S:", 磁盘号, 分区号)。
     fn prepare_legacy_boot_partition(&self, windows_partition: &str) -> Result<(String, usize, usize)> {
-        let drive_letter = windows_partition.trim_end_matches(':').trim_end_matches('\\');
+        let wl_char = windows_partition
+            .trim_end_matches('\\')
+            .trim_end_matches(':')
+            .chars()
+            .next()
+            .map(|c| c.to_ascii_uppercase());
 
-        // 跑一段 diskpart 脚本，返回 stdout(UTF-8)。
-        let run_dp = |script: String, name: &str| -> Result<String> {
-            let p = std::env::temp_dir().join(name);
-            std::fs::write(&p, script.as_bytes())?;
-            let out = create_command("diskpart").args(["/s", &p.to_string_lossy()]).output()?;
-            let _ = std::fs::remove_file(&p);
-            Ok(gbk_to_utf8(&out.stdout))
-        };
-
-        // Step 1: 取目标卷所在磁盘号。
-        let s1 = run_dp(
-            format!("select volume {}\r\ndetail volume\r\n", drive_letter),
-            "lr_bp_disk.txt",
-        )?;
-        let mut disk_num: Option<usize> = None;
-        for line in s1.lines() {
-            let ll = line.to_lowercase();
-            if ll.contains("disk") || line.contains("磁盘") {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                for (i, p) in parts.iter().enumerate() {
-                    if p.to_lowercase().contains("disk") || *p == "磁盘" {
-                        if let Some(ns) = parts.get(i + 1) {
-                            if let Ok(n) = ns.parse::<usize>() {
-                                disk_num = Some(n);
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-            if disk_num.is_some() {
-                break;
-            }
-        }
-        let disk_num =
-            disk_num.ok_or_else(|| anyhow::anyhow!("无法确定 {} 所在磁盘", windows_partition))?;
-
-        // Step 2: 列出该磁盘的分区号。
-        let s2 = run_dp(
-            format!("select disk {}\r\nlist partition\r\n", disk_num),
-            "lr_bp_list.txt",
-        )?;
-        let mut part_nums: Vec<usize> = Vec::new();
-        for line in s2.lines() {
-            let ll = line.to_lowercase();
-            if ll.contains("partition") || line.contains("分区") {
-                let parts: Vec<&str> = line.split_whitespace().collect();
-                for (i, p) in parts.iter().enumerate() {
-                    if p.to_lowercase().contains("partition") || *p == "分区" {
-                        if let Some(ns) = parts.get(i + 1) {
-                            if let Ok(n) = ns.parse::<usize>() {
-                                part_nums.push(n);
-                            }
-                        }
+        // 用 IOCTL 扫描所有物理盘，定位 Windows 分区所在磁盘号 + 分区号（权威，不依赖盘符枚举）。
+        let disks = crate::core::quick_partition::get_physical_disks();
+        let mut disk_num: Option<u32> = None;
+        let mut win_part: Option<u32> = None;
+        'outer: for d in &disks {
+            for p in &d.partitions {
+                if let (Some(dl), Some(wc)) = (p.drive_letter, wl_char) {
+                    if dl.to_ascii_uppercase() == wc {
+                        disk_num = Some(d.disk_number);
+                        win_part = Some(p.partition_number);
+                        break 'outer;
                     }
                 }
             }
         }
+        let disk_num = disk_num
+            .ok_or_else(|| anyhow::anyhow!("无法确定 {} 所在磁盘（IOCTL 未匹配到盘符）", windows_partition))?;
+        let win_part = win_part.unwrap_or(0);
 
-        // Step 3: 逐个分区查"活动: 是 / Active: Yes"，定位活动（引导）分区。
-        let mut active: Option<usize> = None;
-        for &pn in &part_nums {
-            let sd = run_dp(
-                format!(
-                    "select disk {}\r\nselect partition {}\r\ndetail partition\r\n",
-                    disk_num, pn
-                ),
-                "lr_bp_det.txt",
-            )?;
-            let is_active = sd.lines().any(|l| {
-                let ll = l.to_lowercase();
-                (ll.contains("active") || l.contains("活动"))
-                    && (ll.contains("yes") || l.contains("是"))
-            });
-            if is_active {
-                active = Some(pn);
-                break;
+        // 该磁盘的活动（引导）分区——权威来源：MBR BootIndicator=0x80（复用上面同一次 IOCTL 扫描）。
+        let active = disks
+            .iter()
+            .find(|d| d.disk_number == disk_num)
+            .and_then(|d| d.partitions.iter().find(|p| p.is_active))
+            .map(|p| p.partition_number);
+
+        match active {
+            // 独立的活动 System 分区（≠Windows 分区）：引导写到它，给它挂个盘符供 bcdboot /s。
+            Some(ap) if ap != 0 && ap != win_part => {
+                let letter = self.letter_for_partition(&disks, disk_num, ap)?;
+                log::info!(
+                    "[BOOT] Legacy 引导分区 = 活动 System 分区 磁盘{}:分区{} -> {}",
+                    disk_num, ap, letter
+                );
+                Ok((letter, disk_num as usize, ap as usize))
             }
-        }
-        let part = active.ok_or_else(|| anyhow::anyhow!("磁盘 {} 上未找到活动分区", disk_num))?;
-
-        // Step 4: 取活动（引导）分区的盘符——【有就用、没有才分配】，绝不 remove 已有盘符。
-        // （单分区布局下"活动分区"就是 Windows 分区，若 remove 会把刚要用的盘符抹掉，致 bcdboot 失效。）
-        let existing = crate::core::disk::DiskManager::get_partitions().ok().and_then(|ps| {
-            ps.into_iter()
-                .find(|p| {
-                    p.disk_number == Some(disk_num as u32) && p.partition_number == Some(part as u32)
-                })
-                .map(|p| p.letter.trim_end_matches('\\').trim_end_matches(':').to_string())
-        });
-        let lc = match existing {
-            Some(l) if !l.is_empty() => l,
+            // 活动分区就是 Windows 分区，或本盘没有活动分区：用 Windows 分区自身作引导分区，
+            // 稍后由调用方将其设为活动。Windows 分区已挂好盘符，直接用。
             _ => {
-                let free = crate::core::disk::DiskManager::find_available_drive_letter()
-                    .ok_or_else(|| anyhow::anyhow!("没有空闲盘符可分配给引导分区"))?;
-                let _ = run_dp(
-                    format!(
-                        "select disk {}\r\nselect partition {}\r\nassign letter={}\r\n",
-                        disk_num, part, free
-                    ),
-                    "lr_bp_asg.txt",
-                )?;
-                std::thread::sleep(std::time::Duration::from_millis(600));
-                free.to_string()
+                log::info!(
+                    "[BOOT] Legacy 引导分区 = Windows 分区自身 磁盘{}:分区{} -> {}",
+                    disk_num, win_part, windows_partition
+                );
+                Ok((windows_partition.to_string(), disk_num as usize, win_part as usize))
             }
-        };
-        let letter = format!("{}:", lc);
+        }
+    }
+
+    /// 取 磁盘:分区 的盘符——【有就用、没有才分配空闲盘符】，绝不 remove 已有盘符。
+    fn letter_for_partition(
+        &self,
+        disks: &[crate::core::quick_partition::PhysicalDisk],
+        disk_num: u32,
+        part: u32,
+    ) -> Result<String> {
+        // 先看 IOCTL 扫描结果里这个分区有没有现成盘符。
+        let existing = disks
+            .iter()
+            .find(|d| d.disk_number == disk_num)
+            .and_then(|d| d.partitions.iter().find(|p| p.partition_number == part))
+            .and_then(|p| p.drive_letter);
+        if let Some(c) = existing {
+            let letter = format!("{}:", c.to_ascii_uppercase());
+            if Path::new(&format!("{}\\", letter)).exists() {
+                return Ok(letter);
+            }
+        }
+        // 没有则用 diskpart 给它分配一个空闲盘符。
+        let free = crate::core::disk::DiskManager::find_available_drive_letter()
+            .ok_or_else(|| anyhow::anyhow!("没有空闲盘符可分配给引导分区"))?;
+        let script = format!(
+            "select disk {}\r\nselect partition {}\r\nassign letter={}\r\n",
+            disk_num, part, free
+        );
+        let p = std::env::temp_dir().join("lr_bp_asg.txt");
+        std::fs::write(&p, script.as_bytes())?;
+        let _ = create_command("diskpart").args(["/s", &p.to_string_lossy()]).output()?;
+        let _ = std::fs::remove_file(&p);
+        std::thread::sleep(std::time::Duration::from_millis(600));
+        let letter = format!("{}:", free);
         if !Path::new(&format!("{}\\", letter)).exists() {
             anyhow::bail!("引导分区 磁盘{}:分区{} 盘符 {} 不可用", disk_num, part, letter);
         }
-        log::info!("[BOOT] Legacy 引导分区 = 磁盘{}:分区{} -> {}", disk_num, part, letter);
-        Ok((letter, disk_num, part))
+        Ok(letter)
     }
 
     /// 把指定 磁盘:分区 设为活动分区（Legacy/MBR 引导必需，照搬 DSI 的 PART *a）。
