@@ -293,28 +293,71 @@ impl App {
             let driver_backup_str = driver_backup_path.to_string_lossy().to_string();
 
             // 装机前运行 diskpart 脚本（分区准备）——直接读程序目录\diskpart\（当前已在 PE）。
-            // 结果回报到 UI：成功则步骤走到 100%；失败则弹红色错误条并中止（之前只 println 到控制台，
-            // 用户根本看不到跑没跑）。脚本是用来准备分区的，失败还往下走会把系统装到错误的分区布局上。
+            //
+            // 不能仅凭脚本退出码中止：diskpart/cmd 分区脚本即便把活干完，也常返回非 0（diskpart 遇到
+            // 一条命令出错就停、或最后一条命令报 warning）。早先"失败即 return"会在脚本已经改了分区表
+            // 【之后】把安装拦腰斩断，反而把盘留在“清了/重建一半、没装系统”的空盘状态（实机回归）。
+            // 正确做法：跑完脚本后【重新扫描分区】，只在【目标分区真的消失/不可用】时才中止（此时再
+            // format/释放会落到不存在的卷上）；目标分区还在就继续装——这才是“准备分区脚本 + 装机”的正常用法。
             if options.run_diskpart_scripts {
                 send_step(&progress_tx, 1, &tr!("运行 Diskpart 脚本"), 0);
                 let scripts_dir = crate::utils::path::get_exe_dir().join("diskpart");
                 log::info!("[INSTALL] 运行 Diskpart 脚本: {}", scripts_dir.display());
-                match lr_core::diskpart::run_scripts_in_dir(&scripts_dir) {
+
+                let script_result = lr_core::diskpart::run_scripts_in_dir(&scripts_dir);
+                let script_ok = script_result.is_ok();
+                let script_output = match &script_result {
                     Ok(out) => {
                         log::info!("[INSTALL] Diskpart 脚本执行完成:\n{}", out);
-                        send_step(&progress_tx, 1, &tr!("运行 Diskpart 脚本"), 100);
+                        out.clone()
                     }
                     Err(e) => {
-                        log::error!("[INSTALL] Diskpart 脚本执行失败: {}", e);
-                        send_error(
-                            &progress_tx,
-                            &tr!(
-                                "Diskpart 脚本执行失败，已中止安装（未格式化、未写入任何文件）：\n{}",
-                                e
-                            ),
+                        // 非 0 退出码先不当致命错误——脚本可能已完成分区，仅最后一步报了非 0。
+                        log::warn!(
+                            "[INSTALL] Diskpart 脚本返回非 0/未全部成功（先不中止，按分区实况判断）：{}",
+                            e
                         );
-                        return;
+                        e.clone()
                     }
+                };
+
+                // 脚本可能已改变分区布局，等卷管理器稳定后重新枚举分区，按目标分区是否仍存在来决定。
+                std::thread::sleep(std::time::Duration::from_millis(800));
+                let want = target_partition.trim_end_matches('\\').trim_end_matches(':');
+                let target_still_exists = match crate::core::disk::DiskManager::get_partitions() {
+                    Ok(parts) => parts.iter().any(|p| {
+                        p.letter
+                            .trim_end_matches('\\')
+                            .trim_end_matches(':')
+                            .eq_ignore_ascii_case(want)
+                    }),
+                    // 重新枚举本身失败（少见）：不臆断分区已坏，回退按脚本退出码——成功则继续，失败才中止。
+                    Err(e) => {
+                        log::warn!("[INSTALL] 脚本后重新枚举分区失败：{}（回退按脚本退出码判断）", e);
+                        script_ok
+                    }
+                };
+
+                if target_still_exists {
+                    log::info!(
+                        "[INSTALL] Diskpart 脚本执行后目标分区 {} 仍可用，继续安装",
+                        target_partition
+                    );
+                    send_step(&progress_tx, 1, &tr!("运行 Diskpart 脚本"), 100);
+                } else {
+                    log::error!(
+                        "[INSTALL] Diskpart 脚本执行后目标分区 {} 已不存在，中止安装（未格式化、未释放镜像）",
+                        target_partition
+                    );
+                    send_error(
+                        &progress_tx,
+                        &tr!(
+                            "Diskpart 脚本执行后，目标分区 {} 已不存在（脚本可能改变了分区布局）。已中止，未格式化、未释放任何文件。\n请在脚本运行后点「刷新分区」重新选择正确的目标分区，或检查 diskpart 脚本。\n脚本输出：\n{}",
+                            target_partition,
+                            script_output
+                        ),
+                    );
+                    return;
                 }
             }
 
