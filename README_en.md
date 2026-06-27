@@ -156,7 +156,6 @@ This project is licensed under the [PolyForm Noncommercial License 1.0.0](LICENS
 
 - System images and PE download services provided by **Cloud-PE**
 - Thanks to **[电脑病毒爱好者](https://github.com/HelloWin10-19045)** for providing WinPE
-- Thanks to **Tik** for testing and feedback
 
 ---
 

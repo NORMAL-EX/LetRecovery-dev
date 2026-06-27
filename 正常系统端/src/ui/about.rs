@@ -299,7 +299,6 @@ impl App {
 
                 ui.label(format!("• {}", tr!("部分系统镜像及 PE 下载服务由 Cloud-PE 云盘提供")));
                 ui.label(format!("• {}", tr!("感谢 电脑病毒爱好者 提供 WinPE")));
-                ui.label(format!("• {}", tr!("感谢 Tik 参与测试与反馈")));
 
                 ui.add_space(30.0);
                 ui.separator();

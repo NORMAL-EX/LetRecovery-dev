@@ -156,7 +156,6 @@ cargo build --release
 
 - 部分系统镜像及 PE 下载服务由 **Cloud-PE 云盘** 提供
 - 感谢 **[电脑病毒爱好者](https://github.com/HelloWin10-19045)** 提供 WinPE
-- 感谢 **Tik** 参与测试与反馈
 
 ---
 
