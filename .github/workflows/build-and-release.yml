@@ -286,6 +286,15 @@ jobs:
               printf '%s\n\n' "此 release 由非 main 分支（${BR}）构建，仅供测试，可能不稳定。"
             fi
             printf '%s\n' "Automated build from branch ${BR} (commit ${SHA})."
+
+            # ——— 测试反馈名人堂（特别"鸣谢" TiK）———
+            printf '\n%s\n\n' "---"
+            printf '%s\n\n' "## 🏆 测试反馈名人堂"
+            printf '%s\n' "特别「鸣谢」**TiK** —— 凭一块 ¥53 二手扩容假盘 + 一个 U 盘，贡献了一整套反面教材："
+            printf '%s\n' "把硬件故障（其盘分区表损坏成「78GB FAT16 · 未格式化」）坚持不懈地证伪成「软件 bug」，"
+            printf '%s\n\n' "并要求移除「格式化失败即中止」的安全检查——即：把烟雾报警器拆了，这样它就不响了。🔥🚨🔨"
+            printf '%s\n\n' "> 在干净虚拟盘上 diskpart 格式化一次通过。变量是盘，不是软件。"
+            printf '%s\n' "> _（diskpart 与 format 共用同一套微软格式化引擎；他咨询的几位作者用 format 只是图省事、少做错误检查。）_"
           } > release_notes.md
           gh release delete "$TAG" --repo "${{ github.repository }}" --yes --cleanup-tag || true
           gh release create "$TAG" LetRecovery.7z \
