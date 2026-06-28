@@ -1,7 +1,7 @@
 //! 国际化（i18n）模块
 //!
 //! 提供多语言支持，包括：
-//! - 从 `{软件运行目录}/lang` 目录加载语言文件
+//! - 从 `{软件运行目录}/bin/lang` 目录加载语言文件（不存在则回退旧位置 `{软件运行目录}/lang`）
 //! - 支持运行时切换语言
 //! - 语言设置持久化到配置文件
 //! - 高性能翻译查找
@@ -13,7 +13,7 @@ use std::sync::OnceLock;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 
-use super::path::get_exe_dir;
+use super::path::{get_bin_dir, get_exe_dir};
 
 /// 语言文件结构
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,9 +60,14 @@ impl I18nManager {
 /// 全局翻译管理器实例
 static I18N_MANAGER: OnceLock<RwLock<I18nManager>> = OnceLock::new();
 
-/// 获取语言文件目录路径
+/// 获取语言文件目录路径（优先 bin/lang，不存在则回退 exe 同级 lang，兼容旧包）
 pub fn get_lang_dir() -> PathBuf {
-    get_exe_dir().join("lang")
+    let in_bin = get_bin_dir().join("lang");
+    if in_bin.exists() {
+        in_bin
+    } else {
+        get_exe_dir().join("lang")
+    }
 }
 
 /// 初始化国际化系统

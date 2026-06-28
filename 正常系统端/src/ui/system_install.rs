@@ -341,15 +341,15 @@ impl App {
                 ui.horizontal(|ui| {
                     ui.checkbox(&mut self.run_diskpart_scripts, tr!("运行Diskpart脚本"))
                         .on_hover_text(
-                            tr!("安装前运行 程序目录\\diskpart\\ 下的所有脚本(.cmd/.bat 走 cmd，.txt 走 diskpart)，\n在 PE 中、格式化/释放镜像之前执行，可用于自定义分区。"),
+                            tr!("安装前运行 程序目录\\bin\\diskpart\\ 下的所有脚本(.cmd/.bat 走 cmd，.txt 走 diskpart)，\n在 PE 中、格式化/释放镜像之前执行，可用于自定义分区。"),
                         );
                     // 打开 diskpart 脚本目录（不存在则先创建，避免 explorer 打开失败）
                     if ui
                         .button(tr!("打开目录"))
-                        .on_hover_text(tr!("打开程序目录下的 diskpart 脚本文件夹"))
+                        .on_hover_text(tr!("打开程序目录 bin\\diskpart 脚本文件夹"))
                         .clicked()
                     {
-                        let dir = crate::utils::path::get_exe_dir().join("diskpart");
+                        let dir = crate::utils::path::get_bin_dir().join("diskpart");
                         let _ = std::fs::create_dir_all(&dir);
                         #[cfg(windows)]
                         {

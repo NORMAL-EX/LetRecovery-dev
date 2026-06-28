@@ -86,6 +86,21 @@ jobs:
           test -f "pkg/LetRecovery.exe"            || { echo "底包缺少 LetRecovery.exe"; exit 1; }
           test -f "pkg/bin/pe/LetRecovery_PE.wim"  || { echo "底包缺少 bin/pe/LetRecovery_PE.wim"; exit 1; }
 
+      - name: Relocate system-side lang/diskpart into bin
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 正常系统端新布局：根目录 lang/diskpart 收进 bin/（PE 端在 WIM 内的 lang 不受影响）。
+          mkdir -p pkg/bin
+          for d in lang diskpart; do
+            if [ -d "pkg/$d" ]; then
+              mkdir -p "pkg/bin/$d"
+              cp -rf "pkg/$d/." "pkg/bin/$d/"
+              rm -rf "pkg/$d"
+              echo "relocated pkg/$d -> pkg/bin/$d"
+            fi
+          done
+
       - name: Replace system-side exe
         shell: bash
         run: |
@@ -210,13 +225,13 @@ jobs:
           mkdir -p pkg/bin pkg/diskpart
           # 可编辑的修复引导脚本（必须随包；删除则回退默认逻辑）
           cp -f assets/release/repair_boot.txt pkg/bin/repair_boot.txt
-          # diskpart 脚本目录（含说明；用户把分区脚本放这里）
-          if [ -d assets/release/diskpart ]; then cp -rf assets/release/diskpart/. pkg/diskpart/; fi
-          # 多语言文件（exe 同级 lang/ 目录；i18n 运行时从这里加载 en-US 等外置语言）
+          # diskpart 脚本目录（含说明；用户把分区脚本放这里）—— 新布局放 bin/diskpart
+          if [ -d assets/release/diskpart ]; then mkdir -p pkg/bin/diskpart && cp -rf assets/release/diskpart/. pkg/bin/diskpart/; fi
+          # 多语言文件（bin/lang 目录；i18n 运行时优先从这里加载 en-US 等外置语言）
           if [ -d assets/release/lang ]; then
-            mkdir -p pkg/lang
-            cp -rf assets/release/lang/. pkg/lang/
-            echo '--- pkg/lang ---'; ls -la pkg/lang
+            mkdir -p pkg/bin/lang
+            cp -rf assets/release/lang/. pkg/bin/lang/
+            echo '--- pkg/bin/lang ---'; ls -la pkg/bin/lang
           fi
           # 用户驱动文件夹（按 Windows 版本）：随包提供目录 + README，供用户放驱动
           # （安装对应版本系统时自动 DISM 离线注入；XP 仍用 bin/drivers/xp 存储驱动机制）
