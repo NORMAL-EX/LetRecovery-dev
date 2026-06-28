@@ -251,9 +251,9 @@ impl ConfigFileManager {
             log::info!("[CONFIG] 已复制自定义无人值守文件 -> {}", dst);
         }
 
-        // 暂存 diskpart 脚本到数据目录，供重启进 PE 后执行（程序目录\diskpart\ -> 数据目录\diskpart\）
+        // 暂存 diskpart 脚本到数据目录，供重启进 PE 后执行（程序目录\bin\diskpart\ -> 数据目录\diskpart\）
         if config.run_diskpart_scripts {
-            let src = crate::utils::path::get_exe_dir().join("diskpart");
+            let src = crate::utils::path::get_diskpart_scripts_dir();
             let dst = format!("{}\\diskpart", data_dir);
             if src.exists() {
                 if let Err(e) = copy_dir_recursive(&src, std::path::Path::new(&dst)) {

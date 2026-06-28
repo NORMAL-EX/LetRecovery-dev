@@ -304,7 +304,7 @@ impl App {
             let driver_backup_path = temp_dir.join("LetRecovery_DriverBackup");
             let driver_backup_str = driver_backup_path.to_string_lossy().to_string();
 
-            // 装机前运行 diskpart 脚本（分区准备）——直接读程序目录\diskpart\（当前已在 PE）。
+            // 装机前运行 diskpart 脚本（分区准备）——读 bin\diskpart\（旧位置/PE 暂存目录自动回退，当前已在 PE）。
             //
             // 不据脚本退出码中止：diskpart/cmd 分区脚本即便把活干完，也常返回非 0（遇到一条命令出错就停、
             // 或最后一条报 warning）；早先“失败即 return”会在脚本已经改了分区表【之后】把安装拦腰斩断，
@@ -315,7 +315,7 @@ impl App {
             // 并刷新分区表类型（脚本可能把 GPT 改成 MBR）。只有该 disk:partition 真的不存在时才中止。
             if options.run_diskpart_scripts {
                 send_step(&progress_tx, 1, &tr!("运行 Diskpart 脚本"), 0);
-                let scripts_dir = crate::utils::path::get_exe_dir().join("diskpart");
+                let scripts_dir = crate::utils::path::get_diskpart_scripts_dir();
                 log::info!("[INSTALL] 运行 Diskpart 脚本: {}", scripts_dir.display());
 
                 let script_output = match lr_core::diskpart::run_scripts_in_dir(&scripts_dir) {

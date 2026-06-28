@@ -73,6 +73,21 @@ jobs:
           \) -print -delete || true
           echo "运行时垃圾清理完成。"
 
+      - name: Relocate system-side lang/diskpart into bin
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 正常系统端新布局：上游底包根目录的 lang/diskpart 收进 bin/（PE 端在 WIM 内的 lang 不受影响）。
+          mkdir -p pkg/bin
+          for d in lang diskpart; do
+            if [ -d "pkg/$d" ]; then
+              mkdir -p "pkg/bin/$d"
+              cp -rf "pkg/$d/." "pkg/bin/$d/"
+              rm -rf "pkg/$d"
+              echo "relocated pkg/$d -> pkg/bin/$d"
+            fi
+          done
+
       - name: Repackage into package.7z
         shell: bash
         run: |
