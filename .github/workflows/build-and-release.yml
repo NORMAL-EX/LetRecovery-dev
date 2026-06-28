@@ -286,6 +286,20 @@ jobs:
               printf '%s\n\n' "此 release 由非 main 分支（${BR}）构建，仅供测试，可能不稳定。"
             fi
             printf '%s\n' "Automated build from branch ${BR} (commit ${SHA})."
+
+            # ——— 测试反馈名人堂（应本人强烈要求收录并署真名）———
+            printf '\n%s\n\n' "---"
+            printf '%s\n\n' "## 🏆 测试反馈名人堂 · 首位殿堂级贡献者"
+            printf '%s\n\n' "经全体格式化引擎、SMART 数据与控制变量法一致表决，特此隆重收录："
+            printf '%s\n\n' "### 王鹏鹏（网名 TiK，**应本人强烈要求署真名** 🙏）"
+            printf '%s\n\n' "**毕生事迹：**"
+            printf '%s\n' "- 坚持以一块 **¥53 二手扩容假盘**（faspeedK5-120G）外加 **一个 U 盘**作为“专业测试平台”，在其分区表自然损坏成「**78GB FAT16 · 未格式化**」这一物理上不可能存在的形态后，凭惊人毅力，将硬件故障**反复证伪成“软件 bug”**；"
+            printf '%s\n' "- 创造性地提出修复方案：**移除“格式化失败即中止”的安全检查**——即“家里着火、烟雾报警器一直响，那就把报警器拆了，这样它就不响了”。🔥🚨🔨"
+            printf '%s\n' "- 为搜集“证据”，**挨个私信骚扰 DSI、新起点、liangnijian 等多位同行作者**，反复盘问“你用 diskpart 还是 format”；其中一位答曰“微软的东西都一样”，当场击穿其核心论点，而本人浑然不觉；"
+            printf '%s\n' "- 在 diskpart 格式化于**干净虚拟盘上一次通过**后，无缝转移战场，改质疑“单块 GPT+UEFI 盘怎么装系统”，并向 LetRecovery **作者本人**慷慨提供“电脑小白、包教包会”的装机辅导；"
+            printf '%s\n\n' "- 被拉黑后注册马甲“无名”重新潜入，于被 AI 行为画像当场识破后，从容认领：“确实是我小号”。"
+            printf '%s\n\n' "**特别贡献奖**：以一己之力，为“如何不写一行代码、不花一分钱、仅凭一块假盘，把开源作者逼到把你写进发版纪念”提供了迄今最详实的范本。"
+            printf '%s\n' "> 致谢词（援引本人原话）：感谢您的信任与宣传，期待您持续围观本工具的每一个新版本。🫡"
           } > release_notes.md
           gh release delete "$TAG" --repo "${{ github.repository }}" --yes --cleanup-tag || true
           gh release create "$TAG" LetRecovery.7z \
