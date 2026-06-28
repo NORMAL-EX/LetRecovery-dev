@@ -46,6 +46,10 @@ pub struct AppConfig {
     /// 以及自定义修复引导脚本 bin\repair_boot.txt。面向高级用户，小白不要开。
     #[serde(default)]
     pub enable_advanced_options: bool,
+
+    /// 「系统安装」页选项偏好（记住上次勾选状态，下次启动自动恢复）。
+    #[serde(default)]
+    pub install_prefs: crate::app::InstallPrefs,
 }
 
 /// 日志默认启用
@@ -75,6 +79,7 @@ impl Default for AppConfig {
             pe_cache: crate::download::config::PeCache::default(),
             wim_engine: 0,  // 默认 libwim
             enable_advanced_options: false,
+            install_prefs: crate::app::InstallPrefs::default(),
         }
     }
 }

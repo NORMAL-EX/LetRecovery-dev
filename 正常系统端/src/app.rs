@@ -44,7 +44,7 @@ pub struct InstallProgress {
 }
 
 /// 引导模式选择
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub enum BootModeSelection {
     #[default]
     Auto,
@@ -143,7 +143,7 @@ impl BackupFormat {
 }
 
 /// 驱动操作选项
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub enum DriverAction {
     /// 无操作
     None,
@@ -185,6 +185,52 @@ pub struct InstallOptions {
     pub is_xp_i386: bool,
     /// 是否在释放镜像前运行 diskpart 脚本
     pub run_diskpart_scripts: bool,
+}
+
+/// 「系统安装」页选项偏好（持久化到 config.json）。
+///
+/// 记住用户上次的勾选状态，下次启动自动恢复——任意选项变动后自动写回 config.json，
+/// 无需手动保存。注：AdvancedOptions 内的 WiFi 明文等字段标了 #[serde(skip)]，不持久化。
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct InstallPrefs {
+    #[serde(default = "lr_pref_true")]
+    pub format_partition: bool,
+    #[serde(default = "lr_pref_true")]
+    pub repair_boot: bool,
+    #[serde(default = "lr_pref_true")]
+    pub unattended_install: bool,
+    #[serde(default = "lr_pref_true")]
+    pub export_drivers: bool,
+    #[serde(default = "lr_pref_true")]
+    pub auto_reboot: bool,
+    #[serde(default)]
+    pub run_diskpart_scripts: bool,
+    #[serde(default)]
+    pub boot_mode: BootModeSelection,
+    #[serde(default)]
+    pub driver_action: DriverAction,
+    #[serde(default)]
+    pub advanced_options: AdvancedOptions,
+}
+
+fn lr_pref_true() -> bool {
+    true
+}
+
+impl Default for InstallPrefs {
+    fn default() -> Self {
+        Self {
+            format_partition: true,
+            repair_boot: true,
+            unattended_install: true,
+            export_drivers: true,
+            auto_reboot: true,
+            run_diskpart_scripts: false,
+            boot_mode: BootModeSelection::Auto,
+            driver_action: DriverAction::AutoImport,
+            advanced_options: AdvancedOptions::default(),
+        }
+    }
 }
 
 /// 主应用结构
@@ -978,6 +1024,7 @@ impl App {
         Self::setup_style(&cc.egui_ctx);
 
         let mut app = Self::default();
+        app.apply_install_prefs();
         app.load_initial_data();
         app
     }
@@ -996,12 +1043,56 @@ impl App {
 
         log::info!("创建App实例...");
         let mut app = Self::default();
-        
+        app.apply_install_prefs();
+
         log::info!("加载预加载数据...");
         app.load_initial_data_with_preloaded(preloaded);
         
         log::info!("App::new_with_preloaded 完成");
         app
+    }
+
+    /// 把当前「系统安装」页的选项打包成可持久化的偏好快照。
+    pub fn snapshot_install_prefs(&self) -> InstallPrefs {
+        InstallPrefs {
+            format_partition: self.format_partition,
+            repair_boot: self.repair_boot,
+            unattended_install: self.unattended_install,
+            export_drivers: self.export_drivers,
+            auto_reboot: self.auto_reboot,
+            run_diskpart_scripts: self.run_diskpart_scripts,
+            boot_mode: self.selected_boot_mode,
+            driver_action: self.driver_action,
+            advanced_options: self.advanced_options.clone(),
+        }
+    }
+
+    /// 启动时用持久化的偏好恢复「系统安装」页选项。
+    pub fn apply_install_prefs(&mut self) {
+        let p = self.app_config.install_prefs.clone();
+        self.format_partition = p.format_partition;
+        self.repair_boot = p.repair_boot;
+        self.unattended_install = p.unattended_install;
+        self.export_drivers = p.export_drivers;
+        self.auto_reboot = p.auto_reboot;
+        self.run_diskpart_scripts = p.run_diskpart_scripts;
+        self.selected_boot_mode = p.boot_mode;
+        self.driver_action = p.driver_action;
+        self.advanced_options = p.advanced_options;
+    }
+
+    /// 选项有变化就自动写回 config.json（用序列化结果比对，天然忽略 #[serde(skip)] 字段，
+    /// 避免 WiFi 等非持久化字段变动导致每帧重复落盘）。仅在真正变化时写一次盘。
+    pub fn autosave_install_prefs_if_changed(&mut self) {
+        let current = self.snapshot_install_prefs();
+        let cur_json = serde_json::to_string(&current).ok();
+        let saved_json = serde_json::to_string(&self.app_config.install_prefs).ok();
+        if cur_json != saved_json {
+            self.app_config.install_prefs = current;
+            if let Err(e) = self.app_config.save() {
+                log::warn!("自动保存安装选项偏好失败: {}", e);
+            }
+        }
     }
 
     fn setup_fonts(ctx: &egui::Context) {
@@ -1432,6 +1523,9 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // 「系统安装」页选项变化时自动记住（写回 config.json，下次启动自动恢复）
+        self.autosave_install_prefs_if_changed();
+
         // 检查远程配置加载状态
         self.check_remote_config_loading();
         
