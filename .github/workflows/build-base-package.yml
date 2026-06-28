@@ -56,6 +56,23 @@ jobs:
           echo "--- pkg/bin/drivers/xp ---"
           ls -R pkg/bin/drivers/xp
 
+      - name: Strip runtime junk from package
+        shell: bash
+        run: |
+          set -euo pipefail
+          # 上游底包里常混入 Ghost 运行时垃圾（崩溃转储 *.dmp / 错误日志 GHOSTERR.TXT、ghstwarn.txt），
+          # 与本仓库 .gitignore 同一套规则删掉，避免随 base 底包穿到下游 package.7z。
+          find pkg -type f \( \
+            -iname '*.dmp' -o \
+            -iname 'GHOSTERR.TXT' -o \
+            -iname 'ghstwarn.txt' -o \
+            -iname '*.tmp' -o \
+            -iname 'Thumbs.db' -o \
+            -iname '.DS_Store' -o \
+            -iname '*.swp' \
+          \) -print -delete || true
+          echo "运行时垃圾清理完成。"
+
       - name: Repackage into package.7z
         shell: bash
         run: |
